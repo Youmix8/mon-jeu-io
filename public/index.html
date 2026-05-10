@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mon Jeu .io</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="game"></div>
+
+  <div id="ui">
+    <div id="player-count">Joueurs : <span id="count">0</span> / 4 &nbsp;|&nbsp; ❤️ Vivants : <span id="alive">0</span> / <span id="total">0</span></div>
+    <div id="spectator-label" style="display:none;">👻 Mode spectateur</div>
+    <div id="my-stats">
+      <span id="my-gold-row">💰 Gold : <span id="my-gold">0</span></span><br />
+      ❤️ HDV : <span id="my-hp">1000/1000</span><br />
+      👥 Mes unités : <span id="my-unit-count">0</span><br />
+      📍 Sélectionnées : <span id="selected-count">0</span>
+    </div>
+    <hr />
+    <div id="instructions">
+      🎯 Clic HDV : soldat (10 💰)<br />
+      📦 Clic / Drag : sélectionner<br />
+      👉 Clic droit : déplacer / attaquer<br />
+      ⌨️ ZQSD / drag 2 doigts : caméra<br />
+      🔍 Pinch / Ctrl+scroll : zoom
+    </div>
+    <div id="waiting-msg" style="display:none; margin-top:8px; font-size:12px; color:#aaaaaa;">⏳ En attente d'au moins 2 joueurs…</div>
+  </div>
+
+  <div id="match-ended-overlay" class="game-over-overlay" style="display:none;">
+    <div class="game-over-box">
+      <div class="game-over-title" style="color:#3498db; font-size:36px;">⏳ Partie en cours</div>
+      <div style="font-size:16px; color:#666; margin-bottom:16px;">Une partie est déjà en cours.<br/>Reviens dans quelques minutes ou rafraîchis la page.</div>
+      <button class="game-over-button" onclick="window.location.reload()">🔄 Rafraîchir</button>
+    </div>
+  </div>
+
+  <div id="game-over-overlay" class="game-over-overlay" style="display:none;">
+    <div class="game-over-box">
+      <div id="game-over-title" class="game-over-title"></div>
+      <div id="game-over-subtitle" style="font-size:20px; margin-bottom:16px;"></div>
+      <div style="font-size:13px; color:#888; margin-bottom:4px;">Tous les joueurs encore connectés repartent à zéro.</div>
+      <button class="game-over-button" onclick="Network.requestRestart()">🔄 Rejouer</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <script src="/js/network.js"></script>
+  <script src="/js/scenes/MainScene.js"></script>
+  <script src="/js/game.js"></script>
+</body>
+</html>

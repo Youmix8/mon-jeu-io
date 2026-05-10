@@ -1,0 +1,16 @@
+{
+  "name": "mon-jeu-io",
+  "version": "0.1.0",
+  "description": "RTS multijoueur temps réel en .io, inspiré de Polytopia",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  }
+}
