@@ -9,6 +9,22 @@
 <body>
   <div id="game"></div>
 
+  <!-- Lobby -->
+  <div id="lobby-overlay" class="fullscreen-overlay">
+    <div class="overlay-box lobby-box">
+      <div class="lobby-icon">⚔️</div>
+      <h1 class="lobby-title">Mon Jeu .io</h1>
+      <p class="lobby-sub">RTS multijoueur — détruisez les HDV adverses !</p>
+      <input id="name-input" class="name-input" type="text" maxlength="20" placeholder="Ton pseudo..." autocomplete="off" />
+      <button id="play-btn" class="primary-btn">Jouer ▶</button>
+      <div class="lobby-hint">
+        🎯 Clic HDV : soldat (10 💰) &nbsp;|&nbsp; Drag : sélectionner &nbsp;|&nbsp; Clic droit : déplacer/attaquer<br/>
+        ⌨️ ZQSD / 2 doigts : caméra &nbsp;|&nbsp; Pinch / Ctrl+scroll : zoom &nbsp;|&nbsp; Ctrl+A : tout sélectionner
+      </div>
+    </div>
+  </div>
+
+  <!-- HUD -->
   <div id="ui">
     <div id="player-count">Joueurs : <span id="count">0</span> / 4 &nbsp;|&nbsp; ❤️ Vivants : <span id="alive">0</span> / <span id="total">0</span></div>
     <div id="spectator-label" style="display:none;">👻 Mode spectateur</div>
@@ -24,25 +40,47 @@
       📦 Clic / Drag : sélectionner<br />
       👉 Clic droit : déplacer / attaquer<br />
       ⌨️ ZQSD / drag 2 doigts : caméra<br />
-      🔍 Pinch / Ctrl+scroll : zoom
+      🔍 Pinch / Ctrl+scroll : zoom<br />
+      ✅ Ctrl+A : tout sélectionner
     </div>
     <div id="waiting-msg" style="display:none; margin-top:8px; font-size:12px; color:#aaaaaa;">⏳ En attente d'au moins 2 joueurs…</div>
   </div>
 
-  <div id="match-ended-overlay" class="game-over-overlay" style="display:none;">
-    <div class="game-over-box">
-      <div class="game-over-title" style="color:#3498db; font-size:36px;">⏳ Partie en cours</div>
+  <!-- Kill feed -->
+  <div id="kill-feed"></div>
+
+  <!-- Partie en cours (match-ended) -->
+  <div id="match-ended-overlay" class="fullscreen-overlay" style="display:none;">
+    <div class="overlay-box">
+      <div class="overlay-title" style="color:#3498db; font-size:36px;">⏳ Partie en cours</div>
       <div style="font-size:16px; color:#666; margin-bottom:16px;">Une partie est déjà en cours.<br/>Reviens dans quelques minutes ou rafraîchis la page.</div>
-      <button class="game-over-button" onclick="window.location.reload()">🔄 Rafraîchir</button>
+      <button class="primary-btn" onclick="window.location.reload()">🔄 Rafraîchir</button>
     </div>
   </div>
 
-  <div id="game-over-overlay" class="game-over-overlay" style="display:none;">
-    <div class="game-over-box">
-      <div id="game-over-title" class="game-over-title"></div>
-      <div id="game-over-subtitle" style="font-size:20px; margin-bottom:16px;"></div>
-      <div style="font-size:13px; color:#888; margin-bottom:4px;">Tous les joueurs encore connectés repartent à zéro.</div>
-      <button class="game-over-button" onclick="Network.requestRestart()">🔄 Rejouer</button>
+  <!-- Game Over -->
+  <div id="game-over-overlay" class="fullscreen-overlay" style="display:none;">
+    <div class="overlay-box gameover-box">
+      <div id="game-over-title" class="overlay-title"></div>
+      <div id="game-over-reason" class="gameover-reason"></div>
+      <div id="game-over-duration" class="gameover-duration"></div>
+
+      <table id="stats-table" class="stats-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Joueur</th>
+            <th>⚔️ Kills</th>
+            <th>🪖 Unités</th>
+            <th>💰 Gold</th>
+            <th>🏆 Score</th>
+          </tr>
+        </thead>
+        <tbody id="stats-body"></tbody>
+      </table>
+
+      <div style="font-size:12px; color:#999; margin-bottom:4px; margin-top:16px;">Tous les joueurs encore connectés repartent à zéro.</div>
+      <button class="primary-btn" onclick="Network.requestRestart()">🔄 Rejouer</button>
     </div>
   </div>
 

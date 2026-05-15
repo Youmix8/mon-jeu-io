@@ -1,15 +1,15 @@
 const UNIT_RADIUS = 15;
 const BAR_W       = 30;
 const BAR_H       = 4;
-const BAR_Y       = -(UNIT_RADIUS + 8); // HP bar sits above the circle
+const BAR_Y       = -(UNIT_RADIUS + 8);
 
 class MainScene extends Phaser.Scene {
   constructor() {
     super({ key: 'MainScene' });
-    this.hdvSprites  = {};
-    this.unitSprites = {};        // unitId → [circle, barBg, barFill]
-    this.unitTweens  = {};
-    this.unitServerPos = {};      // unitId → {x,y,hp} — last server values
+    this.hdvSprites   = {};
+    this.unitSprites  = {};
+    this.unitTweens   = {};
+    this.unitServerPos = {};
     this.selectionRings = {};
     this.selectedUnitIds = new Set();
     this.lastStateJson = '';
@@ -19,8 +19,8 @@ class MainScene extends Phaser.Scene {
     this.dragStartX      = 0;
     this.dragStartY      = 0;
     this.dragRectGraphics = null;
-    this.attackGraphics   = null; // shared, redrawn every frame
-    this.attackLines      = [];   // [{ax,ay,tx,ty,startTime}]
+    this.attackGraphics   = null;
+    this.attackLines      = [];
   }
 
   preload() {}
@@ -49,10 +49,15 @@ class MainScene extends Phaser.Scene {
 
     this.input.mouse.disableContextMenu();
 
-    // Single Graphics object for all attack lines — cleared and redrawn each frame
     this.attackGraphics = this.add.graphics();
 
-    // Trackpad pan (scroll) and pinch-to-zoom
+    // Particle texture for unit death burst
+    const pg = this.make.graphics({ add: false });
+    pg.fillStyle(0xffffff, 1);
+    pg.fillCircle(4, 4, 4);
+    pg.generateTexture('particle', 8, 8);
+    pg.destroy();
+
     this.input.manager.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const cam = this.cameras.main;
@@ -65,6 +70,22 @@ class MainScene extends Phaser.Scene {
       }
     }, { passive: false });
 
+    // ── Ctrl+A — select all own units ────────────────────────────
+    this.input.keyboard.on('keydown-A', (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const myId = Network.getMyId();
+      if (!myId) return;
+      const units = Network.getState().units || {};
+      this.selectedUnitIds.clear();
+      for (const [uid, unit] of Object.entries(units)) {
+        if (unit.ownerId === myId) this.selectedUnitIds.add(uid);
+      }
+      this._updateSelectionRings();
+    });
+
+    // ── Callbacks réseau ──────────────────────────────────────────
+
     Network.setOnSpawnFailed((reason) => {
       if (reason !== 'not_enough_gold') return;
       const el = document.getElementById('my-gold-row');
@@ -75,58 +96,56 @@ class MainScene extends Phaser.Scene {
     });
 
     Network.setOnPlayerEliminated((data) => {
-      console.log(`${data.name} éliminé !`);
+      this._addKillFeedEntry(`💀 ${data.name} éliminé !`, data.color);
     });
 
     Network.setOnGameOver((data) => {
-      const overlay  = document.getElementById('game-over-overlay');
-      const title    = document.getElementById('game-over-title');
-      const subtitle = document.getElementById('game-over-subtitle');
-      if (!overlay || !title || !subtitle) return;
-
-      const myId = Network.getMyId();
-      if (data.winnerId === myId) {
-        title.textContent = '🏆 VICTOIRE !';
-        title.style.color = '#f1c40f';
-        subtitle.innerHTML = '';
-      } else if (data.winnerId) {
-        title.textContent = '💀 DÉFAITE';
-        title.style.color = '#e74c3c';
-        subtitle.innerHTML = `Vainqueur : <span style="color:${data.winnerColor};font-weight:bold">${data.winnerName}</span>`;
-      } else {
-        title.textContent = '🎬 Fin de partie';
-        title.style.color = '#ffffff';
-        subtitle.textContent = 'Match nul !';
-      }
-      overlay.style.display = 'flex';
+      // network.js handles the overlay — nothing extra needed here
     });
 
     Network.setOnMatchRestarted(() => {
-      const overlay = document.getElementById('game-over-overlay');
-      if (overlay) overlay.style.display = 'none';
       const myId = Network.getMyId();
       const me   = Network.getState().players[myId];
       if (me) this.cameras.main.centerOn(me.x, me.y);
     });
 
     Network.setOnAttack((data) => {
-      const state = Network.getState();
+      const state    = Network.getState();
       const attacker = state.units && state.units[data.attackerId];
       if (!attacker) return;
+
       let tx, ty;
       if (data.targetType === 'unit') {
         const t = state.units && state.units[data.targetId];
         if (!t) return;
         tx = t.x; ty = t.y;
+        this._flashUnit(data.targetId);
+        if (data.killed) {
+          const owner = state.players[t.ownerId];
+          const colorInt = owner
+            ? Phaser.Display.Color.HexStringToColor(owner.color).color
+            : 0xffffff;
+          this._spawnDeathParticles(t.x, t.y, colorInt);
+        }
       } else {
         const t = state.players && state.players[data.targetId];
         if (!t) return;
         tx = t.x; ty = t.y;
+        this._flashHdv(data.targetId);
       }
+
       this.attackLines.push({ ax: attacker.x, ay: attacker.y, tx, ty, startTime: Date.now() });
+
+      // Kill feed for unit kills
+      if (data.killed && data.targetType === 'unit') {
+        const killerOwner = state.players[attacker.ownerId];
+        if (killerOwner) {
+          this._addKillFeedEntry(`⚔️ ${killerOwner.name} a tué une unité`, killerOwner.color);
+        }
+      }
     });
 
-    // ── Input ─────────────────────────────────────────────────────────────
+    // ── Input ─────────────────────────────────────────────────────
 
     this.input.on('pointerdown', (pointer, currentlyOver) => {
       if (pointer.button === 0) {
@@ -143,7 +162,7 @@ class MainScene extends Phaser.Scene {
           this._updateSelectionRings();
           return;
         }
-        if (currentlyOver.length > 0) return; // hit HDV or other interactive → skip drag
+        if (currentlyOver.length > 0) return;
         this.isDragging = true;
         this.dragStartX = pointer.worldX;
         this.dragStartY = pointer.worldY;
@@ -153,10 +172,9 @@ class MainScene extends Phaser.Scene {
         const myId  = Network.getMyId();
         const state = Network.getState();
         const myPlayer = state.players[myId];
-        if (myPlayer && myPlayer.eliminated) return; // spectator — no orders
+        if (myPlayer && myPlayer.eliminated) return;
         const wx = pointer.worldX, wy = pointer.worldY;
 
-        // Check for enemy unit hit (radius 20 for usability)
         let hitEnemyUnit = null;
         for (const [uid, unit] of Object.entries(state.units || {})) {
           if (unit.ownerId === myId) continue;
@@ -168,7 +186,6 @@ class MainScene extends Phaser.Scene {
           return;
         }
 
-        // Check for enemy HDV hit (80x80 rect ±45 around center)
         let hitEnemyHdv = null;
         for (const [pid, player] of Object.entries(state.players || {})) {
           if (pid === myId || player.hp <= 0) continue;
@@ -180,7 +197,6 @@ class MainScene extends Phaser.Scene {
           return;
         }
 
-        // Regular move
         Network.moveUnits(Array.from(this.selectedUnitIds), wx, wy);
         this._showMoveIndicator(wx, wy, false);
       }
@@ -197,7 +213,7 @@ class MainScene extends Phaser.Scene {
       if ((x2-x1)**2 + (y2-y1)**2 < 64) {
         if (!pointer.event.shiftKey) { this.selectedUnitIds.clear(); this._updateSelectionRings(); }
       } else {
-        const myId = Network.getMyId();
+        const myId  = Network.getMyId();
         const units = Network.getState().units || {};
         if (!pointer.event.shiftKey) this.selectedUnitIds.clear();
         for (const [uid, unit] of Object.entries(units)) {
@@ -217,11 +233,9 @@ class MainScene extends Phaser.Scene {
     if (this.cursors.up.isDown    || this.wasd.up.isDown)    cam.scrollY -= SPEED;
     if (this.cursors.down.isDown  || this.wasd.down.isDown)  cam.scrollY += SPEED;
 
-    // Every-frame position followers
     this._updateRingPositions();
     this._updateUnitBarPositions();
 
-    // Drag rectangle
     if (this.isDragging && this.dragRectGraphics) {
       const ptr = this.input.activePointer;
       const rx = Math.min(this.dragStartX, ptr.worldX), rw = Math.abs(ptr.worldX - this.dragStartX);
@@ -233,7 +247,7 @@ class MainScene extends Phaser.Scene {
       this.dragRectGraphics.strokeRect(rx, ry, rw, rh);
     }
 
-    // Attack lines — single shared graphics, redrawn each frame, removed when faded
+    // Attack lines
     const ATTACK_DURATION = 200;
     const now = Date.now();
     this.attackGraphics.clear();
@@ -250,7 +264,6 @@ class MainScene extends Phaser.Scene {
       this.attackGraphics.strokePath();
     }
 
-    // Sync game objects when server state changes
     const state = Network.getState();
     const stateJson = JSON.stringify({ p: state.players, u: state.units });
     if (stateJson === this.lastStateJson) return;
@@ -260,7 +273,7 @@ class MainScene extends Phaser.Scene {
     this._syncUnits(state.units || {}, state.players);
   }
 
-  // ── HDVs ─────────────────────────────────────────────────────────────────
+  // ── HDVs ──────────────────────────────────────────────────────────
 
   _syncHDVs(players) {
     const HDV_SIZE  = 80, BAR_W_HDV = 90, BAR_H_HDV = 8, BAR_Y_OFF = -HDV_SIZE / 2 - 18;
@@ -271,8 +284,8 @@ class MainScene extends Phaser.Scene {
     }
 
     for (const [id, player] of Object.entries(players)) {
-      const colorInt = Phaser.Display.Color.HexStringToColor(player.color).color;
-      const hpRatio  = Math.max(0, player.hp / player.maxHp);
+      const colorInt  = Phaser.Display.Color.HexStringToColor(player.color).color;
+      const hpRatio   = Math.max(0, player.hp / player.maxHp);
       const destroyed = player.hp <= 0;
 
       if (!this.hdvSprites[id]) {
@@ -287,8 +300,8 @@ class MainScene extends Phaser.Scene {
           rect.on('pointerdown', () => Network.spawnUnit());
         }
 
-        const barBg = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, 0x7f0000).setOrigin(0.5, 0.5);
-        const barFill = this.add.rectangle(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF, BAR_W_HDV * hpRatio, BAR_H_HDV, 0x00cc44).setOrigin(0, 0.5);
+        const barBg    = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, 0x7f0000).setOrigin(0.5, 0.5);
+        const barFill  = this.add.rectangle(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF, BAR_W_HDV * hpRatio, BAR_H_HDV, 0x00cc44).setOrigin(0, 0.5);
         const nameLabel = this.add.text(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 4, player.name,
           { fontSize: '13px', fontFamily: 'sans-serif', color: player.color, stroke: '#000000', strokeThickness: 3 }
         ).setOrigin(0.5, 1);
@@ -318,7 +331,7 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  // ── Units ─────────────────────────────────────────────────────────────────
+  // ── Units ─────────────────────────────────────────────────────────
 
   _syncUnits(units, players) {
     const myId = Network.getMyId();
@@ -343,14 +356,13 @@ class MainScene extends Phaser.Scene {
       this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp };
 
       if (!this.unitSprites[id]) {
-        // New unit — snap position, no tween
         const circle = this.add.circle(unit.x, unit.y, UNIT_RADIUS, colorInt);
         circle.setStrokeStyle(2, 0x000000);
         circle._unitId      = id;
         circle._unitOwnerId = unit.ownerId;
 
         if (unit.ownerId === myId) {
-          circle.setInteractive(new Phaser.Geom.Circle(0, 0, 25), Phaser.Geom.Circle.Contains); // larger hit area than visual radius
+          circle.setInteractive(new Phaser.Geom.Circle(0, 0, 25), Phaser.Geom.Circle.Contains);
           circle.on('pointerover', () => this.input.setDefaultCursor('pointer'));
           circle.on('pointerout',  () => this.input.setDefaultCursor('default'));
         }
@@ -379,7 +391,7 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  // ── Selection ─────────────────────────────────────────────────────────────
+  // ── Selection ─────────────────────────────────────────────────────
 
   _updateSelectionRings() {
     for (const id of Object.keys(this.selectionRings)) {
@@ -404,7 +416,6 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  // HP bars follow their circles (which may be mid-tween)
   _updateUnitBarPositions() {
     for (const [, sprites] of Object.entries(this.unitSprites)) {
       if (sprites.length < 3) continue;
@@ -414,11 +425,67 @@ class MainScene extends Phaser.Scene {
     }
   }
 
+  // ── Visual effects ────────────────────────────────────────────────
+
+  _flashUnit(unitId) {
+    const sprites = this.unitSprites[unitId];
+    if (!sprites) return;
+    const [circle] = sprites;
+    const origColor = circle.fillColor;
+    circle.setFillStyle(0xffffff);
+    this.time.delayedCall(80, () => {
+      if (this.unitSprites[unitId]) circle.setFillStyle(origColor);
+    });
+  }
+
+  _flashHdv(playerId) {
+    const sprites = this.hdvSprites[playerId];
+    if (!sprites) return;
+    const [rect] = sprites;
+    const origColor = rect.fillColor;
+    rect.setFillStyle(0xffffff);
+    this.time.delayedCall(80, () => {
+      if (this.hdvSprites[playerId]) rect.setFillStyle(origColor);
+    });
+  }
+
+  _spawnDeathParticles(x, y, colorInt) {
+    const emitter = this.add.particles(x, y, 'particle', {
+      tint: colorInt,
+      speed: { min: 50, max: 150 },
+      scale: { start: 1, end: 0 },
+      alpha: { start: 1, end: 0 },
+      lifespan: 500,
+      gravityY: 200,
+      emitting: false,
+    });
+    emitter.explode(10);
+    this.time.delayedCall(700, () => emitter.destroy());
+  }
+
   _showMoveIndicator(x, y, isAttack = false) {
     const g = this.add.graphics();
     g.lineStyle(2, isAttack ? 0xe74c3c : 0xffffff, 1);
     g.strokeCircle(0, 0, 12);
     g.setPosition(x, y);
     this.tweens.add({ targets: g, alpha: 0, duration: 300, ease: 'Power2', onComplete: () => g.destroy() });
+  }
+
+  // ── Kill feed ─────────────────────────────────────────────────────
+
+  _addKillFeedEntry(text, color) {
+    const feed = document.getElementById('kill-feed');
+    if (!feed) return;
+    const entry = document.createElement('div');
+    entry.className = 'kill-entry';
+    entry.style.borderLeftColor = color || '#fff';
+    entry.textContent = text;
+    feed.appendChild(entry);
+    // Remove after animation ends (3s total)
+    setTimeout(() => {
+      if (entry.parentNode) entry.parentNode.removeChild(entry);
+    }, 3000);
+    // Keep feed to max 5 entries
+    while (feed.children.length > 5) feed.removeChild(feed.firstChild);
   }
 }

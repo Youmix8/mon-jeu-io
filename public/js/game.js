@@ -1,8 +1,6 @@
-// Prevent the browser context menu on right-click inside the game
 document.addEventListener('contextmenu', e => e.preventDefault());
 
-Network.init();
-
+// Phaser starts immediately (canvas visible behind the lobby)
 const config = {
   type: Phaser.AUTO,
   parent: 'game',
@@ -17,3 +15,21 @@ const game = new Phaser.Game(config);
 window.addEventListener('resize', () => {
   game.scale.resize(window.innerWidth, window.innerHeight);
 });
+
+// Lobby — connect only after the player submits their name
+const lobbyOverlay = document.getElementById('lobby-overlay');
+const nameInput    = document.getElementById('name-input');
+const playBtn      = document.getElementById('play-btn');
+
+function startGame() {
+  const name = nameInput.value.trim().slice(0, 20);
+  lobbyOverlay.style.display = 'none';
+  Network.init(name);
+}
+
+playBtn.addEventListener('click', startGame);
+nameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') startGame();
+});
+
+nameInput.focus();

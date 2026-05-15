@@ -19,6 +19,8 @@ body {
   height: 100%;
 }
 
+/* ── HUD ─────────────────────────────────────────────────────────── */
+
 #ui {
   position: absolute;
   top: 16px;
@@ -73,43 +75,208 @@ hr {
   margin-bottom: 6px;
 }
 
-.game-over-overlay {
+/* ── Kill feed ───────────────────────────────────────────────────── */
+
+#kill-feed {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 500;
+}
+
+.kill-entry {
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-family: sans-serif;
+  font-size: 13px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  animation: killSlideIn 0.2s ease-out, killFadeOut 0.4s ease-in 2.6s forwards;
+  white-space: nowrap;
+}
+
+@keyframes killSlideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes killFadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* ── Overlays ────────────────────────────────────────────────────── */
+
+.fullscreen-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
 }
 
-.game-over-box {
+.overlay-box {
   background: #ffffff;
-  padding: 40px 60px;
+  padding: 40px 48px;
   border-radius: 16px;
   text-align: center;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
   min-width: 320px;
+  max-width: 640px;
+  width: 90vw;
 }
 
-.game-over-title {
+.overlay-title {
   font-size: 48px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   font-weight: bold;
   font-family: sans-serif;
 }
 
-.game-over-button {
+/* ── Lobby ───────────────────────────────────────────────────────── */
+
+.lobby-box {
+  max-width: 460px;
+}
+
+.lobby-icon {
+  font-size: 56px;
+  margin-bottom: 8px;
+}
+
+.lobby-title {
+  font-size: 32px;
+  font-weight: 900;
+  color: #1a1a2e;
+  margin-bottom: 6px;
+  font-family: sans-serif;
+}
+
+.lobby-sub {
+  color: #666;
+  font-size: 15px;
+  margin-bottom: 24px;
+  font-family: sans-serif;
+}
+
+.name-input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 18px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  outline: none;
+  text-align: center;
+  font-family: sans-serif;
+  transition: border-color 0.2s;
+}
+
+.name-input:focus {
+  border-color: #3498db;
+}
+
+.lobby-hint {
+  margin-top: 20px;
+  font-size: 11px;
+  color: #999;
+  line-height: 1.6;
+  font-family: sans-serif;
+}
+
+/* ── Shared button ───────────────────────────────────────────────── */
+
+.primary-btn {
   background: #3498db;
   color: white;
   border: none;
-  padding: 12px 32px;
+  padding: 12px 40px;
   font-size: 18px;
   border-radius: 8px;
   cursor: pointer;
-  margin-top: 24px;
+  width: 100%;
+  font-family: sans-serif;
+  font-weight: bold;
+  transition: background 0.15s, transform 0.1s;
 }
 
-.game-over-button:hover {
-  background: #2980b9;
+.primary-btn:hover  { background: #2980b9; }
+.primary-btn:active { transform: scale(0.97); }
+
+/* ── Game Over ───────────────────────────────────────────────────── */
+
+.gameover-box {
+  max-width: 600px;
 }
+
+.gameover-reason {
+  font-size: 16px;
+  color: #888;
+  margin-bottom: 4px;
+  font-family: sans-serif;
+}
+
+.gameover-duration {
+  font-size: 14px;
+  color: #aaa;
+  margin-bottom: 20px;
+  font-family: sans-serif;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: sans-serif;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.stats-table th {
+  background: #f0f0f0;
+  padding: 8px 10px;
+  text-align: center;
+  font-weight: bold;
+  color: #555;
+  border-bottom: 2px solid #ddd;
+}
+
+.stats-table td {
+  padding: 8px 10px;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+  color: #333;
+}
+
+.stats-table tr.my-row td {
+  background: rgba(52, 152, 219, 0.08);
+  font-weight: bold;
+}
+
+.stats-table tr.winner-row td {
+  background: rgba(241, 196, 15, 0.12);
+}
+
+.stats-table tr.eliminated-row td {
+  opacity: 0.55;
+}
+
+.player-name-cell {
+  text-align: left;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.rank-medal {
+  font-size: 16px;
+}
+
+/* Legacy compat — keep old class names working */
+.game-over-overlay { display: none; }
