@@ -1,7 +1,8 @@
 const Network = (() => {
   let socket = null;
-  let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null };
+  let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, playerSummary: [], fog: null };
   let myId   = null;
+  let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50 };
   let onSpawnFailedCallback      = null;
   let onAttackCallback           = null;
   let onPlayerEliminatedCallback = null;
@@ -11,23 +12,34 @@ const Network = (() => {
   function init(playerName) {
     socket = io({ auth: { name: playerName || '' } });
 
-    socket.on('init', ({ playerId }) => {
-      myId = playerId;
+    socket.on('init', (data) => {
+      myId = data.playerId;
+      if (data.mapWidth)  mapInfo.mapWidth  = data.mapWidth;
+      if (data.mapHeight) mapInfo.mapHeight = data.mapHeight;
+      if (data.tileSize)  mapInfo.tileSize  = data.tileSize;
+      if (data.gridW)     mapInfo.gridW     = data.gridW;
+      if (data.gridH)     mapInfo.gridH     = data.gridH;
     });
 
     socket.on('gameState', (newState) => {
+      // Normalise les buffers binaires (ArrayBuffer côté client) en Uint8Array
+      if (newState.fog) {
+        if (newState.fog.visible  instanceof ArrayBuffer) newState.fog.visible  = new Uint8Array(newState.fog.visible);
+        if (newState.fog.explored instanceof ArrayBuffer) newState.fog.explored = new Uint8Array(newState.fog.explored);
+      }
       state = newState;
 
-      const players = Object.values(state.players);
-      const alive   = players.filter(p => !p.eliminated);
+      // Les compteurs UI utilisent playerSummary (non filtré spatial), pas state.players
+      const summary = state.playerSummary || Object.values(state.players).map(p => ({ id: p.id, eliminated: p.eliminated }));
+      const alive   = summary.filter(p => !p.eliminated);
 
       const elCount = document.getElementById('count');
-      if (elCount) elCount.textContent = players.length;
+      if (elCount) elCount.textContent = summary.length;
 
       const elAlive = document.getElementById('alive');
       const elTotal = document.getElementById('total');
       if (elAlive) elAlive.textContent = alive.length;
-      if (elTotal) elTotal.textContent = players.length;
+      if (elTotal) elTotal.textContent = summary.length;
 
       const me = myId && state.players[myId];
       if (me) {
@@ -168,9 +180,10 @@ const Network = (() => {
   function setOnMatchRestarted(cb)   { onMatchRestartedCallback = cb; }
   function getState()                { return state; }
   function getMyId()                 { return myId; }
+  function getMapInfo()              { return mapInfo; }
 
   return {
-    init, getState, getMyId,
+    init, getState, getMyId, getMapInfo,
     spawnUnit, moveUnits, attackTarget, requestRestart,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted,
