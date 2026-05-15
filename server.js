@@ -25,7 +25,6 @@ const HDV_HALF_SIZE      = 40;
 const LOOK_AHEAD         = 60;
 const AVOID_BUFFER       = 25;
 const AVOID_STRENGTH     = 1.8;
-const MATCH_DURATION_MS  = 30 * 60 * 1000;
 
 const SPAWNS = [
   { x: 200,  y: 200  },
@@ -42,7 +41,6 @@ const gameState = {
   matchState: 'waiting',
   winnerId: null,
   matchStartTime: null,
-  timeLeftMs: null,
 };
 let nextUnitId = 1;
 let tickCount  = 0;
@@ -351,7 +349,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Game loop — order: move → collisions → combat → gold → timer → broadcast
+// Game loop — order: move → collisions → combat → gold → broadcast
 setInterval(() => {
   tickCount++;
   const step = UNIT_SPEED / TICK_RATE;
@@ -523,27 +521,7 @@ setInterval(() => {
     }
   }
 
-  // 5. Timer — end match when 30 min elapsed
-  if (gameState.matchState === 'playing' && gameState.matchStartTime) {
-    const elapsed = Date.now() - gameState.matchStartTime;
-    if (elapsed >= MATCH_DURATION_MS) {
-      const alivePlayers = Object.values(gameState.players).filter(p => !p.eliminated);
-      let winner = null, bestScore = -1;
-      for (const p of alivePlayers) {
-        const score = p.gold + Object.values(gameState.units).filter(u => u.ownerId === p.id).length * UNIT_COST;
-        if (score > bestScore) { bestScore = score; winner = p; }
-      }
-      emitGameOver(winner ? winner.id : null, 'timer');
-      console.log(`Timer expired! Winner: ${winner ? winner.name : 'Draw'}`);
-    }
-  }
-
-  // 6. Broadcast
-  if (gameState.matchState === 'playing' && gameState.matchStartTime) {
-    gameState.timeLeftMs = Math.max(0, MATCH_DURATION_MS - (Date.now() - gameState.matchStartTime));
-  } else {
-    gameState.timeLeftMs = null;
-  }
+  // 5. Broadcast
   io.emit('gameState', gameState);
 }, TICK_MS);
 

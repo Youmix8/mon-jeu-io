@@ -21,7 +21,6 @@ class MainScene extends Phaser.Scene {
     this.dragRectGraphics = null;
     this.attackGraphics   = null;
     this.attackLines      = [];
-    this.arrowGraphics    = null;
   }
 
   preload() {}
@@ -51,11 +50,6 @@ class MainScene extends Phaser.Scene {
     this.input.mouse.disableContextMenu();
 
     this.attackGraphics = this.add.graphics();
-
-    // Enemy direction arrows — fixed to screen (scrollFactor 0)
-    this.arrowGraphics = this.add.graphics();
-    this.arrowGraphics.setScrollFactor(0);
-    this.arrowGraphics.setDepth(100);
 
     // Particle texture for unit death burst
     const pg = this.make.graphics({ add: false });
@@ -241,7 +235,6 @@ class MainScene extends Phaser.Scene {
 
     this._updateRingPositions();
     this._updateUnitBarPositions();
-    this._drawEnemyIndicators();
 
     if (this.isDragging && this.dragRectGraphics) {
       const ptr = this.input.activePointer;
@@ -304,19 +297,7 @@ class MainScene extends Phaser.Scene {
           rect.setInteractive();
           rect.on('pointerover', () => this.input.setDefaultCursor('pointer'));
           rect.on('pointerout',  () => this.input.setDefaultCursor('default'));
-          rect.on('pointerdown', (pointer) => {
-            if (pointer.event.detail === 2) {
-              // Double-click: select all own units
-              const units = Network.getState().units || {};
-              this.selectedUnitIds.clear();
-              for (const [uid, unit] of Object.entries(units)) {
-                if (unit.ownerId === myId) this.selectedUnitIds.add(uid);
-              }
-              this._updateSelectionRings();
-            } else {
-              Network.spawnUnit();
-            }
-          });
+          rect.on('pointerdown', () => Network.spawnUnit());
         }
 
         const barBg    = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, 0x7f0000).setOrigin(0.5, 0.5);
@@ -506,60 +487,5 @@ class MainScene extends Phaser.Scene {
     }, 3000);
     // Keep feed to max 5 entries
     while (feed.children.length > 5) feed.removeChild(feed.firstChild);
-  }
-
-  // ── Enemy direction indicators ────────────────────────────────────
-
-  _drawEnemyIndicators() {
-    this.arrowGraphics.clear();
-    const state = Network.getState();
-    const myId  = Network.getMyId();
-    if (!myId) return;
-
-    const cam    = this.cameras.main;
-    const W      = this.scale.width;
-    const H      = this.scale.height;
-    const margin = 28;
-
-    for (const [pid, player] of Object.entries(state.players || {})) {
-      if (pid === myId || player.hp <= 0) continue;
-
-      // World → screen
-      const sx = (player.x - cam.worldView.x) * cam.zoom;
-      const sy = (player.y - cam.worldView.y) * cam.zoom;
-
-      // Already visible — no arrow needed
-      if (sx >= -10 && sx <= W + 10 && sy >= -10 && sy <= H + 10) continue;
-
-      // Direction from screen centre to target
-      const cx = W / 2, cy = H / 2;
-      const dx = sx - cx, dy = sy - cy;
-
-      // Clamp to screen edge
-      const scaleX = Math.abs(dx) > 0 ? (W / 2 - margin) / Math.abs(dx) : Infinity;
-      const scaleY = Math.abs(dy) > 0 ? (H / 2 - margin) / Math.abs(dy) : Infinity;
-      const s  = Math.min(scaleX, scaleY);
-      const ex = cx + dx * s;
-      const ey = cy + dy * s;
-
-      const colorInt = Phaser.Display.Color.HexStringToColor(player.color).color;
-      const angle    = Math.atan2(dy, dx);
-      const size     = 11;
-
-      this.arrowGraphics.fillStyle(colorInt, 0.9);
-      this.arrowGraphics.fillTriangle(
-        ex + Math.cos(angle) * size * 1.6,       ey + Math.sin(angle) * size * 1.6,
-        ex + Math.cos(angle + 2.4) * size,        ey + Math.sin(angle + 2.4) * size,
-        ex + Math.cos(angle - 2.4) * size,        ey + Math.sin(angle - 2.4) * size
-      );
-
-      // Small white outline
-      this.arrowGraphics.lineStyle(1.5, 0xffffff, 0.6);
-      this.arrowGraphics.strokeTriangle(
-        ex + Math.cos(angle) * size * 1.6,       ey + Math.sin(angle) * size * 1.6,
-        ex + Math.cos(angle + 2.4) * size,        ey + Math.sin(angle + 2.4) * size,
-        ex + Math.cos(angle - 2.4) * size,        ey + Math.sin(angle - 2.4) * size
-      );
-    }
   }
 }

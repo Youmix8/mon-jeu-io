@@ -1,6 +1,6 @@
 const Network = (() => {
   let socket = null;
-  let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, timeLeftMs: null };
+  let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null };
   let myId   = null;
   let onSpawnFailedCallback      = null;
   let onAttackCallback           = null;
@@ -58,23 +58,6 @@ const Network = (() => {
 
       const elWaiting = document.getElementById('waiting-msg');
       if (elWaiting) elWaiting.style.display = state.matchState === 'waiting' ? 'block' : 'none';
-
-      // Timer display
-      const timerRow = document.getElementById('timer-row');
-      const timerDisplay = document.getElementById('timer-display');
-      if (timerRow && timerDisplay) {
-        if (state.timeLeftMs !== null && state.timeLeftMs !== undefined) {
-          timerRow.style.display = 'block';
-          const totalSec = Math.ceil(state.timeLeftMs / 1000);
-          const mins = Math.floor(totalSec / 60);
-          const secs = totalSec % 60;
-          timerDisplay.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-          timerRow.classList.toggle('urgent', totalSec <= 60);
-        } else {
-          timerRow.style.display = 'none';
-          timerRow.classList.remove('urgent');
-        }
-      }
     });
 
     socket.on('attacks', (attacks) => {
@@ -134,11 +117,9 @@ const Network = (() => {
     }
 
     if (reasonEl) {
-      reasonEl.textContent = data.reason === 'timer'
-        ? '⏱ Temps écoulé — victoire au score'
-        : data.reason === 'draw'
-          ? 'Égalité parfaite'
-          : '⚔️ Victoire par élimination';
+      reasonEl.textContent = data.reason === 'draw'
+        ? 'Égalité parfaite'
+        : '⚔️ Victoire par élimination';
     }
 
     if (durEl && data.matchDurationMs) {
