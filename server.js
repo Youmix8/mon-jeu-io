@@ -25,6 +25,7 @@ const HDV_HALF_SIZE      = 40;
 const LOOK_AHEAD         = 60;
 const AVOID_BUFFER       = 25;
 const AVOID_STRENGTH     = 1.8;
+const MATCH_DURATION_MS  = 30 * 60 * 1000;
 
 const SPAWNS = [
   { x: 200,  y: 200  },
@@ -35,7 +36,14 @@ const SPAWNS = [
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f'];
 
-const gameState = { players: {}, units: {}, matchState: 'waiting', winnerId: null };
+const gameState = {
+  players: {},
+  units: {},
+  matchState: 'waiting',
+  winnerId: null,
+  matchStartTime: null,
+  timeLeftMs: null,
+};
 let nextUnitId = 1;
 let tickCount  = 0;
 let peakPlayerCount = 0;
@@ -50,8 +58,6 @@ function getAvailableSlot() {
   return -1;
 }
 
-// Returns normalised direction [dx, dy] toward goal with HDV steering avoidance.
-// skipPlayerId: don't steer around this HDV (used when it's the attack target)
 function computeDesiredDir(unit, goalX, goalY, skipPlayerId = null) {
   const dx = goalX - unit.x;
   const dy = goalY - unit.y;
@@ -84,14 +90,46 @@ function computeDesiredDir(unit, goalX, goalY, skipPlayerId = null) {
   return [desiredX, desiredY];
 }
 
-// Edge-to-edge distance between a circular unit and a square HDV (circle vs AABB)
 function unitToHdvDist(unit, hdv) {
   const cx = Math.max(hdv.x - HDV_HALF_SIZE, Math.min(unit.x, hdv.x + HDV_HALF_SIZE));
   const cy = Math.max(hdv.y - HDV_HALF_SIZE, Math.min(unit.y, hdv.y + HDV_HALF_SIZE));
   return Math.hypot(unit.x - cx, unit.y - cy);
 }
 
-// Evaluate and transition matchState after any player count / elimination change
+function buildGameOverPayload(winnerId, reason) {
+  const matchDurationMs = gameState.matchStartTime ? Date.now() - gameState.matchStartTime : 0;
+  const winner = winnerId ? gameState.players[winnerId] : null;
+  const players = Object.values(gameState.players).map(p => {
+    const unitCount = Object.values(gameState.units).filter(u => u.ownerId === p.id).length;
+    return {
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      kills: p.kills,
+      unitsCreated: p.unitsCreated,
+      totalGoldEarned: p.totalGoldEarned,
+      gold: p.gold,
+      eliminated: p.eliminated,
+      finalScore: p.gold + unitCount * UNIT_COST,
+    };
+  });
+  players.sort((a, b) => b.finalScore - a.finalScore);
+  return {
+    winnerId,
+    winnerName: winner ? winner.name : null,
+    winnerColor: winner ? winner.color : null,
+    reason,
+    matchDurationMs,
+    players,
+  };
+}
+
+function emitGameOver(winnerId, reason) {
+  gameState.matchState = 'ended';
+  gameState.winnerId = winnerId;
+  io.emit('gameOver', buildGameOverPayload(winnerId, reason));
+}
+
 function checkMatchState() {
   if (gameState.matchState === 'ended') return;
 
@@ -100,29 +138,25 @@ function checkMatchState() {
 
   if (peakPlayerCount < 2) {
     gameState.matchState = 'waiting';
+    gameState.matchStartTime = null;
     return;
   }
 
   if (alive.length >= 2) {
-    gameState.matchState = 'playing';
+    if (gameState.matchState !== 'playing') {
+      gameState.matchState = 'playing';
+      if (!gameState.matchStartTime) gameState.matchStartTime = Date.now();
+    }
   } else if (alive.length === 1) {
-    gameState.matchState = 'ended';
     const winner = alive[0];
-    gameState.winnerId = winner.id;
-    const eliminatedPlayers = players.filter(p => p.eliminated)
-      .map(p => ({ id: p.id, name: p.name, color: p.color }));
-    io.emit('gameOver', { winnerId: winner.id, winnerName: winner.name, winnerColor: winner.color, eliminatedPlayers });
+    emitGameOver(winner.id, 'elimination');
     console.log(`Game over! Winner: ${winner.name}`);
   } else {
-    gameState.matchState = 'ended';
-    gameState.winnerId = null;
-    io.emit('gameOver', { winnerId: null, winnerName: null, winnerColor: null,
-      eliminatedPlayers: players.map(p => ({ id: p.id, name: p.name, color: p.color })) });
+    emitGameOver(null, 'draw');
     console.log('Game over! Draw (0 players alive)');
   }
 }
 
-// Mark a player as eliminated, delete their units, emit event, check match state
 function eliminatePlayer(player, toDelete) {
   if (player.eliminated) return;
   player.eliminated     = true;
@@ -137,36 +171,40 @@ function eliminatePlayer(player, toDelete) {
   checkMatchState();
 }
 
-// Reset all players to spawn positions and restart the match state
 function resetMatch() {
   for (const p of Object.values(gameState.players)) {
-    p.hp            = HDV_MAX_HP;
-    p.eliminated    = false;
-    p.eliminatedAt  = null;
-    p.gold          = 0;
+    p.hp              = HDV_MAX_HP;
+    p.eliminated      = false;
+    p.eliminatedAt    = null;
+    p.gold            = 0;
+    p.kills           = 0;
+    p.unitsCreated    = 0;
+    p.totalGoldEarned = 0;
+    p.joinTime        = Date.now();
     const spawn = SPAWNS[p.slot];
     p.x = spawn.x;
     p.y = spawn.y;
   }
   for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
-  const playerCount    = Object.keys(gameState.players).length;
-  peakPlayerCount      = playerCount;
-  gameState.winnerId   = null;
-  gameState.matchState = playerCount >= 2 ? 'playing' : 'waiting';
+  const playerCount        = Object.keys(gameState.players).length;
+  peakPlayerCount          = playerCount;
+  gameState.winnerId       = null;
+  gameState.matchStartTime = playerCount >= 2 ? Date.now() : null;
+  gameState.matchState     = playerCount >= 2 ? 'playing' : 'waiting';
   console.log(`Match reset. State: ${gameState.matchState}, Players: ${playerCount}`);
 }
 
 io.on('connection', (socket) => {
   // Zombie recovery: ended state with no players left — auto-reset
   if (gameState.matchState === 'ended' && Object.keys(gameState.players).length === 0) {
-    gameState.matchState = 'waiting';
-    gameState.winnerId   = null;
-    peakPlayerCount      = 0;
+    gameState.matchState     = 'waiting';
+    gameState.winnerId       = null;
+    gameState.matchStartTime = null;
+    peakPlayerCount          = 0;
     for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
     console.log('Recovered zombie ended state on new connection');
   }
 
-  // Refuse new connections once a live match is still running with a winner
   if (gameState.matchState === 'ended') {
     socket.emit('matchEnded');
     socket.disconnect(true);
@@ -181,24 +219,31 @@ io.on('connection', (socket) => {
     return;
   }
 
-  const spawn = SPAWNS[slot];
+  const rawName    = (socket.handshake.auth && socket.handshake.auth.name) || '';
+  const playerName = rawName.trim().slice(0, 20) || `Joueur ${slot + 1}`;
+
+  const spawn  = SPAWNS[slot];
   const player = {
     id: socket.id,
     slot,
     x: spawn.x,
     y: spawn.y,
     color: COLORS[slot],
-    name: `Joueur ${slot + 1}`,
+    name: playerName,
     gold: 0,
     hp: HDV_MAX_HP,
     maxHp: HDV_MAX_HP,
     eliminated: false,
     eliminatedAt: null,
+    kills: 0,
+    unitsCreated: 0,
+    totalGoldEarned: 0,
+    joinTime: Date.now(),
   };
 
   gameState.players[socket.id] = player;
   peakPlayerCount = Math.max(peakPlayerCount, Object.keys(gameState.players).length);
-  console.log(`Player ${socket.id} connected at (${spawn.x},${spawn.y}) — slot ${slot}`);
+  console.log(`Player "${playerName}" (${socket.id.slice(0,6)}) connected — slot ${slot}`);
 
   checkMatchState();
   socket.emit('init', { playerId: socket.id, mapWidth: MAP_WIDTH, mapHeight: MAP_HEIGHT });
@@ -212,6 +257,7 @@ io.on('connection', (socket) => {
       return;
     }
     p.gold -= UNIT_COST;
+    p.unitsCreated++;
 
     const angle  = Math.random() * Math.PI * 2;
     const dist   = 60 + Math.random() * 40;
@@ -231,8 +277,6 @@ io.on('connection', (socket) => {
       attackTargetType: null,
       lastAttackTime: 0,
     };
-
-    // (spawn log suppressed — too verbose)
   });
 
   socket.on('moveUnits', ({ unitIds, targetX, targetY }) => {
@@ -254,7 +298,6 @@ io.on('connection', (socket) => {
       unit.attackTargetId   = null;
       unit.attackTargetType = null;
     }
-    // (move log suppressed — too verbose)
   });
 
   socket.on('attackTarget', ({ unitIds, targetId, targetType }) => {
@@ -273,7 +316,6 @@ io.on('connection', (socket) => {
       unit.targetX = null;
       unit.targetY = null;
     }
-    // (attack-move log suppressed — too verbose)
   });
 
   socket.on('requestRestart', () => {
@@ -285,20 +327,20 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    const player  = gameState.players[socket.id];
+    const player   = gameState.players[socket.id];
     const wasAlive = player && !player.eliminated;
 
     for (const [unitId, unit] of Object.entries(gameState.units)) {
       if (unit.ownerId === socket.id) delete gameState.units[unitId];
     }
     delete gameState.players[socket.id];
-    console.log(`Player ${socket.id} disconnected`);
+    console.log(`Player ${socket.id.slice(0,6)} disconnected`);
 
     if (Object.keys(gameState.players).length === 0) {
-      // Last player gone — full reset so the next person can start fresh
-      gameState.matchState = 'waiting';
-      gameState.winnerId   = null;
-      peakPlayerCount      = 0;
+      gameState.matchState     = 'waiting';
+      gameState.winnerId       = null;
+      gameState.matchStartTime = null;
+      peakPlayerCount          = 0;
       for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
       console.log('Server empty, full reset');
     } else if (wasAlive) {
@@ -309,13 +351,13 @@ io.on('connection', (socket) => {
   });
 });
 
-// Game loop — order: move → collisions → combat → gold → broadcast
+// Game loop — order: move → collisions → combat → gold → timer → broadcast
 setInterval(() => {
   tickCount++;
   const step = UNIT_SPEED / TICK_RATE;
   const effectiveRange = ATTACK_RANGE - UNIT_RADIUS;
 
-  // 1. Move (3 states: ATTACK_MOVE / MOVE / IDLE)
+  // 1. Move (ATTACK_MOVE / MOVE / IDLE)
   for (const unit of Object.values(gameState.units)) {
     let goalX, goalY, skipPlayerId = null;
 
@@ -341,7 +383,7 @@ setInterval(() => {
         continue;
       }
     } else {
-      continue; // IDLE
+      continue;
     }
 
     const [nx, ny] = computeDesiredDir(unit, goalX, goalY, skipPlayerId);
@@ -392,7 +434,7 @@ setInterval(() => {
   }
 
   // 3. Combat (ATTACK_MOVE: specific target | IDLE: nearest enemy | MOVE: skip)
-  const nowMs   = Date.now();
+  const nowMs    = Date.now();
   const toDelete = new Set();
   const attacks  = [];
 
@@ -409,22 +451,25 @@ setInterval(() => {
       } else {
         target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        const edgeDist = unitToHdvDist(unit, target);
-        inRange = edgeDist <= effectiveRange;
+        inRange = unitToHdvDist(unit, target) <= effectiveRange;
       }
       if (!inRange) continue;
 
       unit.lastAttackTime = nowMs;
       target.hp = Math.max(0, target.hp - ATTACK_DAMAGE);
-      attacks.push({ attackerId: unit.id, targetType: unit.attackTargetType, targetId: target.id });
+      const attackEntry = { attackerId: unit.id, targetType: unit.attackTargetType, targetId: target.id };
 
       if (unit.attackTargetType === 'unit' && target.hp <= 0) {
         toDelete.add(target.id);
+        attackEntry.killed = true;
+        const killer = gameState.players[unit.ownerId];
+        if (killer && !killer.eliminated) killer.kills++;
         unit.attackTargetId = null; unit.attackTargetType = null;
       } else if (unit.attackTargetType === 'hdv' && target.hp <= 0) {
         eliminatePlayer(target, toDelete);
         unit.attackTargetId = null; unit.attackTargetType = null;
       }
+      attacks.push(attackEntry);
 
     } else if (unit.targetX === null) {
       // IDLE auto-attack
@@ -447,13 +492,17 @@ setInterval(() => {
 
       unit.lastAttackTime = nowMs;
       best.hp = Math.max(0, best.hp - ATTACK_DAMAGE);
-      attacks.push({ attackerId: unit.id, targetType: bestType, targetId: best.id });
+      const attackEntry = { attackerId: unit.id, targetType: bestType, targetId: best.id };
 
       if (bestType === 'unit' && best.hp <= 0) {
         toDelete.add(best.id);
+        attackEntry.killed = true;
+        const killer = gameState.players[unit.ownerId];
+        if (killer && !killer.eliminated) killer.kills++;
       } else if (bestType === 'hdv' && best.hp <= 0) {
         eliminatePlayer(best, toDelete);
       }
+      attacks.push(attackEntry);
     }
     // MOVE: skip combat
   }
@@ -464,14 +513,37 @@ setInterval(() => {
     delete gameState.units[id];
   }
 
-  // 4. Gold once per second (only for alive players)
+  // 4. Gold once per second (alive players only)
   if (tickCount % TICK_RATE === 0) {
     for (const p of Object.values(gameState.players)) {
-      if (!p.eliminated) p.gold += GOLD_PER_SECOND;
+      if (!p.eliminated) {
+        p.gold += GOLD_PER_SECOND;
+        p.totalGoldEarned += GOLD_PER_SECOND;
+      }
     }
   }
 
-  // 5. Broadcast
+  // 5. Timer — end match when 30 min elapsed
+  if (gameState.matchState === 'playing' && gameState.matchStartTime) {
+    const elapsed = Date.now() - gameState.matchStartTime;
+    if (elapsed >= MATCH_DURATION_MS) {
+      const alivePlayers = Object.values(gameState.players).filter(p => !p.eliminated);
+      let winner = null, bestScore = -1;
+      for (const p of alivePlayers) {
+        const score = p.gold + Object.values(gameState.units).filter(u => u.ownerId === p.id).length * UNIT_COST;
+        if (score > bestScore) { bestScore = score; winner = p; }
+      }
+      emitGameOver(winner ? winner.id : null, 'timer');
+      console.log(`Timer expired! Winner: ${winner ? winner.name : 'Draw'}`);
+    }
+  }
+
+  // 6. Broadcast
+  if (gameState.matchState === 'playing' && gameState.matchStartTime) {
+    gameState.timeLeftMs = Math.max(0, MATCH_DURATION_MS - (Date.now() - gameState.matchStartTime));
+  } else {
+    gameState.timeLeftMs = null;
+  }
   io.emit('gameState', gameState);
 }, TICK_MS);
 

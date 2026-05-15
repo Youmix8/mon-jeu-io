@@ -1,6 +1,6 @@
 const Network = (() => {
   let socket = null;
-  let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null };
+  let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, timeLeftMs: null };
   let myId   = null;
   let onSpawnFailedCallback      = null;
   let onAttackCallback           = null;
@@ -8,8 +8,8 @@ const Network = (() => {
   let onGameOverCallback         = null;
   let onMatchRestartedCallback   = null;
 
-  function init() {
-    socket = io();
+  function init(playerName) {
+    socket = io({ auth: { name: playerName || '' } });
 
     socket.on('init', ({ playerId }) => {
       myId = playerId;
@@ -21,17 +21,14 @@ const Network = (() => {
       const players = Object.values(state.players);
       const alive   = players.filter(p => !p.eliminated);
 
-      // Player count
       const elCount = document.getElementById('count');
       if (elCount) elCount.textContent = players.length;
 
-      // Alive count
       const elAlive = document.getElementById('alive');
       const elTotal = document.getElementById('total');
       if (elAlive) elAlive.textContent = alive.length;
       if (elTotal) elTotal.textContent = players.length;
 
-      // My stats
       const me = myId && state.players[myId];
       if (me) {
         const elGold = document.getElementById('my-gold');
@@ -59,9 +56,25 @@ const Network = (() => {
         elUnits.textContent = Object.values(state.units || {}).filter(u => u.ownerId === myId).length;
       }
 
-      // Waiting message
       const elWaiting = document.getElementById('waiting-msg');
       if (elWaiting) elWaiting.style.display = state.matchState === 'waiting' ? 'block' : 'none';
+
+      // Timer display
+      const timerRow = document.getElementById('timer-row');
+      const timerDisplay = document.getElementById('timer-display');
+      if (timerRow && timerDisplay) {
+        if (state.timeLeftMs !== null && state.timeLeftMs !== undefined) {
+          timerRow.style.display = 'block';
+          const totalSec = Math.ceil(state.timeLeftMs / 1000);
+          const mins = Math.floor(totalSec / 60);
+          const secs = totalSec % 60;
+          timerDisplay.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+          timerRow.classList.toggle('urgent', totalSec <= 60);
+        } else {
+          timerRow.style.display = 'none';
+          timerRow.classList.remove('urgent');
+        }
+      }
     });
 
     socket.on('attacks', (attacks) => {
@@ -83,9 +96,12 @@ const Network = (() => {
 
     socket.on('gameOver', (data) => {
       if (onGameOverCallback) onGameOverCallback(data);
+      _showGameOver(data);
     });
 
     socket.on('matchRestarted', () => {
+      const overlay = document.getElementById('game-over-overlay');
+      if (overlay) overlay.style.display = 'none';
       if (onMatchRestartedCallback) onMatchRestartedCallback();
     });
 
@@ -94,6 +110,65 @@ const Network = (() => {
       if (overlay) overlay.style.display = 'flex';
       socket.disconnect();
     });
+  }
+
+  function _showGameOver(data) {
+    const overlay  = document.getElementById('game-over-overlay');
+    const titleEl  = document.getElementById('game-over-title');
+    const reasonEl = document.getElementById('game-over-reason');
+    const durEl    = document.getElementById('game-over-duration');
+    const tbody    = document.getElementById('stats-body');
+    if (!overlay || !titleEl) return;
+
+    const isWinner = data.winnerId && data.winnerId === myId;
+
+    if (data.winnerId === myId) {
+      titleEl.textContent = '🏆 VICTOIRE !';
+      titleEl.style.color = '#f1c40f';
+    } else if (data.winnerId) {
+      titleEl.textContent = '💀 DÉFAITE';
+      titleEl.style.color = '#e74c3c';
+    } else {
+      titleEl.textContent = '🤝 MATCH NUL';
+      titleEl.style.color = '#95a5a6';
+    }
+
+    if (reasonEl) {
+      reasonEl.textContent = data.reason === 'timer'
+        ? '⏱ Temps écoulé — victoire au score'
+        : data.reason === 'draw'
+          ? 'Égalité parfaite'
+          : '⚔️ Victoire par élimination';
+    }
+
+    if (durEl && data.matchDurationMs) {
+      const totalSec = Math.floor(data.matchDurationMs / 1000);
+      const mins = Math.floor(totalSec / 60);
+      const secs = totalSec % 60;
+      durEl.textContent = `Durée : ${mins}m ${secs}s`;
+    }
+
+    if (tbody && data.players) {
+      const medals = ['🥇', '🥈', '🥉'];
+      tbody.innerHTML = data.players.map((p, i) => {
+        const isMe      = p.id === myId;
+        const isWin     = p.id === data.winnerId;
+        const rowClass  = isMe ? 'my-row' : isWin ? 'winner-row' : p.eliminated ? 'eliminated-row' : '';
+        const medal     = medals[i] || `${i + 1}`;
+        const nameStyle = `color:${p.color}; font-weight:bold;`;
+        const prefix    = p.eliminated ? '💀 ' : '';
+        return `<tr class="${rowClass}">
+          <td class="rank-medal">${medal}</td>
+          <td class="player-name-cell"><span style="${nameStyle}">${prefix}${p.name}</span>${isMe ? ' <span style="color:#3498db;font-size:11px;">(toi)</span>' : ''}</td>
+          <td>${p.kills}</td>
+          <td>${p.unitsCreated}</td>
+          <td>${p.totalGoldEarned}</td>
+          <td><strong>${p.finalScore}</strong></td>
+        </tr>`;
+      }).join('');
+    }
+
+    overlay.style.display = 'flex';
   }
 
   function spawnUnit()  { if (socket) socket.emit('spawnUnit'); }
