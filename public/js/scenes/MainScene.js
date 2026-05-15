@@ -58,6 +58,23 @@ class MainScene extends Phaser.Scene {
     pg.generateTexture('particle', 8, 8);
     pg.destroy();
 
+    // Fog of war — texture canvas low-res, scaled up avec filtre linéaire pour un fondu doux
+    const info = Network.getMapInfo();
+    this.fogCanvas = document.createElement('canvas');
+    this.fogCanvas.width  = info.gridW;
+    this.fogCanvas.height = info.gridH;
+    this.fogCtx = this.fogCanvas.getContext('2d');
+    // Init full black avant qu'on reçoive le premier gameState (sécurité)
+    this.fogCtx.fillStyle = 'rgba(0,0,0,1)';
+    this.fogCtx.fillRect(0, 0, info.gridW, info.gridH);
+    this.textures.addCanvas('fog-texture', this.fogCanvas);
+    this.fogImage = this.add.image(0, 0, 'fog-texture').setOrigin(0, 0);
+    this.fogImage.setDisplaySize(MAP_W, MAP_H);
+    this.fogImage.setDepth(100); // au-dessus de tout le monde du jeu
+    this.textures.get('fog-texture').setFilter(Phaser.Textures.FilterMode.LINEAR);
+    this.lastFogSignature = '';
+    this.cameraCentered = false; // recentre une fois sur mon HDV au début
+
     this.input.manager.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const cam = this.cameras.main;
@@ -265,12 +282,68 @@ class MainScene extends Phaser.Scene {
     }
 
     const state = Network.getState();
+
+    // Recentre la caméra une fois sur mon HDV (spawn aléatoire)
+    if (!this.cameraCentered) {
+      const myId = Network.getMyId();
+      const me   = myId && state.players[myId];
+      if (me) {
+        this.cameras.main.centerOn(me.x, me.y);
+        this.cameraCentered = true;
+      }
+    }
+
+    this._redrawFog(state.fog);
+
     const stateJson = JSON.stringify({ p: state.players, u: state.units });
     if (stateJson === this.lastStateJson) return;
     this.lastStateJson = stateJson;
 
     this._syncHDVs(state.players);
     this._syncUnits(state.units || {}, state.players);
+  }
+
+  // ── Fog of war ────────────────────────────────────────────────────
+
+  _redrawFog(fog) {
+    if (!fog || !fog.visible || !fog.explored) {
+      // Spectateur / éliminé : pas de fog
+      this.fogImage.setVisible(false);
+      return;
+    }
+    this.fogImage.setVisible(true);
+
+    // Signature simple pour éviter de redessiner si rien n'a changé (compare longueurs + checksums rapides)
+    const sig = fog.visible.byteLength + ':' + this._cheapSum(fog.visible) + ':' + this._cheapSum(fog.explored);
+    if (sig === this.lastFogSignature) return;
+    this.lastFogSignature = sig;
+
+    const info = Network.getMapInfo();
+    const gw = info.gridW, gh = info.gridH;
+    const ctx = this.fogCtx;
+    const img = ctx.getImageData(0, 0, gw, gh);
+    const data = img.data;
+    const vis = fog.visible, exp = fog.explored;
+    for (let i = 0; i < vis.length; i++) {
+      let a;
+      if (vis[i]) a = 0;          // visible : transparent
+      else if (exp[i]) a = 140;   // exploré : noir 55 %
+      else a = 255;               // jamais vu : noir plein
+      const j = i * 4;
+      data[j]   = 0;
+      data[j+1] = 0;
+      data[j+2] = 0;
+      data[j+3] = a;
+    }
+    ctx.putImageData(img, 0, 0);
+    this.textures.get('fog-texture').refresh();
+  }
+
+  // Checksum très bon marché sur un Uint8Array (somme modulo)
+  _cheapSum(arr) {
+    let s = 0;
+    for (let i = 0; i < arr.length; i += 7) s = (s + arr[i]) >>> 0;
+    return s;
   }
 
   // ── HDVs ──────────────────────────────────────────────────────────

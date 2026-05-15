@@ -25,8 +25,18 @@ const HDV_HALF_SIZE      = 40;
 const LOOK_AHEAD         = 60;
 const AVOID_BUFFER       = 25;
 const AVOID_STRENGTH     = 1.8;
+const SPAWN_MARGIN       = 250;   // distance min HDV ↔ bord
+const MIN_SPAWN_DIST     = 700;   // distance min HDV ↔ HDV
+const SPAWN_MAX_ATTEMPTS = 500;
 
-const SPAWNS = [
+// Fog of war — grille de tuiles pour calculer la visibilité
+const TILE_SIZE   = 40;
+const GRID_W      = MAP_WIDTH  / TILE_SIZE;   // 50
+const GRID_H      = MAP_HEIGHT / TILE_SIZE;   // 50
+const VISION_UNIT = 180;
+const VISION_HDV  = 280;
+
+const FALLBACK_SPAWNS = [
   { x: 200,  y: 200  },
   { x: 1800, y: 200  },
   { x: 200,  y: 1800 },
@@ -34,6 +44,132 @@ const SPAWNS = [
 ];
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f'];
+
+// Génère MAX_PLAYERS points avec distance min entre eux (rejection sampling).
+// Fallback aux coins si on n'arrive pas à placer.
+function generateSpawns() {
+  const spawns = [];
+  let attempts = 0;
+  while (spawns.length < MAX_PLAYERS && attempts < SPAWN_MAX_ATTEMPTS) {
+    attempts++;
+    const x = SPAWN_MARGIN + Math.random() * (MAP_WIDTH  - 2 * SPAWN_MARGIN);
+    const y = SPAWN_MARGIN + Math.random() * (MAP_HEIGHT - 2 * SPAWN_MARGIN);
+    const ok = spawns.every(s => Math.hypot(s.x - x, s.y - y) >= MIN_SPAWN_DIST);
+    if (ok) spawns.push({ x: Math.round(x), y: Math.round(y) });
+  }
+  if (spawns.length < MAX_PLAYERS) {
+    console.warn(`generateSpawns: only placed ${spawns.length}/${MAX_PLAYERS} after ${attempts} tries, using fallback corners`);
+    return FALLBACK_SPAWNS.map(s => ({ ...s }));
+  }
+  console.log('Random spawns:', spawns.map(s => `(${s.x},${s.y})`).join(' '));
+  return spawns;
+}
+
+let currentSpawns = generateSpawns();
+
+// playerId → { explored: Uint8Array, visible: Uint8Array }
+const playerVisibility = {};
+
+function initVisibility(playerId) {
+  playerVisibility[playerId] = {
+    explored: new Uint8Array(GRID_W * GRID_H),
+    visible:  new Uint8Array(GRID_W * GRID_H),
+  };
+}
+
+function resetVisibilityAll() {
+  for (const v of Object.values(playerVisibility)) {
+    v.explored.fill(0);
+    v.visible.fill(0);
+  }
+}
+
+// Marque les tuiles dans le rayon r autour de (cx, cy) dans arr (Uint8Array).
+function markCircle(arr, cx, cy, r) {
+  const minTx = Math.max(0, Math.floor((cx - r) / TILE_SIZE));
+  const maxTx = Math.min(GRID_W - 1, Math.floor((cx + r) / TILE_SIZE));
+  const minTy = Math.max(0, Math.floor((cy - r) / TILE_SIZE));
+  const maxTy = Math.min(GRID_H - 1, Math.floor((cy + r) / TILE_SIZE));
+  const r2 = r * r;
+  for (let ty = minTy; ty <= maxTy; ty++) {
+    const row = ty * GRID_W;
+    const py  = ty * TILE_SIZE + TILE_SIZE / 2;
+    const dy  = py - cy;
+    const dy2 = dy * dy;
+    for (let tx = minTx; tx <= maxTx; tx++) {
+      const px = tx * TILE_SIZE + TILE_SIZE / 2;
+      const dx = px - cx;
+      if (dx * dx + dy2 <= r2) arr[row + tx] = 1;
+    }
+  }
+}
+
+function computeVisibility(player) {
+  const vis = playerVisibility[player.id];
+  if (!vis) return;
+  vis.visible.fill(0);
+  if (!player.eliminated && player.hp > 0) {
+    markCircle(vis.visible, player.x, player.y, VISION_HDV);
+    for (const unit of Object.values(gameState.units)) {
+      if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, VISION_UNIT);
+    }
+  }
+  // OR dans explored
+  const ex = vis.explored, vi = vis.visible;
+  for (let i = 0; i < vi.length; i++) if (vi[i]) ex[i] = 1;
+}
+
+function buildFilteredState(viewerId) {
+  const viewer = gameState.players[viewerId];
+  if (!viewer) return null;
+  const vis = playerVisibility[viewerId];
+  const seeAll = viewer.eliminated || !vis;
+
+  const filteredPlayers = {};
+  const filteredUnits   = {};
+  const playerSummary   = [];
+
+  for (const [pid, p] of Object.entries(gameState.players)) {
+    playerSummary.push({ id: p.id, name: p.name, color: p.color, eliminated: p.eliminated });
+    if (seeAll || pid === viewerId) { filteredPlayers[pid] = p; continue; }
+    const idx = Math.floor(p.y / TILE_SIZE) * GRID_W + Math.floor(p.x / TILE_SIZE);
+    // HDV : visible si tuile visible OU explorée (HDV statique = on garde la mémoire)
+    if (vis.visible[idx] || vis.explored[idx]) filteredPlayers[pid] = p;
+  }
+
+  for (const [uid, u] of Object.entries(gameState.units)) {
+    if (seeAll || u.ownerId === viewerId) { filteredUnits[uid] = u; continue; }
+    const idx = Math.floor(u.y / TILE_SIZE) * GRID_W + Math.floor(u.x / TILE_SIZE);
+    // Unité : visible uniquement si tuile actuellement visible (pas la mémoire)
+    if (vis.visible[idx]) filteredUnits[uid] = u;
+  }
+
+  return {
+    players: filteredPlayers,
+    units: filteredUnits,
+    matchState: gameState.matchState,
+    winnerId: gameState.winnerId,
+    matchStartTime: gameState.matchStartTime,
+    playerSummary,
+    fog: seeAll ? null : {
+      visible:  Buffer.from(vis.visible.buffer, vis.visible.byteOffset, vis.visible.byteLength),
+      explored: Buffer.from(vis.explored.buffer, vis.explored.byteOffset, vis.explored.byteLength),
+      gridW: GRID_W,
+      gridH: GRID_H,
+      tileSize: TILE_SIZE,
+    },
+  };
+}
+
+function broadcastFilteredState() {
+  // 1. Calculer la visibilité de chaque joueur
+  for (const player of Object.values(gameState.players)) computeVisibility(player);
+  // 2. Émettre l'état filtré à chacun
+  for (const pid of Object.keys(gameState.players)) {
+    const filtered = buildFilteredState(pid);
+    if (filtered) io.to(pid).emit('gameState', filtered);
+  }
+}
 
 const gameState = {
   players: {},
@@ -170,6 +306,8 @@ function eliminatePlayer(player, toDelete) {
 }
 
 function resetMatch() {
+  currentSpawns = generateSpawns();
+  resetVisibilityAll();
   for (const p of Object.values(gameState.players)) {
     p.hp              = HDV_MAX_HP;
     p.eliminated      = false;
@@ -179,7 +317,7 @@ function resetMatch() {
     p.unitsCreated    = 0;
     p.totalGoldEarned = 0;
     p.joinTime        = Date.now();
-    const spawn = SPAWNS[p.slot];
+    const spawn = currentSpawns[p.slot];
     p.x = spawn.x;
     p.y = spawn.y;
   }
@@ -200,6 +338,7 @@ io.on('connection', (socket) => {
     gameState.matchStartTime = null;
     peakPlayerCount          = 0;
     for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
+    currentSpawns = generateSpawns();
     console.log('Recovered zombie ended state on new connection');
   }
 
@@ -220,7 +359,7 @@ io.on('connection', (socket) => {
   const rawName    = (socket.handshake.auth && socket.handshake.auth.name) || '';
   const playerName = rawName.trim().slice(0, 20) || `Joueur ${slot + 1}`;
 
-  const spawn  = SPAWNS[slot];
+  const spawn  = currentSpawns[slot];
   const player = {
     id: socket.id,
     slot,
@@ -240,12 +379,20 @@ io.on('connection', (socket) => {
   };
 
   gameState.players[socket.id] = player;
+  initVisibility(socket.id);
   peakPlayerCount = Math.max(peakPlayerCount, Object.keys(gameState.players).length);
   console.log(`Player "${playerName}" (${socket.id.slice(0,6)}) connected — slot ${slot}`);
 
   checkMatchState();
-  socket.emit('init', { playerId: socket.id, mapWidth: MAP_WIDTH, mapHeight: MAP_HEIGHT });
-  io.emit('gameState', gameState);
+  socket.emit('init', {
+    playerId: socket.id,
+    mapWidth: MAP_WIDTH,
+    mapHeight: MAP_HEIGHT,
+    tileSize: TILE_SIZE,
+    gridW: GRID_W,
+    gridH: GRID_H,
+  });
+  broadcastFilteredState();
 
   socket.on('spawnUnit', () => {
     const p = gameState.players[socket.id];
@@ -321,7 +468,7 @@ io.on('connection', (socket) => {
     resetMatch();
     console.log(`Match restarted by ${socket.id.slice(0,6)}`);
     io.emit('matchRestarted');
-    io.emit('gameState', gameState);
+    broadcastFilteredState();
   });
 
   socket.on('disconnect', () => {
@@ -332,6 +479,7 @@ io.on('connection', (socket) => {
       if (unit.ownerId === socket.id) delete gameState.units[unitId];
     }
     delete gameState.players[socket.id];
+    delete playerVisibility[socket.id];
     console.log(`Player ${socket.id.slice(0,6)} disconnected`);
 
     if (Object.keys(gameState.players).length === 0) {
@@ -340,12 +488,13 @@ io.on('connection', (socket) => {
       gameState.matchStartTime = null;
       peakPlayerCount          = 0;
       for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
+      currentSpawns = generateSpawns();
       console.log('Server empty, full reset');
     } else if (wasAlive) {
       checkMatchState();
     }
 
-    io.emit('gameState', gameState);
+    broadcastFilteredState();
   });
 });
 
@@ -521,8 +670,8 @@ setInterval(() => {
     }
   }
 
-  // 5. Broadcast
-  io.emit('gameState', gameState);
+  // 5. Broadcast — filtré par joueur (fog of war)
+  broadcastFilteredState();
 }, TICK_MS);
 
 const PORT = process.env.PORT || 3000;
