@@ -10,16 +10,9 @@ const MAP_WIDTH  = 2000;
 const MAP_HEIGHT = 2000;
 const MAX_PLAYERS = 4;
 const GOLD_PER_SECOND = 1;
-const HDV_MAX_HP = 1000;
-const UNIT_COST   = 10;
-const UNIT_HP     = 50;
-const UNIT_MAX_HP = 50;
 const UNIT_RADIUS = 15;
-const UNIT_SPEED  = 80;
 const TICK_RATE   = 20;
 const TICK_MS     = 1000 / TICK_RATE;
-const ATTACK_RANGE       = 80;
-const ATTACK_DAMAGE      = 5;
 const ATTACK_COOLDOWN_MS = 1000;
 const HDV_HALF_SIZE      = 40;
 const LOOK_AHEAD         = 60;
@@ -34,7 +27,66 @@ const TILE_SIZE   = 40;
 const GRID_W      = MAP_WIDTH  / TILE_SIZE;   // 50
 const GRID_H      = MAP_HEIGHT / TILE_SIZE;   // 50
 const VISION_UNIT = 180;
-const VISION_HDV  = 280;
+
+// ────────── Tech tree, types d'unités, niveaux HDV ──────────
+
+const UNIT_TYPES = {
+  soldier: { id: 'soldier', name: 'Soldat',    cost: 10, hp: 50, speed:  80, range:  80, damage: 5, requiresTech: null,
+             icon: '⚔️', desc: 'Polyvalent. Disponible dès le départ.' },
+  archer:  { id: 'archer',  name: 'Archer',    cost: 15, hp: 30, speed:  80, range: 140, damage: 4, requiresTech: 'forging',
+             icon: '🏹', desc: 'Longue portée mais fragile.' },
+  knight:  { id: 'knight',  name: 'Chevalier', cost: 25, hp: 80, speed: 140, range:  80, damage: 8, requiresTech: 'cavalry',
+             icon: '🐎', desc: 'Lourd et rapide, gros dégâts.' },
+};
+
+const TECH_TREE = {
+  forging:       { id: 'forging',       name: 'Forge',         icon: '🗡',  cost: 1, tier: 1, requires: [], desc: 'Débloque l\'Archer.',           effect: { unlockUnit: 'archer'  } },
+  cavalry:       { id: 'cavalry',       name: 'Cavalerie',     icon: '🐎', cost: 1, tier: 1, requires: [], desc: 'Débloque le Chevalier.',       effect: { unlockUnit: 'knight'  } },
+  economy:       { id: 'economy',       name: 'Économie',      icon: '💰', cost: 1, tier: 1, requires: [], desc: '+1 gold/sec passif.',          effect: { goldBonus: 1          } },
+  fortification: { id: 'fortification', name: 'Fortification', icon: '🛡',  cost: 1, tier: 1, requires: [], desc: '+400 HP HDV (heal inclus).',    effect: { hdvHpBonus: 400       } },
+};
+
+// hdvLevel 1 = état de départ
+const HDV_LEVELS = [
+  { level: 1, maxHp: 1000, vision: 280, upgradeCost:  100 },
+  { level: 2, maxHp: 1200, vision: 320, upgradeCost:  250 },
+  { level: 3, maxHp: 1400, vision: 360, upgradeCost:  500 },
+  { level: 4, maxHp: 1600, vision: 400, upgradeCost: 1000 },
+  { level: 5, maxHp: 1800, vision: 440, upgradeCost: null }, // max
+];
+
+const MAX_HDV_LEVEL = HDV_LEVELS.length;
+
+// Recalcule maxHp et vision du HDV en fonction du niveau + techs recherchées
+function recomputeHdvStats(player) {
+  const lvl = HDV_LEVELS[player.hdvLevel - 1] || HDV_LEVELS[0];
+  let maxHp = lvl.maxHp;
+  let vision = lvl.vision;
+  for (const techId of player.researchedTechs) {
+    const eff = TECH_TREE[techId] && TECH_TREE[techId].effect;
+    if (!eff) continue;
+    if (eff.hdvHpBonus)  maxHp  += eff.hdvHpBonus;
+    if (eff.visionBonus) vision += eff.visionBonus;
+  }
+  player.maxHp  = maxHp;
+  player.vision = vision;
+}
+
+function computeGoldRate(player) {
+  let rate = GOLD_PER_SECOND;
+  for (const techId of player.researchedTechs) {
+    const eff = TECH_TREE[techId] && TECH_TREE[techId].effect;
+    if (eff && eff.goldBonus) rate += eff.goldBonus;
+  }
+  return rate;
+}
+
+function unitTypeUnlocked(player, typeId) {
+  const def = UNIT_TYPES[typeId];
+  if (!def) return false;
+  if (!def.requiresTech) return true;
+  return player.researchedTechs.includes(def.requiresTech);
+}
 
 const FALLBACK_SPAWNS = [
   { x: 200,  y: 200  },
@@ -109,7 +161,7 @@ function computeVisibility(player) {
   if (!vis) return;
   vis.visible.fill(0);
   if (!player.eliminated && player.hp > 0) {
-    markCircle(vis.visible, player.x, player.y, VISION_HDV);
+    markCircle(vis.visible, player.x, player.y, player.vision || HDV_LEVELS[0].vision);
     for (const unit of Object.values(gameState.units)) {
       if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, VISION_UNIT);
     }
@@ -234,7 +286,6 @@ function buildGameOverPayload(winnerId, reason) {
   const matchDurationMs = gameState.matchStartTime ? Date.now() - gameState.matchStartTime : 0;
   const winner = winnerId ? gameState.players[winnerId] : null;
   const players = Object.values(gameState.players).map(p => {
-    const unitCount = Object.values(gameState.units).filter(u => u.ownerId === p.id).length;
     return {
       id: p.id,
       name: p.name,
@@ -244,7 +295,9 @@ function buildGameOverPayload(winnerId, reason) {
       totalGoldEarned: p.totalGoldEarned,
       gold: p.gold,
       eliminated: p.eliminated,
-      finalScore: p.gold + unitCount * UNIT_COST,
+      finalScore: p.gold + Object.values(gameState.units)
+        .filter(u => u.ownerId === p.id)
+        .reduce((sum, u) => sum + (u.cost || 10), 0),
     };
   });
   players.sort((a, b) => b.finalScore - a.finalScore);
@@ -309,7 +362,12 @@ function resetMatch() {
   currentSpawns = generateSpawns();
   resetVisibilityAll();
   for (const p of Object.values(gameState.players)) {
-    p.hp              = HDV_MAX_HP;
+    p.hdvLevel        = 1;
+    p.techPoints      = 0;
+    p.researchedTechs = [];
+    p.hp              = HDV_LEVELS[0].maxHp;
+    p.maxHp           = HDV_LEVELS[0].maxHp;
+    p.vision          = HDV_LEVELS[0].vision;
     p.eliminated      = false;
     p.eliminatedAt    = null;
     p.gold            = 0;
@@ -368,14 +426,19 @@ io.on('connection', (socket) => {
     color: COLORS[slot],
     name: playerName,
     gold: 0,
-    hp: HDV_MAX_HP,
-    maxHp: HDV_MAX_HP,
+    hp: HDV_LEVELS[0].maxHp,
+    maxHp: HDV_LEVELS[0].maxHp,
     eliminated: false,
     eliminatedAt: null,
     kills: 0,
     unitsCreated: 0,
     totalGoldEarned: 0,
     joinTime: Date.now(),
+    // Tech tree state
+    hdvLevel: 1,
+    techPoints: 0,
+    researchedTechs: [],
+    vision: HDV_LEVELS[0].vision,
   };
 
   gameState.players[socket.id] = player;
@@ -391,17 +454,27 @@ io.on('connection', (socket) => {
     tileSize: TILE_SIZE,
     gridW: GRID_W,
     gridH: GRID_H,
+    unitTypes: UNIT_TYPES,
+    techTree: TECH_TREE,
+    hdvLevels: HDV_LEVELS,
   });
   broadcastFilteredState();
 
-  socket.on('spawnUnit', () => {
+  socket.on('spawnUnit', (data) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
-    if (p.gold < UNIT_COST) {
+    const typeId = (data && data.unitType) || 'soldier';
+    const def    = UNIT_TYPES[typeId];
+    if (!def) { socket.emit('spawnFailed', { reason: 'invalid_unit_type' }); return; }
+    if (!unitTypeUnlocked(p, typeId)) {
+      socket.emit('spawnFailed', { reason: 'unit_locked' });
+      return;
+    }
+    if (p.gold < def.cost) {
       socket.emit('spawnFailed', { reason: 'not_enough_gold' });
       return;
     }
-    p.gold -= UNIT_COST;
+    p.gold -= def.cost;
     p.unitsCreated++;
 
     const angle  = Math.random() * Math.PI * 2;
@@ -413,15 +486,60 @@ io.on('connection', (socket) => {
       ownerId: socket.id,
       x: Math.round(p.x + Math.cos(angle) * dist),
       y: Math.round(p.y + Math.sin(angle) * dist),
-      type: 'soldier',
-      hp: UNIT_HP,
-      maxHp: UNIT_MAX_HP,
+      type: typeId,
+      hp: def.hp,
+      maxHp: def.hp,
+      speed: def.speed,
+      range: def.range,
+      damage: def.damage,
+      cost: def.cost,
       targetX: null,
       targetY: null,
       attackTargetId:   null,
       attackTargetType: null,
       lastAttackTime: 0,
     };
+  });
+
+  socket.on('upgradeHdv', () => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    if (p.hdvLevel >= MAX_HDV_LEVEL) return;
+    const cost = HDV_LEVELS[p.hdvLevel - 1].upgradeCost;
+    if (p.gold < cost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_gold' });
+      return;
+    }
+    p.gold -= cost;
+    p.hdvLevel += 1;
+    p.techPoints += 1;
+    recomputeHdvStats(p);
+    p.hp = p.maxHp; // heal complet à l'upgrade
+    console.log(`Player ${p.name} → HDV lv ${p.hdvLevel}`);
+  });
+
+  socket.on('researchTech', ({ techId } = {}) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const tech = TECH_TREE[techId];
+    if (!tech) return;
+    if (p.researchedTechs.includes(techId)) return;
+    if (p.techPoints < tech.cost) return;
+    // Prérequis
+    for (const req of tech.requires) {
+      if (!p.researchedTechs.includes(req)) return;
+    }
+    p.techPoints -= tech.cost;
+    p.researchedTechs.push(techId);
+    // Effets
+    const eff = tech.effect || {};
+    if (eff.hdvHpBonus) {
+      recomputeHdvStats(p);
+      p.hp = Math.min(p.maxHp, p.hp + eff.hdvHpBonus); // heal du bonus
+    }
+    if (eff.visionBonus) recomputeHdvStats(p);
+    // unlockUnit + goldBonus : effets calculés à la volée, rien à faire ici
+    console.log(`Player ${p.name} researched ${techId}`);
   });
 
   socket.on('moveUnits', ({ unitIds, targetX, targetY }) => {
@@ -501,18 +619,20 @@ io.on('connection', (socket) => {
 // Game loop — order: move → collisions → combat → gold → broadcast
 setInterval(() => {
   tickCount++;
-  const step = UNIT_SPEED / TICK_RATE;
-  const effectiveRange = ATTACK_RANGE - UNIT_RADIUS;
 
-  // 1. Move (ATTACK_MOVE / MOVE / IDLE)
+  // 1. Move (ATTACK_MOVE / MOVE / IDLE) — stats par unité
   for (const unit of Object.values(gameState.units)) {
+    const uSpeed = unit.speed || 80;
+    const uRange = unit.range || 80;
+    const step = uSpeed / TICK_RATE;
+    const effectiveRange = uRange - UNIT_RADIUS;
     let goalX, goalY, skipPlayerId = null;
 
     if (unit.attackTargetId !== null) {
       if (unit.attackTargetType === 'unit') {
         const target = gameState.units[unit.attackTargetId];
         if (!target) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        if (Math.hypot(target.x - unit.x, target.y - unit.y) <= ATTACK_RANGE) continue;
+        if (Math.hypot(target.x - unit.x, target.y - unit.y) <= uRange) continue;
         goalX = target.x; goalY = target.y;
       } else {
         const target = gameState.players[unit.attackTargetId];
@@ -588,13 +708,16 @@ setInterval(() => {
   for (const unit of Object.values(gameState.units)) {
     if (toDelete.has(unit.id)) continue;
     if (nowMs - unit.lastAttackTime < ATTACK_COOLDOWN_MS) continue;
+    const uRange  = unit.range  || 80;
+    const uDamage = unit.damage || 5;
+    const effectiveRange = uRange - UNIT_RADIUS;
 
     if (unit.attackTargetId !== null) {
       let target, inRange = false;
       if (unit.attackTargetType === 'unit') {
         target = gameState.units[unit.attackTargetId];
         if (!target || toDelete.has(target.id)) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        inRange = Math.hypot(target.x - unit.x, target.y - unit.y) <= ATTACK_RANGE;
+        inRange = Math.hypot(target.x - unit.x, target.y - unit.y) <= uRange;
       } else {
         target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
@@ -603,7 +726,7 @@ setInterval(() => {
       if (!inRange) continue;
 
       unit.lastAttackTime = nowMs;
-      target.hp = Math.max(0, target.hp - ATTACK_DAMAGE);
+      target.hp = Math.max(0, target.hp - uDamage);
       const attackEntry = { attackerId: unit.id, targetType: unit.attackTargetType, targetId: target.id };
 
       if (unit.attackTargetType === 'unit' && target.hp <= 0) {
@@ -625,7 +748,7 @@ setInterval(() => {
       for (const other of Object.values(gameState.units)) {
         if (toDelete.has(other.id) || other.ownerId === unit.ownerId) continue;
         const d = Math.hypot(other.x - unit.x, other.y - unit.y);
-        if (d <= ATTACK_RANGE && d < bestDist) { best = other; bestDist = d; bestType = 'unit'; }
+        if (d <= uRange && d < bestDist) { best = other; bestDist = d; bestType = 'unit'; }
       }
       for (const player of Object.values(gameState.players)) {
         if (player.id === unit.ownerId || player.hp <= 0) continue;
@@ -638,7 +761,7 @@ setInterval(() => {
       if (!best) continue;
 
       unit.lastAttackTime = nowMs;
-      best.hp = Math.max(0, best.hp - ATTACK_DAMAGE);
+      best.hp = Math.max(0, best.hp - uDamage);
       const attackEntry = { attackerId: unit.id, targetType: bestType, targetId: best.id };
 
       if (bestType === 'unit' && best.hp <= 0) {
@@ -660,12 +783,13 @@ setInterval(() => {
     delete gameState.units[id];
   }
 
-  // 4. Gold once per second (alive players only)
+  // 4. Gold once per second (alive players only) — taux modulé par les techs
   if (tickCount % TICK_RATE === 0) {
     for (const p of Object.values(gameState.players)) {
       if (!p.eliminated) {
-        p.gold += GOLD_PER_SECOND;
-        p.totalGoldEarned += GOLD_PER_SECOND;
+        const rate = computeGoldRate(p);
+        p.gold += rate;
+        p.totalGoldEarned += rate;
       }
     }
   }

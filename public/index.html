@@ -18,7 +18,7 @@
       <input id="name-input" class="name-input" type="text" maxlength="20" placeholder="Ton pseudo..." autocomplete="off" />
       <button id="play-btn" class="primary-btn">Jouer ▶</button>
       <div class="lobby-hint">
-        🎯 Clic HDV : soldat (10 💰) &nbsp;|&nbsp; Drag : sélectionner &nbsp;|&nbsp; Clic droit : déplacer/attaquer<br/>
+        🏛 Clic HDV : production & recherche &nbsp;|&nbsp; Drag : sélectionner &nbsp;|&nbsp; Clic droit : déplacer/attaquer<br/>
         ⌨️ ZQSD / 2 doigts : caméra &nbsp;|&nbsp; Pinch / Ctrl+scroll : zoom &nbsp;|&nbsp; Ctrl+A : tout sélectionner
       </div>
     </div>
@@ -36,7 +36,7 @@
     </div>
     <hr />
     <div id="instructions">
-      🎯 Clic HDV : soldat (10 💰)<br />
+      🏛 Clic HDV : production & tech<br />
       📦 Clic / Drag : sélectionner<br />
       👉 Clic droit : déplacer / attaquer<br />
       ⌨️ ZQSD / drag 2 doigts : caméra<br />
@@ -48,6 +48,35 @@
 
   <!-- Kill feed -->
   <div id="kill-feed"></div>
+
+  <!-- HDV Panel (clic sur ton HDV) -->
+  <div id="hdv-panel" style="display:none;">
+    <div class="hdv-panel-header">
+      <span id="hdv-panel-title">🏛 Mon HDV</span>
+      <button class="hdv-panel-close" onclick="HdvPanel.close()">✕</button>
+    </div>
+
+    <div class="hdv-panel-section">
+      <div class="hdv-panel-section-title">Empire</div>
+      <div id="hdv-panel-empire">
+        <div>Niveau : <strong><span id="hdv-level">1</span> / 5</strong></div>
+        <div>❤️ HP : <span id="hdv-hp">1000/1000</span></div>
+        <div>💰 Gold : <span id="hdv-gold">0</span> &nbsp; (<span id="hdv-rate">+1</span>/s)</div>
+        <div>🔬 Pts tech : <strong><span id="hdv-techpts">0</span></strong></div>
+        <button id="upgrade-btn" class="hdv-action-btn" onclick="HdvPanel.upgrade()">⬆ Améliorer (— gold)</button>
+      </div>
+    </div>
+
+    <div class="hdv-panel-section">
+      <div class="hdv-panel-section-title">Production</div>
+      <div id="hdv-panel-production" class="production-grid"></div>
+    </div>
+
+    <div class="hdv-panel-section">
+      <div class="hdv-panel-section-title">Recherche</div>
+      <div id="hdv-panel-tech" class="tech-grid"></div>
+    </div>
+  </div>
 
   <!-- Partie en cours (match-ended) -->
   <div id="match-ended-overlay" class="fullscreen-overlay" style="display:none;">
@@ -87,6 +116,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
   <script src="/js/network.js"></script>
+  <script src="/js/hdv-panel.js"></script>
   <script src="/js/scenes/MainScene.js"></script>
   <script src="/js/game.js"></script>
 </body>

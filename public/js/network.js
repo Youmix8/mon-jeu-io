@@ -3,6 +3,7 @@ const Network = (() => {
   let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, playerSummary: [], fog: null };
   let myId   = null;
   let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50 };
+  let config  = { unitTypes: {}, techTree: {}, hdvLevels: [] };
   let onSpawnFailedCallback      = null;
   let onAttackCallback           = null;
   let onPlayerEliminatedCallback = null;
@@ -19,6 +20,9 @@ const Network = (() => {
       if (data.tileSize)  mapInfo.tileSize  = data.tileSize;
       if (data.gridW)     mapInfo.gridW     = data.gridW;
       if (data.gridH)     mapInfo.gridH     = data.gridH;
+      if (data.unitTypes) config.unitTypes = data.unitTypes;
+      if (data.techTree)  config.techTree  = data.techTree;
+      if (data.hdvLevels) config.hdvLevels = data.hdvLevels;
     });
 
     socket.on('gameState', (newState) => {
@@ -70,6 +74,9 @@ const Network = (() => {
 
       const elWaiting = document.getElementById('waiting-msg');
       if (elWaiting) elWaiting.style.display = state.matchState === 'waiting' ? 'block' : 'none';
+
+      // Rafraîchit le panneau HDV s'il est ouvert (gold, HP, techs en temps réel)
+      if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible()) HdvPanel.refresh();
     });
 
     socket.on('attacks', (attacks) => {
@@ -164,7 +171,9 @@ const Network = (() => {
     overlay.style.display = 'flex';
   }
 
-  function spawnUnit()  { if (socket) socket.emit('spawnUnit'); }
+  function spawnUnit(unitType) {
+    if (socket) socket.emit('spawnUnit', { unitType: unitType || 'soldier' });
+  }
   function moveUnits(unitIds, targetX, targetY) {
     if (socket) socket.emit('moveUnits', { unitIds, targetX, targetY });
   }
@@ -172,6 +181,8 @@ const Network = (() => {
     if (socket) socket.emit('attackTarget', { unitIds, targetId, targetType });
   }
   function requestRestart() { if (socket) socket.emit('requestRestart'); }
+  function upgradeHdv()     { if (socket) socket.emit('upgradeHdv'); }
+  function researchTech(techId) { if (socket) socket.emit('researchTech', { techId }); }
 
   function setOnSpawnFailed(cb)      { onSpawnFailedCallback = cb; }
   function setOnAttack(cb)           { onAttackCallback = cb; }
@@ -181,10 +192,11 @@ const Network = (() => {
   function getState()                { return state; }
   function getMyId()                 { return myId; }
   function getMapInfo()              { return mapInfo; }
+  function getConfig()               { return config; }
 
   return {
-    init, getState, getMyId, getMapInfo,
-    spawnUnit, moveUnits, attackTarget, requestRestart,
+    init, getState, getMyId, getMapInfo, getConfig,
+    spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted,
   };

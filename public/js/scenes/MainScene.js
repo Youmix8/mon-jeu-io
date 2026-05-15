@@ -370,7 +370,7 @@ class MainScene extends Phaser.Scene {
           rect.setInteractive();
           rect.on('pointerover', () => this.input.setDefaultCursor('pointer'));
           rect.on('pointerout',  () => this.input.setDefaultCursor('default'));
-          rect.on('pointerdown', () => Network.spawnUnit());
+          rect.on('pointerdown', () => HdvPanel.toggle());
         }
 
         const barBg    = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, 0x7f0000).setOrigin(0.5, 0.5);
@@ -411,7 +411,7 @@ class MainScene extends Phaser.Scene {
 
     for (const id of Object.keys(this.unitSprites)) {
       if (!units[id]) {
-        this.unitSprites[id].forEach(o => o.destroy());
+        this.unitSprites[id].forEach(o => { if (o) o.destroy(); });
         delete this.unitSprites[id];
         if (this.unitTweens[id])    { this.unitTweens[id].stop(); delete this.unitTweens[id]; }
         delete this.unitServerPos[id];
@@ -430,7 +430,9 @@ class MainScene extends Phaser.Scene {
 
       if (!this.unitSprites[id]) {
         const circle = this.add.circle(unit.x, unit.y, UNIT_RADIUS, colorInt);
-        circle.setStrokeStyle(2, 0x000000);
+        // Différenciation visuelle par type d'unité
+        const stroke = unit.type === 'knight' ? 4 : 2;
+        circle.setStrokeStyle(stroke, 0x000000);
         circle._unitId      = id;
         circle._unitOwnerId = unit.ownerId;
 
@@ -443,7 +445,13 @@ class MainScene extends Phaser.Scene {
         const barBg   = this.add.rectangle(unit.x, unit.y + BAR_Y, BAR_W, BAR_H, 0x333333).setOrigin(0.5, 0.5);
         const barFill = this.add.rectangle(unit.x - BAR_W / 2, unit.y + BAR_Y, BAR_W * (unit.hp / unit.maxHp), BAR_H, 0x2ecc71).setOrigin(0, 0.5);
 
-        this.unitSprites[id] = [circle, barBg, barFill];
+        // Archer : petit point blanc au centre
+        let decoration = null;
+        if (unit.type === 'archer') {
+          decoration = this.add.circle(unit.x, unit.y, 4, 0xffffff);
+        }
+
+        this.unitSprites[id] = [circle, barBg, barFill, decoration];
 
       } else if (posChanged || hpChanged) {
         const [circle, , barFill] = this.unitSprites[id];
@@ -492,9 +500,10 @@ class MainScene extends Phaser.Scene {
   _updateUnitBarPositions() {
     for (const [, sprites] of Object.entries(this.unitSprites)) {
       if (sprites.length < 3) continue;
-      const [circle, barBg, barFill] = sprites;
+      const [circle, barBg, barFill, deco] = sprites;
       barBg.setPosition(circle.x, circle.y + BAR_Y);
       barFill.setPosition(circle.x - BAR_W / 2, circle.y + BAR_Y);
+      if (deco) deco.setPosition(circle.x, circle.y);
     }
   }
 
