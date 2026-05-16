@@ -12,6 +12,8 @@ class MainScene extends Phaser.Scene {
     this.unitServerPos = {};
     this.selectionRings = {};
     this.selectedUnitIds = new Set();
+    this.villageSprites = {};  // villageId → [icon, ringFill, ringBg, label]
+    this.lastVillageStateJson = '';
     this.lastStateJson = '';
     this.cursors = null;
     this.wasd    = null;
@@ -26,18 +28,28 @@ class MainScene extends Phaser.Scene {
   preload() {}
 
   create() {
-    const MAP_W = 2000, MAP_H = 2000;
+    const info = Network.getMapInfo();
+    const MAP_W = info.mapWidth, MAP_H = info.mapHeight;
+    this.MAP_W = MAP_W;
+    this.MAP_H = MAP_H;
 
+    // Fond + bordure subtile pour matérialiser les limites de la map
     this.add.rectangle(MAP_W / 2, MAP_H / 2, MAP_W, MAP_H, 0xa8e6a3);
+    const border = this.add.graphics();
+    border.lineStyle(6, 0x6b8a5e, 0.8);
+    border.strokeRect(0, 0, MAP_W, MAP_H);
 
     const grid = this.add.graphics();
-    grid.lineStyle(1, 0x888888, 0.25);
+    grid.lineStyle(1, 0x88a07c, 0.22);
     for (let x = 0; x <= MAP_W; x += 100) { grid.moveTo(x, 0); grid.lineTo(x, MAP_H); }
     for (let y = 0; y <= MAP_H; y += 100) { grid.moveTo(0, y); grid.lineTo(MAP_W, y); }
     grid.strokePath();
 
-    this.cameras.main.setBounds(0, 0, MAP_W, MAP_H);
-    this.cameras.main.setZoom(1);
+    // Caméra : padding égal de 400px autour pour pouvoir scroller symétriquement
+    // au-delà de la map (sinon on bute sur les coins selon le spawn).
+    const PAD = 400;
+    this.cameras.main.setBounds(-PAD, -PAD, MAP_W + 2 * PAD, MAP_H + 2 * PAD);
+    this.cameras.main.setZoom(0.7);
 
     this.cursors = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys({
@@ -59,7 +71,6 @@ class MainScene extends Phaser.Scene {
     pg.destroy();
 
     // Fog of war — texture canvas low-res, scaled up avec filtre linéaire pour un fondu doux
-    const info = Network.getMapInfo();
     this.fogCanvas = document.createElement('canvas');
     this.fogCanvas.width  = info.gridW;
     this.fogCanvas.height = info.gridH;
@@ -75,12 +86,16 @@ class MainScene extends Phaser.Scene {
     this.lastFogSignature = '';
     this.cameraCentered = false; // recentre une fois sur mon HDV au début
 
+    // Mini-carte
+    if (typeof Minimap !== 'undefined') Minimap.init(this.cameras.main);
+
     this.input.manager.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const cam = this.cameras.main;
       if (e.ctrlKey) {
-        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-        cam.zoom = Phaser.Math.Clamp(cam.zoom * zoomFactor, 0.4, 2.0);
+        // Zoom plus doux qu'avant (0.96 / 1.04 au lieu de 0.9 / 1.1)
+        const zoomFactor = e.deltaY > 0 ? 0.96 : 1.04;
+        cam.zoom = Phaser.Math.Clamp(cam.zoom * zoomFactor, 0.35, 1.6);
       } else {
         cam.scrollX += e.deltaX / cam.zoom;
         cam.scrollY += e.deltaY / cam.zoom;
@@ -114,6 +129,13 @@ class MainScene extends Phaser.Scene {
 
     Network.setOnPlayerEliminated((data) => {
       this._addKillFeedEntry(`💀 ${data.name} éliminé !`, data.color);
+    });
+
+    Network.setOnVillageCaptured((data) => {
+      const cfg = Network.getConfig();
+      const typeDef = cfg.villageTypes && cfg.villageTypes[data.type];
+      const icon = typeDef ? typeDef.icon : '🏘';
+      this._addKillFeedEntry(`${icon} ${data.ownerName} capture une ${typeDef ? typeDef.name : 'zone'}`, data.ownerColor);
     });
 
     Network.setOnGameOver((data) => {
@@ -295,12 +317,74 @@ class MainScene extends Phaser.Scene {
 
     this._redrawFog(state.fog);
 
+    // Mini-carte
+    if (typeof Minimap !== 'undefined') Minimap.render();
+
+    // Villages mis à jour à chaque tick (capture progress en temps réel)
+    this._syncVillages(state.villages || [], state.players);
+
     const stateJson = JSON.stringify({ p: state.players, u: state.units });
     if (stateJson === this.lastStateJson) return;
     this.lastStateJson = stateJson;
 
     this._syncHDVs(state.players);
     this._syncUnits(state.units || {}, state.players);
+  }
+
+  // ── Villages neutres ─────────────────────────────────────────────
+
+  _syncVillages(villages, players) {
+    const cfg = Network.getConfig();
+    const CAP_TICKS = cfg.villageCaptureTicks || 200;
+    const RAD = cfg.villageRadius || 70;
+    const seen = new Set();
+
+    for (const v of villages) {
+      seen.add(v.id);
+      const typeDef = cfg.villageTypes && cfg.villageTypes[v.type];
+      const icon = typeDef ? typeDef.icon : '🏘';
+      const owner = v.ownerId ? players[v.ownerId] : null;
+      const ownerColorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0x888888;
+
+      let sprite = this.villageSprites[v.id];
+      if (!sprite) {
+        // Cercle de base (neutre gris) + icône emoji + label type + barre de capture
+        const base = this.add.circle(v.x, v.y, RAD * 0.55, 0x444444, 0.55);
+        base.setStrokeStyle(3, 0x888888, 0.9);
+        const iconText = this.add.text(v.x, v.y, icon, { fontSize: '30px' }).setOrigin(0.5, 0.5);
+        const label    = this.add.text(v.x, v.y + RAD * 0.7, (typeDef ? typeDef.name : v.type), {
+          fontSize: '11px', fontFamily: 'sans-serif', color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+        }).setOrigin(0.5, 0);
+        const barBg    = this.add.rectangle(v.x, v.y - RAD * 0.6, 70, 6, 0x111111, 0.85).setOrigin(0.5, 0.5);
+        const barFill  = this.add.rectangle(v.x - 35, v.y - RAD * 0.6, 0, 6, 0xf1c40f).setOrigin(0, 0.5);
+        sprite = { base, iconText, label, barBg, barFill };
+        this.villageSprites[v.id] = sprite;
+      }
+
+      // Couleur de bordure : owner color si capturé, sinon gris
+      sprite.base.setStrokeStyle(3, owner ? ownerColorInt : 0x888888, 0.95);
+      sprite.base.setFillStyle(owner ? ownerColorInt : 0x444444, owner ? 0.25 : 0.55);
+
+      // Barre de capture si en cours
+      const showBar = v.captureProgress > 0;
+      const ratio   = Math.max(0, Math.min(1, v.captureProgress / CAP_TICKS));
+      sprite.barBg.setVisible(showBar);
+      sprite.barFill.setVisible(showBar);
+      if (showBar) {
+        sprite.barFill.width = 70 * ratio;
+        const capturer = v.capturingPlayerId ? players[v.capturingPlayerId] : null;
+        sprite.barFill.setFillStyle(capturer ? Phaser.Display.Color.HexStringToColor(capturer.color).color : 0xf1c40f);
+      }
+    }
+
+    // Cleanup villages disparus du state filtré (pas explorés)
+    for (const id of Object.keys(this.villageSprites)) {
+      if (!seen.has(id)) {
+        const s = this.villageSprites[id];
+        Object.values(s).forEach(o => o && o.destroy());
+        delete this.villageSprites[id];
+      }
+    }
   }
 
   // ── Fog of war ────────────────────────────────────────────────────
@@ -362,9 +446,21 @@ class MainScene extends Phaser.Scene {
       const destroyed = player.hp <= 0;
 
       if (!this.hdvSprites[id]) {
+        // Ombre portée sous le HDV
+        const shadow = this.add.ellipse(player.x, player.y + HDV_SIZE / 2 + 4, HDV_SIZE + 14, 14, 0x000000, 0.35);
+        // Tour principale
         const rect = this.add.rectangle(player.x, player.y, HDV_SIZE, HDV_SIZE, destroyed ? 0x888888 : colorInt);
-        rect.setStrokeStyle(3, 0x000000, 0.6);
+        rect.setStrokeStyle(4, 0x111111, 0.85);
         if (destroyed) rect.setAlpha(0.4);
+        // Bande sombre intérieure pour relief
+        const innerStripe = this.add.rectangle(player.x, player.y + HDV_SIZE / 4, HDV_SIZE - 12, 10, 0x000000, 0.18);
+        // Toit / créneaux : 4 petits carrés au sommet
+        const merlons = [];
+        const merlonY = player.y - HDV_SIZE / 2 - 5;
+        for (let mi = 0; mi < 4; mi++) {
+          const mx = player.x - HDV_SIZE / 2 + 10 + mi * 20;
+          merlons.push(this.add.rectangle(mx, merlonY, 12, 12, destroyed ? 0x888888 : colorInt).setStrokeStyle(2, 0x111111, 0.85));
+        }
 
         if (id === myId) {
           rect.setInteractive();
@@ -375,14 +471,15 @@ class MainScene extends Phaser.Scene {
 
         const barBg    = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, 0x7f0000).setOrigin(0.5, 0.5);
         const barFill  = this.add.rectangle(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF, BAR_W_HDV * hpRatio, BAR_H_HDV, 0x00cc44).setOrigin(0, 0.5);
-        const nameLabel = this.add.text(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 4, player.name,
-          { fontSize: '13px', fontFamily: 'sans-serif', color: player.color, stroke: '#000000', strokeThickness: 3 }
+        const nameLabel = this.add.text(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 8, player.name,
+          { fontSize: '14px', fontFamily: 'sans-serif', fontStyle: 'bold', color: player.color, stroke: '#000000', strokeThickness: 4 }
         ).setOrigin(0.5, 1);
-        const hpLabel = this.add.text(player.x, player.y + HDV_SIZE / 2 + 6, `${player.hp}/${player.maxHp}`,
-          { fontSize: '12px', fontFamily: 'sans-serif', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
+        const hpLabel = this.add.text(player.x, player.y + HDV_SIZE / 2 + 12, `${player.hp}/${player.maxHp}`,
+          { fontSize: '12px', fontFamily: 'sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
         ).setOrigin(0.5, 0);
 
-        this.hdvSprites[id] = [rect, barBg, barFill, nameLabel, hpLabel];
+        // [rect, barBg, barFill, nameLabel, hpLabel, shadow, innerStripe, ...merlons]
+        this.hdvSprites[id] = [rect, barBg, barFill, nameLabel, hpLabel, shadow, innerStripe, ...merlons];
 
       } else {
         const [rect, barBg, barFill, nameLabel, hpLabel] = this.hdvSprites[id];
@@ -396,10 +493,10 @@ class MainScene extends Phaser.Scene {
         barBg.setPosition(player.x, player.y + BAR_Y_OFF);
         barFill.setPosition(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF);
         barFill.width = BAR_W_HDV * hpRatio;
-        nameLabel.setPosition(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 4)
+        nameLabel.setPosition(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 8)
           .setText(player.eliminated ? '💀 ÉLIMINÉ' : player.name)
           .setColor(player.eliminated ? '#e74c3c' : player.color);
-        hpLabel.setPosition(player.x, player.y + HDV_SIZE / 2 + 6).setText(`${player.hp}/${player.maxHp}`);
+        hpLabel.setPosition(player.x, player.y + HDV_SIZE / 2 + 12).setText(`${player.hp}/${player.maxHp}`);
       }
     }
   }

@@ -3,12 +3,13 @@ const Network = (() => {
   let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, playerSummary: [], fog: null };
   let myId   = null;
   let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50 };
-  let config  = { unitTypes: {}, techTree: {}, hdvLevels: [] };
+  let config  = { unitTypes: {}, techTree: {}, hdvLevels: [], villageTypes: {}, villageRadius: 70, villageCaptureTicks: 200 };
   let onSpawnFailedCallback      = null;
   let onAttackCallback           = null;
   let onPlayerEliminatedCallback = null;
   let onGameOverCallback         = null;
   let onMatchRestartedCallback   = null;
+  let onVillageCapturedCallback  = null;
 
   function init(playerName) {
     socket = io({ auth: { name: playerName || '' } });
@@ -20,9 +21,12 @@ const Network = (() => {
       if (data.tileSize)  mapInfo.tileSize  = data.tileSize;
       if (data.gridW)     mapInfo.gridW     = data.gridW;
       if (data.gridH)     mapInfo.gridH     = data.gridH;
-      if (data.unitTypes) config.unitTypes = data.unitTypes;
-      if (data.techTree)  config.techTree  = data.techTree;
-      if (data.hdvLevels) config.hdvLevels = data.hdvLevels;
+      if (data.unitTypes)   config.unitTypes   = data.unitTypes;
+      if (data.techTree)    config.techTree    = data.techTree;
+      if (data.hdvLevels)   config.hdvLevels   = data.hdvLevels;
+      if (data.villageTypes)        config.villageTypes        = data.villageTypes;
+      if (data.villageRadius)       config.villageRadius       = data.villageRadius;
+      if (data.villageCaptureTicks) config.villageCaptureTicks = data.villageCaptureTicks;
     });
 
     socket.on('gameState', (newState) => {
@@ -75,6 +79,10 @@ const Network = (() => {
       const elWaiting = document.getElementById('waiting-msg');
       if (elWaiting) elWaiting.style.display = state.matchState === 'waiting' ? 'block' : 'none';
 
+      // Bouton "Ajouter un bot" visible tant qu'il reste de la place
+      const elAddBot = document.getElementById('add-bot-btn');
+      if (elAddBot) elAddBot.style.display = summary.length < 4 ? 'inline-block' : 'none';
+
       // Rafraîchit le panneau HDV s'il est ouvert (gold, HP, techs en temps réel)
       if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible()) HdvPanel.refresh();
     });
@@ -95,6 +103,10 @@ const Network = (() => {
 
     socket.on('playerEliminated', (data) => {
       if (onPlayerEliminatedCallback) onPlayerEliminatedCallback(data);
+    });
+
+    socket.on('villageCaptured', (data) => {
+      if (onVillageCapturedCallback) onVillageCapturedCallback(data);
     });
 
     socket.on('gameOver', (data) => {
@@ -186,12 +198,14 @@ const Network = (() => {
   function requestRestart() { if (socket) socket.emit('requestRestart'); }
   function upgradeHdv()     { if (socket) socket.emit('upgradeHdv'); }
   function researchTech(techId) { if (socket) socket.emit('researchTech', { techId }); }
+  function addBot()         { if (socket) socket.emit('addBot'); }
 
   function setOnSpawnFailed(cb)      { onSpawnFailedCallback = cb; }
   function setOnAttack(cb)           { onAttackCallback = cb; }
   function setOnPlayerEliminated(cb) { onPlayerEliminatedCallback = cb; }
   function setOnGameOver(cb)         { onGameOverCallback = cb; }
   function setOnMatchRestarted(cb)   { onMatchRestartedCallback = cb; }
+  function setOnVillageCaptured(cb)  { onVillageCapturedCallback = cb; }
   function getState()                { return state; }
   function getMyId()                 { return myId; }
   function getMapInfo()              { return mapInfo; }
@@ -199,8 +213,8 @@ const Network = (() => {
 
   return {
     init, getState, getMyId, getMapInfo, getConfig,
-    spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech,
+    spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech, addBot,
     setOnSpawnFailed, setOnAttack,
-    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted,
+    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured,
   };
 })();

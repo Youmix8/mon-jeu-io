@@ -451,3 +451,36 @@ hr {
   50%      { background: rgba(231,76,60,0.15); }
 }
 .error-flash { animation: errorFlash 0.45s ease-out 2; }
+
+/* ── HUD button ── */
+.hud-btn {
+  pointer-events: auto;
+  background: rgba(52, 152, 219, 0.85);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.2);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: sans-serif;
+  font-weight: bold;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.hud-btn:hover { background: #3498db; }
+
+/* ── Minimap ── */
+#minimap-wrap {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  background: rgba(0,0,0,0.7);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 600;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+#minimap {
+  display: block;
+  cursor: crosshair;
+  border-radius: 4px;
+}
