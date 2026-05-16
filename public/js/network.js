@@ -10,6 +10,8 @@ const Network = (() => {
   let onGameOverCallback         = null;
   let onMatchRestartedCallback   = null;
   let onVillageCapturedCallback  = null;
+  let onInitReceivedCallback     = null;
+  let initReceived = false;
 
   function init(playerName) {
     socket = io({ auth: { name: playerName || '' } });
@@ -27,6 +29,8 @@ const Network = (() => {
       if (data.villageTypes)        config.villageTypes        = data.villageTypes;
       if (data.villageRadius)       config.villageRadius       = data.villageRadius;
       if (data.villageCaptureTicks) config.villageCaptureTicks = data.villageCaptureTicks;
+      initReceived = true;
+      if (onInitReceivedCallback) onInitReceivedCallback();
     });
 
     socket.on('gameState', (newState) => {
@@ -206,6 +210,8 @@ const Network = (() => {
   function setOnGameOver(cb)         { onGameOverCallback = cb; }
   function setOnMatchRestarted(cb)   { onMatchRestartedCallback = cb; }
   function setOnVillageCaptured(cb)  { onVillageCapturedCallback = cb; }
+  function setOnInitReceived(cb)     { onInitReceivedCallback = cb; if (initReceived && cb) cb(); }
+  function isInitReceived()          { return initReceived; }
   function getState()                { return state; }
   function getMyId()                 { return myId; }
   function getMapInfo()              { return mapInfo; }
@@ -215,6 +221,7 @@ const Network = (() => {
     init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech, addBot,
     setOnSpawnFailed, setOnAttack,
-    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured,
+    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnInitReceived,
+    isInitReceived,
   };
 })();
