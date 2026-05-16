@@ -28,36 +28,12 @@ class MainScene extends Phaser.Scene {
   preload() {}
 
   create() {
-    const info = Network.getMapInfo();
-    const MAP_W = info.mapWidth, MAP_H = info.mapHeight;
-    this.MAP_W = MAP_W;
-    this.MAP_H = MAP_H;
-
-    // Map : pelouse vert clair
-    this.add.rectangle(MAP_W / 2, MAP_H / 2, MAP_W, MAP_H, 0xa8e6a3);
-    const border = this.add.graphics();
-    border.lineStyle(6, 0x6b8a5e, 0.9);
-    border.strokeRect(0, 0, MAP_W, MAP_H);
-
-    const grid = this.add.graphics();
-    grid.lineStyle(1, 0x88a07c, 0.22);
-    for (let x = 0; x <= MAP_W; x += 100) { grid.moveTo(x, 0); grid.lineTo(x, MAP_H); }
-    for (let y = 0; y <= MAP_H; y += 100) { grid.moveTo(0, y); grid.lineTo(MAP_W, y); }
-    grid.strokePath();
-
-    // Caméra : bornes exactes sur la map. Le minZoom dynamique garantit
-    // que le viewport ne dépasse jamais la map dans aucune dimension
-    // → aucun « hors-map » visible.
-    this.cameras.main.setBounds(0, 0, MAP_W, MAP_H);
-    this._recomputeMinZoom();
-    this.cameras.main.setZoom(this.minZoom); // démarre en vue d'ensemble
-
-    // Recalcule la borne de zoom min si on redimensionne la fenêtre
-    this.scale.on('resize', () => {
-      this._recomputeMinZoom();
-      const cam = this.cameras.main;
-      if (cam.zoom < this.minZoom) cam.zoom = this.minZoom;
-    });
+    // IMPORTANT : ne pas construire la map ici car Network.init() n'a pas
+    // encore reçu la taille réelle du serveur. On construit la map UNIQUEMENT
+    // après réception de l'event 'init'. Voir _buildMap() plus bas.
+    this.mapBuilt = false;
+    this.lastFogSignature = '';
+    this.cameraCentered = false;
 
     this.cursors = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys({
@@ -68,7 +44,6 @@ class MainScene extends Phaser.Scene {
     });
 
     this.input.mouse.disableContextMenu();
-
     this.attackGraphics = this.add.graphics();
 
     // Particle texture for unit death burst
@@ -78,27 +53,20 @@ class MainScene extends Phaser.Scene {
     pg.generateTexture('particle', 8, 8);
     pg.destroy();
 
-    // Fog of war — texture canvas low-res, scaled up avec filtre linéaire pour un fondu doux
-    this.fogCanvas = document.createElement('canvas');
-    this.fogCanvas.width  = info.gridW;
-    this.fogCanvas.height = info.gridH;
-    this.fogCtx = this.fogCanvas.getContext('2d');
-    // Init full black avant qu'on reçoive le premier gameState (sécurité)
-    this.fogCtx.fillStyle = 'rgba(0,0,0,1)';
-    this.fogCtx.fillRect(0, 0, info.gridW, info.gridH);
-    this.textures.addCanvas('fog-texture', this.fogCanvas);
-    this.fogImage = this.add.image(0, 0, 'fog-texture').setOrigin(0, 0);
-    this.fogImage.setDisplaySize(MAP_W, MAP_H);
-    this.fogImage.setDepth(100); // au-dessus de tout le monde du jeu
-    this.textures.get('fog-texture').setFilter(Phaser.Textures.FilterMode.LINEAR);
-    this.lastFogSignature = '';
-    this.cameraCentered = false; // recentre une fois sur mon HDV au début
+    // Recalcule la borne de zoom min si on redimensionne la fenêtre
+    this.scale.on('resize', () => {
+      if (!this.mapBuilt) return;
+      this._recomputeMinZoom();
+      const cam = this.cameras.main;
+      if (cam.zoom < this.minZoom) cam.zoom = this.minZoom;
+    });
 
-    // Mini-carte
-    if (typeof Minimap !== 'undefined') Minimap.init(this.cameras.main);
+    // Build map dès que le serveur a envoyé init (ou immédiatement si déjà reçu)
+    Network.setOnInitReceived(() => this._buildMap());
 
     this.input.manager.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+      if (!this.mapBuilt) return;
       const cam = this.cameras.main;
       if (e.ctrlKey) {
         const zoomFactor = e.deltaY > 0 ? 0.96 : 1.04;
@@ -111,6 +79,7 @@ class MainScene extends Phaser.Scene {
 
     // ── F — vue d'ensemble (fit map) ──────────────────────────────
     this.input.keyboard.on('keydown-F', () => {
+      if (!this.mapBuilt) return;
       const cam = this.cameras.main;
       this._recomputeMinZoom();
       cam.zoom = this.minZoom;
@@ -280,6 +249,7 @@ class MainScene extends Phaser.Scene {
   }
 
   update() {
+    if (!this.mapBuilt) return; // pas avant que l'event 'init' n'arrive
     const cam = this.cameras.main;
     const SPEED = 12 / cam.zoom;
     if (this.cursors.left.isDown  || this.wasd.left.isDown)  cam.scrollX -= SPEED;
@@ -406,6 +376,51 @@ class MainScene extends Phaser.Scene {
   // Garantit qu'on ne voit jamais de zone hors-map.
   _recomputeMinZoom() {
     this.minZoom = Math.max(this.scale.width / this.MAP_W, this.scale.height / this.MAP_H);
+  }
+
+  // Construit la map (rectangle vert + bordure + grille + fog + bornes caméra).
+  // Appelé une seule fois, après réception de l'event 'init' du serveur.
+  _buildMap() {
+    if (this.mapBuilt) return;
+    const info = Network.getMapInfo();
+    this.MAP_W = info.mapWidth;
+    this.MAP_H = info.mapHeight;
+
+    // Pelouse vert clair
+    this.add.rectangle(this.MAP_W / 2, this.MAP_H / 2, this.MAP_W, this.MAP_H, 0xa8e6a3);
+    const border = this.add.graphics();
+    border.lineStyle(6, 0x6b8a5e, 0.9);
+    border.strokeRect(0, 0, this.MAP_W, this.MAP_H);
+
+    const grid = this.add.graphics();
+    grid.lineStyle(1, 0x88a07c, 0.22);
+    for (let x = 0; x <= this.MAP_W; x += 100) { grid.moveTo(x, 0); grid.lineTo(x, this.MAP_H); }
+    for (let y = 0; y <= this.MAP_H; y += 100) { grid.moveTo(0, y); grid.lineTo(this.MAP_W, y); }
+    grid.strokePath();
+
+    // Caméra : bornes exactes à la map réelle
+    this.cameras.main.setBounds(0, 0, this.MAP_W, this.MAP_H);
+    this._recomputeMinZoom();
+    this.cameras.main.setZoom(this.minZoom);
+
+    // Fog of war — canvas low-res, scaled up avec filtre linéaire
+    this.fogCanvas = document.createElement('canvas');
+    this.fogCanvas.width  = info.gridW;
+    this.fogCanvas.height = info.gridH;
+    this.fogCtx = this.fogCanvas.getContext('2d');
+    this.fogCtx.fillStyle = 'rgba(0,0,0,1)';
+    this.fogCtx.fillRect(0, 0, info.gridW, info.gridH);
+    this.textures.addCanvas('fog-texture', this.fogCanvas);
+    this.fogImage = this.add.image(0, 0, 'fog-texture').setOrigin(0, 0);
+    this.fogImage.setDisplaySize(this.MAP_W, this.MAP_H);
+    this.fogImage.setDepth(100);
+    this.textures.get('fog-texture').setFilter(Phaser.Textures.FilterMode.LINEAR);
+
+    // Mini-carte
+    if (typeof Minimap !== 'undefined') Minimap.init(this.cameras.main);
+
+    this.mapBuilt = true;
+    console.log(`Map built: ${this.MAP_W}×${this.MAP_H}, grid ${info.gridW}×${info.gridH}, minZoom ${this.minZoom.toFixed(3)}`);
   }
 
   // ── Fog of war ────────────────────────────────────────────────────
