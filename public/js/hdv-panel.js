@@ -1,31 +1,32 @@
 // Panneau HDV — production d'unités, upgrade niveau, recherche tech.
-// Ouverture : clic gauche sur ton HDV (déclenché par MainScene).
-// Auto-refresh à chaque gameState pour gold/HP/techs en temps réel.
-// Délégation d'événements (pas d'inline onclick) pour fiabilité maximale.
+// IMPORTANT : les cartes sont construites UNE SEULE FOIS (à l'ouverture / config init)
+// puis seulement mises à jour (classes / textes / statuts) à chaque gameState.
+// Sinon innerHTML détruirait les cartes en plein mousedown→mouseup et les clics seraient perdus.
 
 const HdvPanel = (() => {
-  let isOpen   = false;
-  let panelEl  = null;
-  let prodEl   = null;
-  let techEl   = null;
-  let upgradeBtn = null;
+  let isOpen      = false;
+  let panelEl     = null;
+  let prodEl      = null;
+  let techEl      = null;
+  let upgradeBtn  = null;
+  let cardsBuilt  = false;
 
-  function ensureEls() {
+  function _initListenersOnce() {
     if (panelEl) return;
     panelEl    = document.getElementById('hdv-panel');
     prodEl     = document.getElementById('hdv-panel-production');
     techEl     = document.getElementById('hdv-panel-tech');
     upgradeBtn = document.getElementById('upgrade-btn');
 
-    // Délégation : un seul listener sur chaque grille
+    // Délégation : un seul listener sur chaque grille (les cartes peuvent être
+    // recréées si la config change, le listener parent reste valide)
     prodEl.addEventListener('click', (e) => {
       const card = e.target.closest('.unit-card');
-      if (!card || !panelEl.contains(card)) return;
+      if (!card || card.classList.contains('locked')) return;
       const unitId = card.dataset.unitId;
       if (!unitId) return;
-      if (card.classList.contains('locked')) return;
       _animateClick(card);
-      spawn(unitId);
+      Network.spawnUnit(unitId);
     });
 
     techEl.addEventListener('click', (e) => {
@@ -35,12 +36,11 @@ const HdvPanel = (() => {
       if (!techId) return;
       if (!card.classList.contains('available')) return;
       _animateClick(card);
-      research(techId);
+      Network.researchTech(techId);
     });
 
     upgradeBtn.addEventListener('click', upgrade);
 
-    // Listener fermeture (bouton ✕)
     const closeBtn = panelEl.querySelector('.hdv-panel-close');
     if (closeBtn) closeBtn.addEventListener('click', close);
 
@@ -51,7 +51,7 @@ const HdvPanel = (() => {
 
   function _animateClick(el) {
     el.classList.remove('click-flash');
-    void el.offsetWidth; // reflow
+    void el.offsetWidth;
     el.classList.add('click-flash');
   }
 
@@ -62,34 +62,65 @@ const HdvPanel = (() => {
     el.classList.add('error-flash');
   }
 
-  function open()  { ensureEls(); panelEl.style.display = 'block'; isOpen = true; refresh(); }
-  function close() { if (panelEl) panelEl.style.display = 'none';  isOpen = false; }
-  function toggle()   { isOpen ? close() : open(); }
-  function isVisible(){ return isOpen; }
+  function open()      { _initListenersOnce(); panelEl.style.display = 'block'; isOpen = true; refresh(); }
+  function close()     { if (panelEl) panelEl.style.display = 'none';  isOpen = false; }
+  function toggle()    { isOpen ? close() : open(); }
+  function isVisible() { return isOpen; }
+  function spawn(t)    { Network.spawnUnit(t); }
+  function upgrade()   { Network.upgradeHdv(); }
+  function research(t) { Network.researchTech(t); }
 
-  function spawn(unitType) { Network.spawnUnit(unitType); }
-  function upgrade()        { Network.upgradeHdv(); }
-  function research(techId) { Network.researchTech(techId); }
-
-  // Flash rouge sur la carte concernée si spawn échoue (gold insuffisant)
   function onSpawnFailed(reason, lastUnitType) {
     if (!isOpen || !prodEl) return;
     if (reason === 'not_enough_gold' && lastUnitType) {
-      const card = prodEl.querySelector(`.unit-card[data-unit-id="${lastUnitType}"]`);
-      _flashError(card);
+      _flashError(prodEl.querySelector(`.unit-card[data-unit-id="${lastUnitType}"]`));
     }
+  }
+
+  // Construit la structure des cartes (une fois)
+  function _buildCards() {
+    const cfg = Network.getConfig();
+    if (!cfg.unitTypes || !cfg.techTree) return false;
+
+    prodEl.innerHTML = Object.values(cfg.unitTypes).map(u => `
+      <div class="unit-card" data-unit-id="${u.id}">
+        <div class="unit-card-icon">${u.icon}</div>
+        <div class="unit-card-name">${u.name}</div>
+        <div class="unit-card-stats">❤️ ${u.hp} &nbsp; 🗡 ${u.damage} &nbsp; 🎯 ${u.range}</div>
+        <div class="unit-card-cost">${u.cost} 💰</div>
+        <div class="locked-note" data-role="lock"></div>
+      </div>
+    `).join('');
+
+    const techList = Object.values(cfg.techTree).sort((a, b) => a.tier - b.tier || a.id.localeCompare(b.id));
+    techEl.innerHTML = techList.map(t => `
+      <div class="tech-card" data-tech-id="${t.id}">
+        <div class="tech-card-icon">${t.icon}</div>
+        <div class="tech-card-name">${t.name}</div>
+        <div class="tech-card-desc">${t.desc}</div>
+        <div class="tech-card-status" data-role="status"></div>
+      </div>
+    `).join('');
+
+    cardsBuilt = true;
+    return true;
   }
 
   function refresh() {
     if (!isOpen) return;
-    ensureEls();
+    _initListenersOnce();
     const myId = Network.getMyId();
     if (!myId) return;
-    const me = Network.getState().players && Network.getState().players[myId];
+    const me  = Network.getState().players && Network.getState().players[myId];
     if (!me) return;
     const cfg = Network.getConfig();
 
-    // Empire
+    // Build cards on first refresh (when config is available)
+    if (!cardsBuilt) {
+      if (!_buildCards()) return;
+    }
+
+    // ── Empire (texte seulement, pas de remplacement DOM) ──────────────
     document.getElementById('hdv-level').textContent   = me.hdvLevel || 1;
     document.getElementById('hdv-hp').textContent      = `${me.hp}/${me.maxHp}`;
     document.getElementById('hdv-gold').textContent    = me.gold;
@@ -102,7 +133,7 @@ const HdvPanel = (() => {
     }
     document.getElementById('hdv-rate').textContent = `+${rate}`;
 
-    // Upgrade button
+    // ── Upgrade button ────────────────────────────────────────────────
     const lvlIdx = (me.hdvLevel || 1) - 1;
     const levels = cfg.hdvLevels || [];
     if (!levels.length || lvlIdx >= levels.length - 1) {
@@ -116,47 +147,42 @@ const HdvPanel = (() => {
       upgradeBtn.classList.toggle('disabled', me.gold < cost);
     }
 
-    // Production grid — data-attributes + classes (pas d'inline onclick)
-    if (cfg.unitTypes && prodEl) {
-      prodEl.innerHTML = Object.values(cfg.unitTypes).map(u => {
-        const unlocked   = !u.requiresTech || (me.researchedTechs || []).includes(u.requiresTech);
-        const affordable = me.gold >= u.cost;
-        let cls = 'unit-card';
-        if (!unlocked) cls += ' locked';
-        else if (!affordable) cls += ' poor';
-        const lockNote = !unlocked ? `<div class="locked-note">🔒 ${techNameOf(u.requiresTech)}</div>` : '';
-        return `<div class="${cls}" data-unit-id="${u.id}">
-          <div class="unit-card-icon">${u.icon}</div>
-          <div class="unit-card-name">${u.name}</div>
-          <div class="unit-card-stats">❤️ ${u.hp} &nbsp; 🗡 ${u.damage} &nbsp; 🎯 ${u.range}</div>
-          <div class="unit-card-cost">${u.cost} 💰</div>
-          ${lockNote}
-        </div>`;
-      }).join('');
+    // ── Unit cards : on update juste les classes et le label de lock ───
+    for (const card of prodEl.querySelectorAll('.unit-card')) {
+      const u = cfg.unitTypes[card.dataset.unitId];
+      if (!u) continue;
+      const unlocked   = !u.requiresTech || (me.researchedTechs || []).includes(u.requiresTech);
+      const affordable = me.gold >= u.cost;
+      card.classList.toggle('locked', !unlocked);
+      card.classList.toggle('poor', unlocked && !affordable);
+      const lockNote = card.querySelector('[data-role="lock"]');
+      if (lockNote) {
+        if (!unlocked) {
+          lockNote.textContent = `🔒 ${techNameOf(u.requiresTech)}`;
+          lockNote.style.display = '';
+        } else {
+          lockNote.style.display = 'none';
+        }
+      }
     }
 
-    // Tech tree grid
-    if (cfg.techTree && techEl) {
-      const techList = Object.values(cfg.techTree).sort((a, b) => a.tier - b.tier || a.id.localeCompare(b.id));
-      techEl.innerHTML = techList.map(t => {
-        const researched = (me.researchedTechs || []).includes(t.id);
-        const prereqsOk  = t.requires.every(r => (me.researchedTechs || []).includes(r));
-        const canResearch = !researched && prereqsOk && (me.techPoints || 0) >= t.cost;
-        let cls = 'tech-card';
-        if (researched) cls += ' researched';
-        else if (!prereqsOk) cls += ' locked';
-        else if (canResearch) cls += ' available';
-        else cls += ' poor';
-        const status = researched ? '✓ Recherchée'
-                     : !prereqsOk ? `🔒 ${t.requires.map(r => techNameOf(r)).join(', ')}`
-                     : `🔬 ${t.cost} pt`;
-        return `<div class="${cls}" data-tech-id="${t.id}">
-          <div class="tech-card-icon">${t.icon}</div>
-          <div class="tech-card-name">${t.name}</div>
-          <div class="tech-card-desc">${t.desc}</div>
-          <div class="tech-card-status">${status}</div>
-        </div>`;
-      }).join('');
+    // ── Tech cards : update classes + status text ─────────────────────
+    for (const card of techEl.querySelectorAll('.tech-card')) {
+      const t = cfg.techTree[card.dataset.techId];
+      if (!t) continue;
+      const researched  = (me.researchedTechs || []).includes(t.id);
+      const prereqsOk   = t.requires.every(r => (me.researchedTechs || []).includes(r));
+      const canResearch = !researched && prereqsOk && (me.techPoints || 0) >= t.cost;
+      card.classList.toggle('researched', researched);
+      card.classList.toggle('locked',     !researched && !prereqsOk);
+      card.classList.toggle('available',  canResearch);
+      card.classList.toggle('poor',       !researched && prereqsOk && !canResearch);
+      const statusEl = card.querySelector('[data-role="status"]');
+      if (statusEl) {
+        statusEl.textContent = researched ? '✓ Recherchée'
+          : !prereqsOk ? `🔒 ${t.requires.map(r => techNameOf(r)).join(', ')}`
+          : `🔬 ${t.cost} pt`;
+      }
     }
   }
 
