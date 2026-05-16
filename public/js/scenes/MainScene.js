@@ -33,10 +33,6 @@ class MainScene extends Phaser.Scene {
     this.MAP_W = MAP_W;
     this.MAP_H = MAP_H;
 
-    // "Océan" hors-map : grand rectangle bleu nuit qui dépasse largement de la map.
-    // Empêche d'avoir une zone "vide" disgracieuse si on scrolle ou zoome out.
-    this.add.rectangle(MAP_W / 2, MAP_H / 2, MAP_W * 5, MAP_H * 5, 0x1f2a4a);
-
     // Map : pelouse vert clair
     this.add.rectangle(MAP_W / 2, MAP_H / 2, MAP_W, MAP_H, 0xa8e6a3);
     const border = this.add.graphics();
@@ -49,12 +45,19 @@ class MainScene extends Phaser.Scene {
     for (let y = 0; y <= MAP_H; y += 100) { grid.moveTo(0, y); grid.lineTo(MAP_W, y); }
     grid.strokePath();
 
-    // Caméra : bornes exactes sur la map (pas de padding). Combiné au scroll
-    // libre, ça empêche de partir loin dans l'océan.
+    // Caméra : bornes exactes sur la map. Le minZoom dynamique garantit
+    // que le viewport ne dépasse jamais la map dans aucune dimension
+    // → aucun « hors-map » visible.
     this.cameras.main.setBounds(0, 0, MAP_W, MAP_H);
-    // Zoom de départ : adapte selon la taille de l'écran pour voir un large pan.
-    const fitZoom = Math.min(window.innerWidth / MAP_W, window.innerHeight / MAP_H) * 1.1;
-    this.cameras.main.setZoom(Phaser.Math.Clamp(fitZoom, 0.35, 0.8));
+    this._recomputeMinZoom();
+    this.cameras.main.setZoom(this.minZoom); // démarre en vue d'ensemble
+
+    // Recalcule la borne de zoom min si on redimensionne la fenêtre
+    this.scale.on('resize', () => {
+      this._recomputeMinZoom();
+      const cam = this.cameras.main;
+      if (cam.zoom < this.minZoom) cam.zoom = this.minZoom;
+    });
 
     this.cursors = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys({
@@ -98,9 +101,8 @@ class MainScene extends Phaser.Scene {
       e.preventDefault();
       const cam = this.cameras.main;
       if (e.ctrlKey) {
-        // Zoom plus doux qu'avant (0.96 / 1.04 au lieu de 0.9 / 1.1)
         const zoomFactor = e.deltaY > 0 ? 0.96 : 1.04;
-        cam.zoom = Phaser.Math.Clamp(cam.zoom * zoomFactor, 0.35, 1.6);
+        cam.zoom = Phaser.Math.Clamp(cam.zoom * zoomFactor, this.minZoom, 1.6);
       } else {
         cam.scrollX += e.deltaX / cam.zoom;
         cam.scrollY += e.deltaY / cam.zoom;
@@ -110,8 +112,8 @@ class MainScene extends Phaser.Scene {
     // ── F — vue d'ensemble (fit map) ──────────────────────────────
     this.input.keyboard.on('keydown-F', () => {
       const cam = this.cameras.main;
-      const fitZoom = Math.min(this.scale.width / this.MAP_W, this.scale.height / this.MAP_H) * 0.98;
-      cam.zoom = Phaser.Math.Clamp(fitZoom, 0.35, 1.6);
+      this._recomputeMinZoom();
+      cam.zoom = this.minZoom;
       cam.centerOn(this.MAP_W / 2, this.MAP_H / 2);
     });
 
@@ -398,6 +400,12 @@ class MainScene extends Phaser.Scene {
         delete this.villageSprites[id];
       }
     }
+  }
+
+  // Calcule le zoom minimum pour que le viewport NE DÉPASSE JAMAIS la map.
+  // Garantit qu'on ne voit jamais de zone hors-map.
+  _recomputeMinZoom() {
+    this.minZoom = Math.max(this.scale.width / this.MAP_W, this.scale.height / this.MAP_H);
   }
 
   // ── Fog of war ────────────────────────────────────────────────────

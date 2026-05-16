@@ -89,16 +89,18 @@ const Minimap = (() => {
       ctx.fill();
     }
 
-    // Viewport caméra (rectangle blanc)
+    // Viewport caméra (rectangle blanc) — clampé aux bornes de la mini-carte
     if (phaserCamera) {
       const cam = phaserCamera;
-      const vx = cam.worldView.x * sx;
-      const vy = cam.worldView.y * sy;
-      const vw = cam.worldView.width  * sx;
-      const vh = cam.worldView.height * sy;
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(vx, vy, vw, vh);
+      const x1 = Math.max(0,    cam.worldView.x * sx);
+      const y1 = Math.max(0,    cam.worldView.y * sy);
+      const x2 = Math.min(SIZE, (cam.worldView.x + cam.worldView.width)  * sx);
+      const y2 = Math.min(SIZE, (cam.worldView.y + cam.worldView.height) * sy);
+      if (x2 > x1 && y2 > y1) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      }
     }
   }
 
