@@ -6,8 +6,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const MAP_WIDTH  = 2000;
-const MAP_HEIGHT = 2000;
+const MAP_WIDTH  = 3500;
+const MAP_HEIGHT = 3500;
 const MAX_PLAYERS = 4;
 const GOLD_PER_SECOND = 1;
 const UNIT_RADIUS = 15;
@@ -18,15 +18,15 @@ const HDV_HALF_SIZE      = 40;
 const LOOK_AHEAD         = 60;
 const AVOID_BUFFER       = 25;
 const AVOID_STRENGTH     = 1.8;
-const SPAWN_MARGIN       = 250;   // distance min HDV ↔ bord
-const MIN_SPAWN_DIST     = 700;   // distance min HDV ↔ HDV
+const SPAWN_MARGIN       = 400;   // distance min HDV ↔ bord
+const MIN_SPAWN_DIST     = 1200;  // distance min HDV ↔ HDV
 const SPAWN_MAX_ATTEMPTS = 500;
 
 // Fog of war — grille de tuiles pour calculer la visibilité
-const TILE_SIZE   = 40;
-const GRID_W      = MAP_WIDTH  / TILE_SIZE;   // 50
-const GRID_H      = MAP_HEIGHT / TILE_SIZE;   // 50
-const VISION_UNIT = 180;
+const TILE_SIZE   = 50;
+const GRID_W      = MAP_WIDTH  / TILE_SIZE;   // 70
+const GRID_H      = MAP_HEIGHT / TILE_SIZE;   // 70
+const VISION_UNIT = 220;
 
 // ────────── Tech tree, types d'unités, niveaux HDV ──────────
 
@@ -48,14 +48,57 @@ const TECH_TREE = {
 
 // hdvLevel 1 = état de départ
 const HDV_LEVELS = [
-  { level: 1, maxHp: 1000, vision: 280, upgradeCost:  100 },
-  { level: 2, maxHp: 1200, vision: 320, upgradeCost:  250 },
-  { level: 3, maxHp: 1400, vision: 360, upgradeCost:  500 },
-  { level: 4, maxHp: 1600, vision: 400, upgradeCost: 1000 },
-  { level: 5, maxHp: 1800, vision: 440, upgradeCost: null }, // max
+  { level: 1, maxHp: 1000, vision: 340, upgradeCost:  100 },
+  { level: 2, maxHp: 1200, vision: 380, upgradeCost:  250 },
+  { level: 3, maxHp: 1400, vision: 420, upgradeCost:  500 },
+  { level: 4, maxHp: 1600, vision: 460, upgradeCost: 1000 },
+  { level: 5, maxHp: 1800, vision: 500, upgradeCost: null }, // max
 ];
 
 const MAX_HDV_LEVEL = HDV_LEVELS.length;
+
+// ────────── Villages neutres ──────────
+const VILLAGE_RADIUS         = 70;             // rayon de capture
+const VILLAGE_CAPTURE_TICKS  = 10 * TICK_RATE; // 10 s à 20 Hz = 200 ticks
+const VILLAGE_MIN_DIST_HDV   = 700;            // distance min HDV ↔ village
+const VILLAGE_MIN_DIST_OTHER = 600;            // distance min village ↔ village
+const VILLAGE_COUNT_MIN      = 6;
+const VILLAGE_COUNT_MAX      = 10;
+
+const VILLAGE_TYPES = {
+  goldmine:    { id: 'goldmine',    name: "Mine d'or",      icon: '💰', desc: '+0.5 gold/sec passif',     effect: { goldBonus: 0.5 } },
+  watchtower:  { id: 'watchtower',  name: 'Tour de guet',   icon: '🔭', desc: 'Vision permanente autour', effect: { visionAura: 220 } },
+  shrine:      { id: 'shrine',      name: 'Sanctuaire',     icon: '✨', desc: '+1 pt tech toutes les 60s', effect: { techTickEvery: 60 } },
+  forge:       { id: 'forge',       name: 'Forge',          icon: '🗡', desc: 'Unités spawn avec +5 HP',   effect: { unitHpBonus: 5 } },
+};
+
+function generateVillages(spawns) {
+  const types = Object.keys(VILLAGE_TYPES);
+  const count = VILLAGE_COUNT_MIN + Math.floor(Math.random() * (VILLAGE_COUNT_MAX - VILLAGE_COUNT_MIN + 1));
+  const villages = [];
+  let attempts = 0;
+  while (villages.length < count && attempts < 800) {
+    attempts++;
+    const x = 200 + Math.random() * (MAP_WIDTH  - 400);
+    const y = 200 + Math.random() * (MAP_HEIGHT - 400);
+    // Pas trop près d'un HDV
+    if (spawns.some(s => Math.hypot(s.x - x, s.y - y) < VILLAGE_MIN_DIST_HDV)) continue;
+    // Pas trop près d'un autre village
+    if (villages.some(v => Math.hypot(v.x - x, v.y - y) < VILLAGE_MIN_DIST_OTHER)) continue;
+    const typeId = types[Math.floor(Math.random() * types.length)];
+    villages.push({
+      id: `v_${villages.length + 1}`,
+      x: Math.round(x), y: Math.round(y),
+      type: typeId,
+      ownerId: null,
+      captureProgress: 0,        // 0 → VILLAGE_CAPTURE_TICKS
+      capturingPlayerId: null,   // joueur qui capture en ce moment
+      techTickCounter: 0,        // pour shrines (compte les sec depuis dernière distribution)
+    });
+  }
+  console.log(`Villages générés: ${villages.length} (${count} demandés)`);
+  return villages;
+}
 
 // Recalcule maxHp et vision du HDV en fonction du niveau + techs recherchées
 function recomputeHdvStats(player) {
@@ -78,7 +121,148 @@ function computeGoldRate(player) {
     const eff = TECH_TREE[techId] && TECH_TREE[techId].effect;
     if (eff && eff.goldBonus) rate += eff.goldBonus;
   }
+  // Bonus villages possédés
+  for (const v of gameState.villages) {
+    if (v.ownerId !== player.id) continue;
+    const eff = VILLAGE_TYPES[v.type] && VILLAGE_TYPES[v.type].effect;
+    if (eff && eff.goldBonus) rate += eff.goldBonus;
+  }
   return rate;
+}
+
+function unitHpBonusFromVillages(player) {
+  let bonus = 0;
+  for (const v of gameState.villages) {
+    if (v.ownerId !== player.id) continue;
+    const eff = VILLAGE_TYPES[v.type] && VILLAGE_TYPES[v.type].effect;
+    if (eff && eff.unitHpBonus) bonus += eff.unitHpBonus;
+  }
+  return bonus;
+}
+
+// ────────── Bot IA ──────────
+let nextBotId = 1;
+const BOT_NAMES = ['Atlas', 'Hermès', 'Apollon', 'Arès', 'Hadès', 'Zeus'];
+
+function addBot() {
+  const slot = getAvailableSlot();
+  if (slot === -1) return null;
+  const spawn = currentSpawns[slot];
+  const botId = `bot_${nextBotId++}`;
+  const botPlayer = {
+    id: botId,
+    slot,
+    isBot: true,
+    x: spawn.x, y: spawn.y,
+    color: COLORS[slot],
+    name: `🤖 ${BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)]}`,
+    gold: 0, hp: HDV_LEVELS[0].maxHp, maxHp: HDV_LEVELS[0].maxHp,
+    eliminated: false, eliminatedAt: null,
+    kills: 0, unitsCreated: 0, totalGoldEarned: 0, joinTime: Date.now(),
+    hdvLevel: 1, techPoints: 0, researchedTechs: [],
+    vision: HDV_LEVELS[0].vision,
+    botCooldown: 0, // tickCount + N → prochaine décision
+  };
+  gameState.players[botId] = botPlayer;
+  initVisibility(botId);
+  peakPlayerCount = Math.max(peakPlayerCount, Object.keys(gameState.players).length);
+  console.log(`Bot "${botPlayer.name}" added — slot ${slot}`);
+  checkMatchState();
+  return botPlayer;
+}
+
+// Logique IA simple :
+//  - Spawn une unité dès qu'il a assez de gold (préfère Knight > Archer > Soldier)
+//  - Recherche les techs dès qu'il a 1 pt
+//  - Upgrade HDV dès qu'il peut se le payer
+//  - Envoie ses unités idle vers le HDV ennemi le plus proche
+function botTick(bot) {
+  if (bot.eliminated) return;
+
+  // Recherche tech (priorité : forging > cavalry > economy > fortification)
+  if ((bot.techPoints || 0) > 0) {
+    const priority = ['forging', 'cavalry', 'economy', 'fortification'];
+    for (const tid of priority) {
+      if (!bot.researchedTechs.includes(tid)) {
+        bot.techPoints--;
+        bot.researchedTechs.push(tid);
+        const eff = TECH_TREE[tid].effect || {};
+        if (eff.hdvHpBonus) { recomputeHdvStats(bot); bot.hp = Math.min(bot.maxHp, bot.hp + eff.hdvHpBonus); }
+        if (eff.visionBonus) recomputeHdvStats(bot);
+        console.log(`[Bot ${bot.name}] researched ${tid}`);
+        break;
+      }
+    }
+  }
+
+  // Upgrade HDV
+  if (bot.hdvLevel < MAX_HDV_LEVEL) {
+    const cost = HDV_LEVELS[bot.hdvLevel - 1].upgradeCost;
+    if (bot.gold >= cost + 50) { // garder un peu de gold pour spawner
+      bot.gold -= cost;
+      bot.hdvLevel++;
+      bot.techPoints++;
+      recomputeHdvStats(bot);
+      bot.hp = bot.maxHp;
+      console.log(`[Bot ${bot.name}] → HDV lv ${bot.hdvLevel}`);
+    }
+  }
+
+  // Spawn unit — préfère le meilleur dispo
+  const preferOrder = ['knight', 'archer', 'soldier'];
+  for (const typeId of preferOrder) {
+    const def = UNIT_TYPES[typeId];
+    if (!unitTypeUnlocked(bot, typeId)) continue;
+    if (bot.gold < def.cost) continue;
+    bot.gold -= def.cost;
+    bot.unitsCreated++;
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = 60 + Math.random() * 40;
+    const unitId = `unit_${nextUnitId++}`;
+    const hpBonus = unitHpBonusFromVillages(bot);
+    gameState.units[unitId] = {
+      id: unitId, ownerId: bot.id,
+      x: Math.round(bot.x + Math.cos(angle) * dist),
+      y: Math.round(bot.y + Math.sin(angle) * dist),
+      type: typeId,
+      hp: def.hp + hpBonus, maxHp: def.hp + hpBonus,
+      speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
+      targetX: null, targetY: null,
+      attackTargetId: null, attackTargetType: null,
+      lastAttackTime: 0,
+    };
+    break; // une unité par tick d'IA
+  }
+
+  // Envoie les unités idle vers HDV ennemi le plus proche
+  // (ou village neutre proche si pas d'ennemi en vue)
+  const myUnits = Object.values(gameState.units).filter(u => u.ownerId === bot.id && u.targetX === null && u.attackTargetId === null);
+  if (myUnits.length === 0) return;
+
+  // Cible : HDV ennemi le plus proche du centre de mes unités
+  let bestTargetX = null, bestTargetY = null, bestDistSq = Infinity;
+  for (const p of Object.values(gameState.players)) {
+    if (p.id === bot.id || p.eliminated || p.hp <= 0) continue;
+    const dSq = (p.x - bot.x) ** 2 + (p.y - bot.y) ** 2;
+    if (dSq < bestDistSq) { bestDistSq = dSq; bestTargetX = p.x; bestTargetY = p.y; }
+  }
+  // Si rien, prendre un village neutre proche
+  if (bestTargetX === null) {
+    for (const v of gameState.villages) {
+      if (v.ownerId === bot.id) continue;
+      const dSq = (v.x - bot.x) ** 2 + (v.y - bot.y) ** 2;
+      if (dSq < bestDistSq) { bestDistSq = dSq; bestTargetX = v.x; bestTargetY = v.y; }
+    }
+  }
+  if (bestTargetX === null) return;
+
+  // 70% des idle vont attaquer, 30% restent en défense
+  const sendCount = Math.max(1, Math.floor(myUnits.length * 0.7));
+  for (let i = 0; i < sendCount && i < myUnits.length; i++) {
+    const u = myUnits[i];
+    u.targetX = bestTargetX + (Math.random() - 0.5) * 100;
+    u.targetY = bestTargetY + (Math.random() - 0.5) * 100;
+  }
 }
 
 function unitTypeUnlocked(player, typeId) {
@@ -89,10 +273,10 @@ function unitTypeUnlocked(player, typeId) {
 }
 
 const FALLBACK_SPAWNS = [
-  { x: 200,  y: 200  },
-  { x: 1800, y: 200  },
-  { x: 200,  y: 1800 },
-  { x: 1800, y: 1800 },
+  { x: 400,  y: 400  },
+  { x: 3100, y: 400  },
+  { x: 400,  y: 3100 },
+  { x: 3100, y: 3100 },
 ];
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f'];
@@ -118,6 +302,7 @@ function generateSpawns() {
 }
 
 let currentSpawns = generateSpawns();
+let initialVillages = generateVillages(currentSpawns);
 
 // playerId → { explored: Uint8Array, visible: Uint8Array }
 const playerVisibility = {};
@@ -165,6 +350,12 @@ function computeVisibility(player) {
     for (const unit of Object.values(gameState.units)) {
       if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, VISION_UNIT);
     }
+    // Villages possédés donnant une aura de vision (Tour de guet)
+    for (const v of gameState.villages) {
+      if (v.ownerId !== player.id) continue;
+      const eff = VILLAGE_TYPES[v.type] && VILLAGE_TYPES[v.type].effect;
+      if (eff && eff.visionAura) markCircle(vis.visible, v.x, v.y, eff.visionAura);
+    }
   }
   // OR dans explored
   const ex = vis.explored, vi = vis.visible;
@@ -196,9 +387,19 @@ function buildFilteredState(viewerId) {
     if (vis.visible[idx]) filteredUnits[uid] = u;
   }
 
+  // Villages — visibles si tuile actuellement visible OU explorée
+  // (HDV-like : une fois découverts, on garde la mémoire de leur position)
+  const filteredVillages = [];
+  for (const v of gameState.villages) {
+    if (seeAll) { filteredVillages.push(v); continue; }
+    const idx = Math.floor(v.y / TILE_SIZE) * GRID_W + Math.floor(v.x / TILE_SIZE);
+    if (vis.visible[idx] || vis.explored[idx]) filteredVillages.push(v);
+  }
+
   return {
     players: filteredPlayers,
     units: filteredUnits,
+    villages: filteredVillages,
     matchState: gameState.matchState,
     winnerId: gameState.winnerId,
     matchStartTime: gameState.matchStartTime,
@@ -226,6 +427,7 @@ function broadcastFilteredState() {
 const gameState = {
   players: {},
   units: {},
+  villages: initialVillages,
   matchState: 'waiting',
   winnerId: null,
   matchStartTime: null,
@@ -360,6 +562,7 @@ function eliminatePlayer(player, toDelete) {
 
 function resetMatch() {
   currentSpawns = generateSpawns();
+  gameState.villages = generateVillages(currentSpawns);
   resetVisibilityAll();
   for (const p of Object.values(gameState.players)) {
     p.hdvLevel        = 1;
@@ -397,6 +600,7 @@ io.on('connection', (socket) => {
     peakPlayerCount          = 0;
     for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
     currentSpawns = generateSpawns();
+    gameState.villages = generateVillages(currentSpawns);
     console.log('Recovered zombie ended state on new connection');
   }
 
@@ -457,6 +661,9 @@ io.on('connection', (socket) => {
     unitTypes: UNIT_TYPES,
     techTree: TECH_TREE,
     hdvLevels: HDV_LEVELS,
+    villageTypes: VILLAGE_TYPES,
+    villageRadius: VILLAGE_RADIUS,
+    villageCaptureTicks: VILLAGE_CAPTURE_TICKS,
   });
   broadcastFilteredState();
 
@@ -481,14 +688,15 @@ io.on('connection', (socket) => {
     const dist   = 60 + Math.random() * 40;
     const unitId = `unit_${nextUnitId++}`;
 
+    const hpBonus = unitHpBonusFromVillages(p);
     gameState.units[unitId] = {
       id: unitId,
       ownerId: socket.id,
       x: Math.round(p.x + Math.cos(angle) * dist),
       y: Math.round(p.y + Math.sin(angle) * dist),
       type: typeId,
-      hp: def.hp,
-      maxHp: def.hp,
+      hp: def.hp + hpBonus,
+      maxHp: def.hp + hpBonus,
       speed: def.speed,
       range: def.range,
       damage: def.damage,
@@ -581,6 +789,12 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('addBot', () => {
+    if (Object.keys(gameState.players).length >= MAX_PLAYERS) return;
+    addBot();
+    broadcastFilteredState();
+  });
+
   socket.on('requestRestart', () => {
     if (gameState.matchState !== 'ended') return;
     resetMatch();
@@ -600,14 +814,24 @@ io.on('connection', (socket) => {
     delete playerVisibility[socket.id];
     console.log(`Player ${socket.id.slice(0,6)} disconnected`);
 
-    if (Object.keys(gameState.players).length === 0) {
+    // Plus aucun humain : on vire aussi les bots et on reset
+    const humansLeft = Object.values(gameState.players).filter(p => !p.isBot).length;
+    if (humansLeft === 0) {
+      // Supprime les bots et leurs unités
+      for (const pid of Object.keys(gameState.players)) {
+        if (gameState.players[pid].isBot) {
+          delete gameState.players[pid];
+          delete playerVisibility[pid];
+        }
+      }
+      for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
       gameState.matchState     = 'waiting';
       gameState.winnerId       = null;
       gameState.matchStartTime = null;
       peakPlayerCount          = 0;
-      for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
       currentSpawns = generateSpawns();
-      console.log('Server empty, full reset');
+      gameState.villages = generateVillages(currentSpawns);
+      console.log('No humans left, full reset (bots removed)');
     } else if (wasAlive) {
       checkMatchState();
     }
@@ -783,6 +1007,48 @@ setInterval(() => {
     delete gameState.units[id];
   }
 
+  // 3.5. Villages — capture progressive (10 s) si une seule team présente
+  for (const v of gameState.villages) {
+    const r2 = VILLAGE_RADIUS * VILLAGE_RADIUS;
+    const ownersInside = new Set();
+    for (const unit of Object.values(gameState.units)) {
+      const dx = unit.x - v.x, dy = unit.y - v.y;
+      if (dx * dx + dy * dy <= r2) ownersInside.add(unit.ownerId);
+    }
+    if (ownersInside.size === 1) {
+      const claimer = [...ownersInside][0];
+      const player  = gameState.players[claimer];
+      if (!player || player.eliminated) continue;
+      if (v.ownerId === claimer) continue; // déjà à eux
+      // Si capturé par quelqu'un d'autre : on revient à 0 d'abord, puis on monte
+      if (v.capturingPlayerId !== claimer) {
+        if (v.captureProgress > 0) {
+          v.captureProgress = Math.max(0, v.captureProgress - 2); // reset rapide
+          if (v.captureProgress === 0) v.capturingPlayerId = claimer;
+        } else {
+          v.capturingPlayerId = claimer;
+        }
+      } else {
+        v.captureProgress++;
+        if (v.captureProgress >= VILLAGE_CAPTURE_TICKS) {
+          v.ownerId = claimer;
+          v.captureProgress = 0;
+          v.capturingPlayerId = null;
+          v.techTickCounter = 0;
+          io.emit('villageCaptured', { villageId: v.id, ownerId: claimer, ownerName: player.name, ownerColor: player.color, type: v.type });
+          console.log(`Village ${v.id} (${v.type}) capturé par ${player.name}`);
+        }
+      }
+    } else if (ownersInside.size === 0) {
+      // Personne ne capture : la progression décroît lentement
+      if (v.captureProgress > 0) {
+        v.captureProgress = Math.max(0, v.captureProgress - 1);
+        if (v.captureProgress === 0) v.capturingPlayerId = null;
+      }
+    }
+    // ownersInside.size > 1 : contesté, pas de progression
+  }
+
   // 4. Gold once per second (alive players only) — taux modulé par les techs
   if (tickCount % TICK_RATE === 0) {
     for (const p of Object.values(gameState.players)) {
@@ -791,6 +1057,25 @@ setInterval(() => {
         p.gold += rate;
         p.totalGoldEarned += rate;
       }
+    }
+    // Shrines : tick toutes les 60s → +1 pt tech à l'owner
+    for (const v of gameState.villages) {
+      if (!v.ownerId) continue;
+      const eff = VILLAGE_TYPES[v.type] && VILLAGE_TYPES[v.type].effect;
+      if (!eff || !eff.techTickEvery) continue;
+      v.techTickCounter = (v.techTickCounter || 0) + 1;
+      if (v.techTickCounter >= eff.techTickEvery) {
+        v.techTickCounter = 0;
+        const owner = gameState.players[v.ownerId];
+        if (owner && !owner.eliminated) owner.techPoints = (owner.techPoints || 0) + 1;
+      }
+    }
+  }
+
+  // 4.5. Bot IA — décide toutes les ~1.5s (30 ticks)
+  if (tickCount % 30 === 0) {
+    for (const p of Object.values(gameState.players)) {
+      if (p.isBot) botTick(p);
     }
   }
 
