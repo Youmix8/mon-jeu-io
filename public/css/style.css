@@ -436,3 +436,18 @@ hr {
 }
 .tech-card.researched .tech-card-status { color: #2ecc71; }
 .tech-card.locked .tech-card-status { color: #e67e22; }
+
+/* ── HDV Panel : feedback clic ── */
+.unit-card, .tech-card { position: relative; }
+
+@keyframes clickFlash {
+  0%   { box-shadow: 0 0 0 2px rgba(241,196,15,0.9) inset; }
+  100% { box-shadow: 0 0 0 2px rgba(241,196,15,0) inset; }
+}
+.click-flash { animation: clickFlash 0.4s ease-out; }
+
+@keyframes errorFlash {
+  0%, 100% { background: rgba(231,76,60,0.45); }
+  50%      { background: rgba(231,76,60,0.15); }
+}
+.error-flash { animation: errorFlash 0.45s ease-out 2; }
