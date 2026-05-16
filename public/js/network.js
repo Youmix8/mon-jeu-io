@@ -85,7 +85,8 @@ const Network = (() => {
     });
 
     socket.on('spawnFailed', ({ reason }) => {
-      if (onSpawnFailedCallback) onSpawnFailedCallback(reason);
+      if (onSpawnFailedCallback) onSpawnFailedCallback(reason, lastSpawnAttempt);
+      if (typeof HdvPanel !== 'undefined') HdvPanel.onSpawnFailed(reason, lastSpawnAttempt);
     });
 
     socket.on('serverFull', () => {
@@ -171,8 +172,10 @@ const Network = (() => {
     overlay.style.display = 'flex';
   }
 
+  let lastSpawnAttempt = 'soldier';
   function spawnUnit(unitType) {
-    if (socket) socket.emit('spawnUnit', { unitType: unitType || 'soldier' });
+    lastSpawnAttempt = unitType || 'soldier';
+    if (socket) socket.emit('spawnUnit', { unitType: lastSpawnAttempt });
   }
   function moveUnits(unitIds, targetX, targetY) {
     if (socket) socket.emit('moveUnits', { unitIds, targetX, targetY });
