@@ -33,10 +33,14 @@ class MainScene extends Phaser.Scene {
     this.MAP_W = MAP_W;
     this.MAP_H = MAP_H;
 
-    // Fond + bordure subtile pour matérialiser les limites de la map
+    // "Océan" hors-map : grand rectangle bleu nuit qui dépasse largement de la map.
+    // Empêche d'avoir une zone "vide" disgracieuse si on scrolle ou zoome out.
+    this.add.rectangle(MAP_W / 2, MAP_H / 2, MAP_W * 5, MAP_H * 5, 0x1f2a4a);
+
+    // Map : pelouse vert clair
     this.add.rectangle(MAP_W / 2, MAP_H / 2, MAP_W, MAP_H, 0xa8e6a3);
     const border = this.add.graphics();
-    border.lineStyle(6, 0x6b8a5e, 0.8);
+    border.lineStyle(6, 0x6b8a5e, 0.9);
     border.strokeRect(0, 0, MAP_W, MAP_H);
 
     const grid = this.add.graphics();
@@ -45,11 +49,12 @@ class MainScene extends Phaser.Scene {
     for (let y = 0; y <= MAP_H; y += 100) { grid.moveTo(0, y); grid.lineTo(MAP_W, y); }
     grid.strokePath();
 
-    // Caméra : padding égal de 400px autour pour pouvoir scroller symétriquement
-    // au-delà de la map (sinon on bute sur les coins selon le spawn).
-    const PAD = 400;
-    this.cameras.main.setBounds(-PAD, -PAD, MAP_W + 2 * PAD, MAP_H + 2 * PAD);
-    this.cameras.main.setZoom(0.7);
+    // Caméra : bornes exactes sur la map (pas de padding). Combiné au scroll
+    // libre, ça empêche de partir loin dans l'océan.
+    this.cameras.main.setBounds(0, 0, MAP_W, MAP_H);
+    // Zoom de départ : adapte selon la taille de l'écran pour voir un large pan.
+    const fitZoom = Math.min(window.innerWidth / MAP_W, window.innerHeight / MAP_H) * 1.1;
+    this.cameras.main.setZoom(Phaser.Math.Clamp(fitZoom, 0.35, 0.8));
 
     this.cursors = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys({
@@ -101,6 +106,14 @@ class MainScene extends Phaser.Scene {
         cam.scrollY += e.deltaY / cam.zoom;
       }
     }, { passive: false });
+
+    // ── F — vue d'ensemble (fit map) ──────────────────────────────
+    this.input.keyboard.on('keydown-F', () => {
+      const cam = this.cameras.main;
+      const fitZoom = Math.min(this.scale.width / this.MAP_W, this.scale.height / this.MAP_H) * 0.98;
+      cam.zoom = Phaser.Math.Clamp(fitZoom, 0.35, 1.6);
+      cam.centerOn(this.MAP_W / 2, this.MAP_H / 2);
+    });
 
     // ── Ctrl+A — select all own units ────────────────────────────
     this.input.keyboard.on('keydown-A', (event) => {
