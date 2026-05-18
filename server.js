@@ -230,14 +230,16 @@ function botTick(bot) {
       targetX: null, targetY: null,
       attackTargetId: null, attackTargetType: null,
       lastAttackTime: 0,
+      mode: 'defend', defendX: bot.x, defendY: bot.y, defendRadius: 320,
     };
     break; // une unité par tick d'IA
   }
 
-  // Envoie les unités idle vers HDV ennemi le plus proche
-  // (ou village neutre proche si pas d'ennemi en vue)
-  const myUnits = Object.values(gameState.units).filter(u => u.ownerId === bot.id && u.targetX === null && u.attackTargetId === null);
-  if (myUnits.length === 0) return;
+  // Envoie une partie des unités du bot en attaque (mode 'move' vers HDV/village)
+  const myUnits = Object.values(gameState.units).filter(u =>
+    u.ownerId === bot.id && u.mode === 'defend' && u.attackTargetId === null
+  );
+  if (myUnits.length < 3) return; // attend d'avoir au moins 3 défenseurs avant d'attaquer
 
   // Cible : HDV ennemi le plus proche du centre de mes unités
   let bestTargetX = null, bestTargetY = null, bestDistSq = Infinity;
@@ -256,12 +258,13 @@ function botTick(bot) {
   }
   if (bestTargetX === null) return;
 
-  // 70% des idle vont attaquer, 30% restent en défense
-  const sendCount = Math.max(1, Math.floor(myUnits.length * 0.7));
+  // 60% des défenseurs partent en attaque, 40% restent en défense
+  const sendCount = Math.max(1, Math.floor(myUnits.length * 0.6));
   for (let i = 0; i < sendCount && i < myUnits.length; i++) {
     const u = myUnits[i];
     u.targetX = bestTargetX + (Math.random() - 0.5) * 100;
     u.targetY = bestTargetY + (Math.random() - 0.5) * 100;
+    u.mode = 'move';
   }
 }
 
@@ -706,7 +709,31 @@ io.on('connection', (socket) => {
       attackTargetId:   null,
       attackTargetType: null,
       lastAttackTime: 0,
+      // IA : par défaut, le pion défend son HDV avec un rayon de 320px.
+      // Il y retourne après chaque combat et engage tout ennemi qui entre dans la zone.
+      mode: 'defend',
+      defendX: p.x,
+      defendY: p.y,
+      defendRadius: 320,
     };
+  });
+
+  socket.on('defendArea', ({ unitIds, x, y, radius }) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    if (!Array.isArray(unitIds)) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const cx = Math.max(0, Math.min(MAP_WIDTH,  x));
+    const cy = Math.max(0, Math.min(MAP_HEIGHT, y));
+    const r  = Math.max(100, Math.min(600, radius || 280));
+    const valid = unitIds.filter(id => gameState.units[id] && gameState.units[id].ownerId === socket.id);
+    for (const id of valid) {
+      const u = gameState.units[id];
+      u.mode = 'defend';
+      u.defendX = cx; u.defendY = cy; u.defendRadius = r;
+      u.targetX = null; u.targetY = null;
+      u.attackTargetId = null; u.attackTargetType = null;
+    }
   });
 
   socket.on('upgradeHdv', () => {
@@ -768,6 +795,7 @@ io.on('connection', (socket) => {
       unit.targetY = cy;
       unit.attackTargetId   = null;
       unit.attackTargetType = null;
+      unit.mode = 'move';
     }
   });
 
@@ -786,6 +814,7 @@ io.on('connection', (socket) => {
       unit.attackTargetType = targetType;
       unit.targetX = null;
       unit.targetY = null;
+      unit.mode = 'attack';
     }
   });
 
@@ -840,9 +869,66 @@ io.on('connection', (socket) => {
   });
 });
 
-// Game loop — order: move → collisions → combat → gold → broadcast
+// Game loop — order: behavior → move → collisions → combat → gold → broadcast
 setInterval(() => {
   tickCount++;
+
+  // 0. Behavior IA — auto-cible selon le mode (defend / move opportuniste)
+  for (const unit of Object.values(gameState.units)) {
+    if (unit.attackTargetId !== null) continue; // déjà engagé
+
+    if (unit.mode === 'defend') {
+      const radius = unit.defendRadius || 320;
+      const cx = unit.defendX, cy = unit.defendY;
+      let best = null, bestScore = Infinity, bestType = null;
+      // Cible prioritaire : la plus faible en HP dans le rayon (focus kill)
+      // Score = hp + 0.5 * distance (ratio simple)
+      for (const other of Object.values(gameState.units)) {
+        if (other.ownerId === unit.ownerId) continue;
+        const d = Math.hypot(other.x - cx, other.y - cy);
+        if (d > radius) continue;
+        const score = other.hp + d * 0.3;
+        if (score < bestScore) { best = other; bestScore = score; bestType = 'unit'; }
+      }
+      for (const player of Object.values(gameState.players)) {
+        if (player.id === unit.ownerId || player.hp <= 0 || player.eliminated) continue;
+        const d = Math.hypot(player.x - cx, player.y - cy);
+        if (d > radius + HDV_HALF_SIZE) continue;
+        // HDVs : moins prioritaires (gros HP) mais reste cible si rien d'autre
+        const score = player.hp * 0.05 + d * 0.3 + 200; // pénalité pour préférer les unités
+        if (score < bestScore) { best = player; bestScore = score; bestType = 'hdv'; }
+      }
+      if (best) {
+        unit.attackTargetId = best.id;
+        unit.attackTargetType = bestType;
+      } else {
+        // Pas d'ennemi en vue : retourne au point de défense si trop loin
+        const dToCenter = Math.hypot(cx - unit.x, cy - unit.y);
+        if (dToCenter > 40) {
+          unit.targetX = cx;
+          unit.targetY = cy;
+        } else {
+          unit.targetX = null;
+          unit.targetY = null;
+        }
+      }
+    } else if (unit.mode === 'move') {
+      // Engagement opportuniste : si un ennemi entre à portée+40 sur le chemin → attaque
+      const scanR = (unit.range || 80) + 40;
+      let nearest = null, nearestDist = scanR;
+      for (const other of Object.values(gameState.units)) {
+        if (other.ownerId === unit.ownerId) continue;
+        const d = Math.hypot(other.x - unit.x, other.y - unit.y);
+        if (d < nearestDist) { nearest = other; nearestDist = d; }
+      }
+      if (nearest) {
+        unit.attackTargetId = nearest.id;
+        unit.attackTargetType = 'unit';
+        // On garde targetX/targetY : après le kill, la cible est null et le pion reprend sa route
+      }
+    }
+    // mode === 'attack' ou non défini : aucune auto-cible (comportement existant)
+  }
 
   // 1. Move (ATTACK_MOVE / MOVE / IDLE) — stats par unité
   for (const unit of Object.values(gameState.units)) {
