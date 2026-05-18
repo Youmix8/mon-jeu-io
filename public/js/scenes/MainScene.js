@@ -324,31 +324,33 @@ class MainScene extends Phaser.Scene {
     const RAD = cfg.villageRadius || 70;
     const seen = new Set();
 
+    const VILLAGE_DISPLAY = 90; // taille à l'écran (la texture fait 80)
     for (const v of villages) {
       seen.add(v.id);
       const typeDef = cfg.villageTypes && cfg.villageTypes[v.type];
-      const icon = typeDef ? typeDef.icon : '🏘';
       const owner = v.ownerId ? players[v.ownerId] : null;
-      const ownerColorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0x888888;
+      const ownerColorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0xffffff;
+      const texKey = 'village-' + v.type;
 
       let sprite = this.villageSprites[v.id];
       if (!sprite) {
-        // Cercle de base (neutre gris) + icône emoji + label type + barre de capture
-        const base = this.add.circle(v.x, v.y, RAD * 0.55, 0x444444, 0.55);
-        base.setStrokeStyle(3, 0x888888, 0.9);
-        const iconText = this.add.text(v.x, v.y, icon, { fontSize: '30px' }).setOrigin(0.5, 0.5);
-        const label    = this.add.text(v.x, v.y + RAD * 0.7, (typeDef ? typeDef.name : v.type), {
-          fontSize: '11px', fontFamily: 'sans-serif', color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+        // Cercle d'ownership en arrière-plan (transparent si neutre)
+        const ownerRing = this.add.circle(v.x, v.y, RAD, 0x000000, 0).setStrokeStyle(4, ownerColorInt, owner ? 0.9 : 0);
+        // Sprite détaillé du village
+        const main = this.add.sprite(v.x, v.y, texKey).setDisplaySize(VILLAGE_DISPLAY, VILLAGE_DISPLAY);
+        // Label nom (sous l'icône)
+        const label = this.add.text(v.x, v.y + RAD * 0.7, (typeDef ? typeDef.name : v.type), {
+          fontSize: '12px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3,
         }).setOrigin(0.5, 0);
-        const barBg    = this.add.rectangle(v.x, v.y - RAD * 0.6, 70, 6, 0x111111, 0.85).setOrigin(0.5, 0.5);
-        const barFill  = this.add.rectangle(v.x - 35, v.y - RAD * 0.6, 0, 6, 0xf1c40f).setOrigin(0, 0.5);
-        sprite = { base, iconText, label, barBg, barFill };
+        // Barre de capture (au-dessus)
+        const barBg    = this.add.rectangle(v.x, v.y - RAD * 0.85, 80, 8, 0x111111, 0.9).setStrokeStyle(1, 0x000000, 0.6).setOrigin(0.5, 0.5);
+        const barFill  = this.add.rectangle(v.x - 40, v.y - RAD * 0.85, 0, 8, 0xfbbf24).setOrigin(0, 0.5);
+        sprite = { ownerRing, main, label, barBg, barFill };
         this.villageSprites[v.id] = sprite;
       }
 
-      // Couleur de bordure : owner color si capturé, sinon gris
-      sprite.base.setStrokeStyle(3, owner ? ownerColorInt : 0x888888, 0.95);
-      sprite.base.setFillStyle(owner ? ownerColorInt : 0x444444, owner ? 0.25 : 0.55);
+      // Anneau owner : on/off selon ownership
+      sprite.ownerRing.setStrokeStyle(4, ownerColorInt, owner ? 0.9 : 0);
 
       // Barre de capture si en cours
       const showBar = v.captureProgress > 0;
@@ -356,9 +358,9 @@ class MainScene extends Phaser.Scene {
       sprite.barBg.setVisible(showBar);
       sprite.barFill.setVisible(showBar);
       if (showBar) {
-        sprite.barFill.width = 70 * ratio;
+        sprite.barFill.width = 80 * ratio;
         const capturer = v.capturingPlayerId ? players[v.capturingPlayerId] : null;
-        sprite.barFill.setFillStyle(capturer ? Phaser.Display.Color.HexStringToColor(capturer.color).color : 0xf1c40f);
+        sprite.barFill.setFillStyle(capturer ? Phaser.Display.Color.HexStringToColor(capturer.color).color : 0xfbbf24);
       }
     }
 
@@ -386,17 +388,31 @@ class MainScene extends Phaser.Scene {
     this.MAP_W = info.mapWidth;
     this.MAP_H = info.mapHeight;
 
-    // Pelouse vert clair
-    this.add.rectangle(this.MAP_W / 2, this.MAP_H / 2, this.MAP_W, this.MAP_H, 0xa8e6a3);
+    // Pelouse — palette plus vibrante, avec des patches d'herbe plus sombres pour la texture
+    this.add.rectangle(this.MAP_W / 2, this.MAP_H / 2, this.MAP_W, this.MAP_H, 0x9fdc7c);
+    // Patches d'herbe : 80 cercles aléatoires plus sombres pour casser la monotonie
+    const patches = this.add.graphics();
+    patches.fillStyle(0x7ab560, 0.55);
+    for (let i = 0; i < 80; i++) {
+      const px = Math.random() * this.MAP_W;
+      const py = Math.random() * this.MAP_H;
+      const pr = 50 + Math.random() * 90;
+      patches.fillCircle(px, py, pr);
+    }
+    // Bordure de la map
     const border = this.add.graphics();
-    border.lineStyle(6, 0x6b8a5e, 0.9);
+    border.lineStyle(8, 0x4d6b3e, 0.95);
     border.strokeRect(0, 0, this.MAP_W, this.MAP_H);
 
+    // Grille subtile
     const grid = this.add.graphics();
-    grid.lineStyle(1, 0x88a07c, 0.22);
+    grid.lineStyle(1, 0x6b8a5e, 0.18);
     for (let x = 0; x <= this.MAP_W; x += 100) { grid.moveTo(x, 0); grid.lineTo(x, this.MAP_H); }
     for (let y = 0; y <= this.MAP_H; y += 100) { grid.moveTo(0, y); grid.lineTo(this.MAP_W, y); }
     grid.strokePath();
+
+    // Génère toutes les textures de sprites (HDV, unités, villages)
+    if (typeof SpriteFactory !== 'undefined') SpriteFactory.generateAll(this);
 
     // Caméra : bornes exactes à la map réelle
     this.cameras.main.setBounds(0, 0, this.MAP_W, this.MAP_H);
@@ -469,7 +485,13 @@ class MainScene extends Phaser.Scene {
   // ── HDVs ──────────────────────────────────────────────────────────
 
   _syncHDVs(players) {
-    const HDV_SIZE  = 80, BAR_W_HDV = 90, BAR_H_HDV = 8, BAR_Y_OFF = -HDV_SIZE / 2 - 18;
+    // Le sprite hdv-castle fait 120×130. Le centre logique du HDV (player.x,y)
+    // est au centre du corps de pierre, donc le sprite est décalé vers le HAUT
+    // (origine 0.5, ~0.65) pour que les pieds du château soient au sol.
+    const HDV_DISPLAY_W = 110;
+    const HDV_DISPLAY_H = 120;
+    const BAR_W_HDV = 100, BAR_H_HDV = 10;
+    const BAR_Y_OFF = -HDV_DISPLAY_H * 0.65 - 18; // au-dessus de la tour centrale
     const myId = Network.getMyId();
 
     for (const id of Object.keys(this.hdvSprites)) {
@@ -482,57 +504,57 @@ class MainScene extends Phaser.Scene {
       const destroyed = player.hp <= 0;
 
       if (!this.hdvSprites[id]) {
-        // Ombre portée sous le HDV
-        const shadow = this.add.ellipse(player.x, player.y + HDV_SIZE / 2 + 4, HDV_SIZE + 14, 14, 0x000000, 0.35);
-        // Tour principale
-        const rect = this.add.rectangle(player.x, player.y, HDV_SIZE, HDV_SIZE, destroyed ? 0x888888 : colorInt);
-        rect.setStrokeStyle(4, 0x111111, 0.85);
-        if (destroyed) rect.setAlpha(0.4);
-        // Bande sombre intérieure pour relief
-        const innerStripe = this.add.rectangle(player.x, player.y + HDV_SIZE / 4, HDV_SIZE - 12, 10, 0x000000, 0.18);
-        // Toit / créneaux : 4 petits carrés au sommet
-        const merlons = [];
-        const merlonY = player.y - HDV_SIZE / 2 - 5;
-        for (let mi = 0; mi < 4; mi++) {
-          const mx = player.x - HDV_SIZE / 2 + 10 + mi * 20;
-          merlons.push(this.add.rectangle(mx, merlonY, 12, 12, destroyed ? 0x888888 : colorInt).setStrokeStyle(2, 0x111111, 0.85));
-        }
+        // Le château : sprite avec tint faction. Origine au "sol" (0.5, 0.85)
+        // pour que la base du château s'aligne sur player.y.
+        const castle = this.add.sprite(player.x, player.y, 'hdv-castle')
+          .setOrigin(0.5, 0.85)
+          .setDisplaySize(HDV_DISPLAY_W, HDV_DISPLAY_H * (130 / 130));
+        castle.setTint(destroyed ? 0x888888 : colorInt);
+        if (destroyed) castle.setAlpha(0.45);
 
         if (id === myId) {
-          rect.setInteractive();
-          rect.on('pointerover', () => this.input.setDefaultCursor('pointer'));
-          rect.on('pointerout',  () => this.input.setDefaultCursor('default'));
-          rect.on('pointerdown', () => HdvPanel.toggle());
+          castle.setInteractive();
+          castle.on('pointerover', () => this.input.setDefaultCursor('pointer'));
+          castle.on('pointerout',  () => this.input.setDefaultCursor('default'));
+          castle.on('pointerdown', () => HdvPanel.toggle());
         }
 
-        const barBg    = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, 0x7f0000).setOrigin(0.5, 0.5);
-        const barFill  = this.add.rectangle(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF, BAR_W_HDV * hpRatio, BAR_H_HDV, 0x00cc44).setOrigin(0, 0.5);
+        const barBg    = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, 0x431407, 0.95).setStrokeStyle(1.5, 0x000000, 0.7).setOrigin(0.5, 0.5);
+        const barFill  = this.add.rectangle(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF, BAR_W_HDV * hpRatio, BAR_H_HDV, 0x22c55e).setOrigin(0, 0.5);
         const nameLabel = this.add.text(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 8, player.name,
-          { fontSize: '14px', fontFamily: 'sans-serif', fontStyle: 'bold', color: player.color, stroke: '#000000', strokeThickness: 4 }
+          { fontSize: '15px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: player.color, stroke: '#000000', strokeThickness: 4 }
         ).setOrigin(0.5, 1);
-        const hpLabel = this.add.text(player.x, player.y + HDV_SIZE / 2 + 12, `${player.hp}/${player.maxHp}`,
-          { fontSize: '12px', fontFamily: 'sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
+        const hpLabel = this.add.text(player.x, player.y + 8, `${player.hp}/${player.maxHp}`,
+          { fontSize: '12px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
         ).setOrigin(0.5, 0);
 
-        // [rect, barBg, barFill, nameLabel, hpLabel, shadow, innerStripe, ...merlons]
-        this.hdvSprites[id] = [rect, barBg, barFill, nameLabel, hpLabel, shadow, innerStripe, ...merlons];
+        // [castle, barBg, barFill, nameLabel, hpLabel] — ancre castle pour interactivité
+        this.hdvSprites[id] = [castle, barBg, barFill, nameLabel, hpLabel];
 
       } else {
-        const [rect, barBg, barFill, nameLabel, hpLabel] = this.hdvSprites[id];
+        const [castle, barBg, barFill, nameLabel, hpLabel] = this.hdvSprites[id];
 
-        if (destroyed) {
-          rect.setFillStyle(0x888888).setAlpha(0.4);
-        } else {
-          rect.setFillStyle(colorInt).setAlpha(1);
+        castle.setPosition(player.x, player.y);
+        castle.setTint(destroyed ? 0x888888 : colorInt);
+        castle.setAlpha(destroyed ? 0.45 : 1);
+
+        // Glow rouge subtil quand HP < 30%
+        if (!destroyed && hpRatio < 0.3) {
+          // pulse alpha doux entre 0.85 et 1.0
+          castle.setAlpha(0.9 + 0.1 * Math.sin(Date.now() / 200));
         }
 
         barBg.setPosition(player.x, player.y + BAR_Y_OFF);
         barFill.setPosition(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF);
         barFill.width = BAR_W_HDV * hpRatio;
+        // Couleur de la barre HP : verte → orange → rouge selon ratio
+        const barColor = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
+        barFill.setFillStyle(barColor);
+
         nameLabel.setPosition(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 8)
           .setText(player.eliminated ? '💀 ÉLIMINÉ' : player.name)
-          .setColor(player.eliminated ? '#e74c3c' : player.color);
-        hpLabel.setPosition(player.x, player.y + HDV_SIZE / 2 + 12).setText(`${player.hp}/${player.maxHp}`);
+          .setColor(player.eliminated ? '#ef4444' : player.color);
+        hpLabel.setPosition(player.x, player.y + 8).setText(`${player.hp}/${player.maxHp}`);
       }
     }
   }
@@ -562,41 +584,41 @@ class MainScene extends Phaser.Scene {
       this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp };
 
       if (!this.unitSprites[id]) {
-        const circle = this.add.circle(unit.x, unit.y, UNIT_RADIUS, colorInt);
-        // Différenciation visuelle par type d'unité
-        const stroke = unit.type === 'knight' ? 4 : 2;
-        circle.setStrokeStyle(stroke, 0x000000);
-        circle._unitId      = id;
-        circle._unitOwnerId = unit.ownerId;
+        // Sprite selon le type ; tinté par la couleur de la faction
+        const texKey = unit.type === 'archer' ? 'unit-archer'
+                    : unit.type === 'knight' ? 'unit-knight'
+                    : 'unit-soldier';
+        const sprite = this.add.sprite(unit.x, unit.y, texKey).setTint(colorInt);
+        // Hit area circulaire élargie (25px) pour faciliter le clic
+        sprite._unitId      = id;
+        sprite._unitOwnerId = unit.ownerId;
 
         if (unit.ownerId === myId) {
-          circle.setInteractive(new Phaser.Geom.Circle(0, 0, 25), Phaser.Geom.Circle.Contains);
-          circle.on('pointerover', () => this.input.setDefaultCursor('pointer'));
-          circle.on('pointerout',  () => this.input.setDefaultCursor('default'));
+          sprite.setInteractive(new Phaser.Geom.Circle(20, 20, 25), Phaser.Geom.Circle.Contains);
+          sprite.on('pointerover', () => this.input.setDefaultCursor('pointer'));
+          sprite.on('pointerout',  () => this.input.setDefaultCursor('default'));
         }
 
-        const barBg   = this.add.rectangle(unit.x, unit.y + BAR_Y, BAR_W, BAR_H, 0x333333).setOrigin(0.5, 0.5);
-        const barFill = this.add.rectangle(unit.x - BAR_W / 2, unit.y + BAR_Y, BAR_W * (unit.hp / unit.maxHp), BAR_H, 0x2ecc71).setOrigin(0, 0.5);
+        const barBg   = this.add.rectangle(unit.x, unit.y + BAR_Y, BAR_W, BAR_H, 0x111111, 0.85).setStrokeStyle(1, 0x000000, 0.7).setOrigin(0.5, 0.5);
+        const barFill = this.add.rectangle(unit.x - BAR_W / 2, unit.y + BAR_Y, BAR_W * (unit.hp / unit.maxHp), BAR_H, 0x22c55e).setOrigin(0, 0.5);
 
-        // Archer : petit point blanc au centre
-        let decoration = null;
-        if (unit.type === 'archer') {
-          decoration = this.add.circle(unit.x, unit.y, 4, 0xffffff);
-        }
-
-        this.unitSprites[id] = [circle, barBg, barFill, decoration];
+        // [sprite, barBg, barFill]
+        this.unitSprites[id] = [sprite, barBg, barFill];
 
       } else if (posChanged || hpChanged) {
-        const [circle, , barFill] = this.unitSprites[id];
-        circle.setFillStyle(colorInt);
+        const [sprite, , barFill] = this.unitSprites[id];
+        sprite.setTint(colorInt);
 
         if (hpChanged) {
-          barFill.width = Math.max(0, BAR_W * (unit.hp / unit.maxHp));
+          const ratio = unit.hp / unit.maxHp;
+          barFill.width = Math.max(0, BAR_W * ratio);
+          const c = ratio > 0.6 ? 0x22c55e : ratio > 0.3 ? 0xf59e0b : 0xef4444;
+          barFill.setFillStyle(c);
         }
         if (posChanged) {
           if (this.unitTweens[id]) this.unitTweens[id].stop();
           this.unitTweens[id] = this.tweens.add({
-            targets: circle, x: unit.x, y: unit.y,
+            targets: sprite, x: unit.x, y: unit.y,
             duration: 50, ease: 'Linear',
             onComplete: () => { delete this.unitTweens[id]; },
           });
@@ -613,10 +635,19 @@ class MainScene extends Phaser.Scene {
     }
     for (const id of this.selectedUnitIds) {
       if (this.selectionRings[id] || !this.unitSprites[id]) continue;
-      const ring = this.add.graphics();
-      ring.lineStyle(4, 0xf1c40f, 1);
-      ring.strokeCircle(0, 0, UNIT_RADIUS + 5);
-      ring.setPosition(this.unitSprites[id][0].x, this.unitSprites[id][0].y);
+      // Sprite-based ring with pulse tween
+      const ring = this.add.sprite(this.unitSprites[id][0].x, this.unitSprites[id][0].y, 'selection-ring');
+      ring.setDepth(50); // au-dessus des unités mais sous le fog
+      this.tweens.add({
+        targets: ring,
+        scaleX: { from: 0.85, to: 1.05 },
+        scaleY: { from: 0.85, to: 1.05 },
+        alpha:  { from: 1.0,  to: 0.6 },
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
       this.selectionRings[id] = ring;
     }
     const el = document.getElementById('selected-count');

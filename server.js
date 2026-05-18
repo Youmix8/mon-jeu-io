@@ -279,7 +279,7 @@ const FALLBACK_SPAWNS = [
   { x: 3100, y: 3100 },
 ];
 
-const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f'];
+const COLORS = ['#ff6b6b', '#4dabf7', '#69db7c', '#ffd43b']; // rouge corail, bleu ciel, vert pomme, jaune solaire
 
 // Génère MAX_PLAYERS points avec distance min entre eux (rejection sampling).
 // Fallback aux coins si on n'arrive pas à placer.
