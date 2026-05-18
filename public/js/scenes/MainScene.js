@@ -157,7 +157,8 @@ class MainScene extends Phaser.Scene {
         this._flashHdv(data.targetId);
       }
 
-      this.attackLines.push({ ax: attacker.x, ay: attacker.y, tx, ty, startTime: Date.now() });
+      // ── Animation selon le type d'attaquant ───────────────────
+      this._playAttackAnimation(attacker, tx, ty);
 
       // Kill feed for unit kills
       if (data.killed && data.targetType === 'unit') {
@@ -271,21 +272,22 @@ class MainScene extends Phaser.Scene {
       this.dragRectGraphics.strokeRect(rx, ry, rw, rh);
     }
 
-    // Attack lines
-    const ATTACK_DURATION = 200;
-    const now = Date.now();
+    // Zone de défense : cercle pointillé jaune autour des unités sélectionnées en mode defend
     this.attackGraphics.clear();
-    let i = this.attackLines.length;
-    while (i--) {
-      const ln = this.attackLines[i];
-      const elapsed = now - ln.startTime;
-      if (elapsed >= ATTACK_DURATION) { this.attackLines.splice(i, 1); continue; }
-      const alpha = 0.8 * (1 - elapsed / ATTACK_DURATION);
-      this.attackGraphics.lineStyle(3, 0xe74c3c, alpha);
-      this.attackGraphics.beginPath();
-      this.attackGraphics.moveTo(ln.ax, ln.ay);
-      this.attackGraphics.lineTo(ln.tx, ln.ty);
-      this.attackGraphics.strokePath();
+    const stateNow = Network.getState();
+    if (this.selectedUnitIds.size > 0 && stateNow.units) {
+      const drawn = new Set();
+      for (const uid of this.selectedUnitIds) {
+        const u = stateNow.units[uid];
+        if (!u || u.mode !== 'defend') continue;
+        const key = `${u.defendX},${u.defendY},${u.defendRadius}`;
+        if (drawn.has(key)) continue;
+        drawn.add(key);
+        this.attackGraphics.lineStyle(2, 0xfbbf24, 0.45);
+        this.attackGraphics.strokeCircle(u.defendX, u.defendY, u.defendRadius);
+        this.attackGraphics.fillStyle(0xfbbf24, 0.05);
+        this.attackGraphics.fillCircle(u.defendX, u.defendY, u.defendRadius);
+      }
     }
 
     const state = Network.getState();
@@ -602,12 +604,18 @@ class MainScene extends Phaser.Scene {
         const barBg   = this.add.rectangle(unit.x, unit.y + BAR_Y, BAR_W, BAR_H, 0x111111, 0.85).setStrokeStyle(1, 0x000000, 0.7).setOrigin(0.5, 0.5);
         const barFill = this.add.rectangle(unit.x - BAR_W / 2, unit.y + BAR_Y, BAR_W * (unit.hp / unit.maxHp), BAR_H, 0x22c55e).setOrigin(0, 0.5);
 
-        // [sprite, barBg, barFill]
-        this.unitSprites[id] = [sprite, barBg, barFill];
+        // Badge mode : petit icône en haut-droite de l'unité (🛡 defend, ⚔ attack, 🚶 move)
+        const badge = this.add.text(unit.x + 12, unit.y - 14, this._modeIcon(unit.mode), {
+          fontSize: '10px', fontFamily: '"Quicksand", sans-serif',
+        }).setOrigin(0.5, 0.5).setDepth(10);
+
+        // [sprite, barBg, barFill, badge]
+        this.unitSprites[id] = [sprite, barBg, barFill, badge];
 
       } else if (posChanged || hpChanged) {
-        const [sprite, , barFill] = this.unitSprites[id];
+        const [sprite, , barFill, badge] = this.unitSprites[id];
         sprite.setTint(colorInt);
+        if (badge) badge.setText(this._modeIcon(unit.mode));
 
         if (hpChanged) {
           const ratio = unit.hp / unit.maxHp;
@@ -664,11 +672,18 @@ class MainScene extends Phaser.Scene {
   _updateUnitBarPositions() {
     for (const [, sprites] of Object.entries(this.unitSprites)) {
       if (sprites.length < 3) continue;
-      const [circle, barBg, barFill, deco] = sprites;
+      const [circle, barBg, barFill, badge] = sprites;
       barBg.setPosition(circle.x, circle.y + BAR_Y);
       barFill.setPosition(circle.x - BAR_W / 2, circle.y + BAR_Y);
-      if (deco) deco.setPosition(circle.x, circle.y);
+      if (badge) badge.setPosition(circle.x + 14, circle.y - 14);
     }
+  }
+
+  _modeIcon(mode) {
+    if (mode === 'defend') return '🛡';
+    if (mode === 'attack') return '⚔';
+    if (mode === 'move')   return '';
+    return '';
   }
 
   // ── Visual effects ────────────────────────────────────────────────
@@ -707,6 +722,50 @@ class MainScene extends Phaser.Scene {
     });
     emitter.explode(10);
     this.time.delayedCall(700, () => emitter.destroy());
+  }
+
+  // ── Animations d'attaque selon le type d'unité ──────────────────
+  _playAttackAnimation(attacker, tx, ty) {
+    const dx = tx - attacker.x, dy = ty - attacker.y;
+    const angle = Math.atan2(dy, dx);
+    if (attacker.type === 'archer') {
+      // Flèche qui vole de l'archer à la cible
+      const arrow = this.add.sprite(attacker.x, attacker.y, 'arrow')
+        .setRotation(angle)
+        .setDepth(55);
+      this.tweens.add({
+        targets: arrow,
+        x: tx, y: ty,
+        duration: 220,
+        ease: 'Quad.easeOut',
+        onComplete: () => arrow.destroy(),
+      });
+    } else {
+      // Soldat / Chevalier : arc de slash blanc apparaissant sur la cible
+      const slash = this.add.sprite(tx, ty, 'slash')
+        .setRotation(angle)
+        .setDepth(55)
+        .setScale(0.5);
+      this.tweens.add({
+        targets: slash,
+        scale: { from: 0.7, to: 1.15 },
+        alpha: { from: 1, to: 0 },
+        duration: 220,
+        ease: 'Cubic.easeOut',
+        onComplete: () => slash.destroy(),
+      });
+      // Chevalier : impact flash doré supplémentaire
+      if (attacker.type === 'knight') {
+        const flash = this.add.circle(tx, ty, 18, 0xfbbf24, 0.55).setDepth(54);
+        this.tweens.add({
+          targets: flash,
+          scale: { from: 0.6, to: 1.8 },
+          alpha: { from: 0.6, to: 0 },
+          duration: 250,
+          onComplete: () => flash.destroy(),
+        });
+      }
+    }
   }
 
   _showMoveIndicator(x, y, isAttack = false) {
