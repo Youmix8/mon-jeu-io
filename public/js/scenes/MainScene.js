@@ -224,48 +224,45 @@ class MainScene extends Phaser.Scene {
         const state = Network.getState();
         const myPlayer = state.players[myId];
         if (myPlayer && myPlayer.eliminated) return;
-        const wx = pointer.worldX, wy = pointer.worldY;
 
-        let hitEnemyUnit = null;
-        for (const [uid, unit] of Object.entries(state.units || {})) {
-          if (unit.ownerId === myId) continue;
-          if (Math.hypot(wx - unit.x, wy - unit.y) <= 20) { hitEnemyUnit = uid; break; }
+        // Mémorise la position monde du clic droit + lance le timer de la roue.
+        // Si l'utilisateur relâche AVANT 220ms : comportement par défaut (attack/move).
+        // Sinon : la roue apparaît et le relâchement choisit l'action.
+        this._rightPressWorld = { x: pointer.worldX, y: pointer.worldY };
+        this._rightPressTime  = Date.now();
+        this._rightPressDown  = true;
+        if (typeof RadialMenu !== 'undefined') {
+          RadialMenu.startPress(pointer.x, pointer.y, pointer.worldX, pointer.worldY);
         }
-        if (hitEnemyUnit) {
-          Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyUnit, 'unit');
-          this._showMoveIndicator(wx, wy, true);
-          return;
-        }
+      }
+    });
 
-        let hitEnemyHdv = null;
-        for (const [pid, player] of Object.entries(state.players || {})) {
-          if (pid === myId || player.hp <= 0) continue;
-          if (Math.abs(wx - player.x) <= 45 && Math.abs(wy - player.y) <= 45) { hitEnemyHdv = pid; break; }
-        }
-        if (hitEnemyHdv) {
-          Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyHdv, 'hdv');
-          this._showMoveIndicator(wx, wy, true);
-          return;
-        }
-
-        // Clic droit sur un village ennemi → attaque
-        let hitEnemyVillage = null;
-        for (const v of (state.villages || [])) {
-          if (v.ownerId === myId) continue; // pas attaquer son propre village
-          if (Math.abs(wx - v.x) <= 38 && Math.abs(wy - v.y) <= 38) { hitEnemyVillage = v.id; break; }
-        }
-        if (hitEnemyVillage) {
-          Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyVillage, 'village');
-          this._showMoveIndicator(wx, wy, true);
-          return;
-        }
-
-        Network.moveUnits(Array.from(this.selectedUnitIds), wx, wy);
-        this._showMoveIndicator(wx, wy, false);
+    // Suivi du mouvement pendant l'appui droit pour mettre à jour la sélection radiale
+    this.input.on('pointermove', (pointer) => {
+      if (this._rightPressDown && typeof RadialMenu !== 'undefined' && RadialMenu.isActive()) {
+        RadialMenu.updateMove(pointer.x, pointer.y);
       }
     });
 
     this.input.on('pointerup', (pointer) => {
+      // ── Clic droit relâché : roue d'action OU action par défaut (selon durée) ──
+      if (pointer.button === 2) {
+        if (!this._rightPressDown) return;
+        this._rightPressDown = false;
+        const pressed = this._rightPressWorld;
+        if (!pressed) return;
+
+        // Le menu radial a-t-il été affiché et a-t-on choisi une option ?
+        const picked = (typeof RadialMenu !== 'undefined') ? RadialMenu.endPress() : null;
+        if (picked) {
+          this._executeRadialAction(picked, pressed.x, pressed.y);
+        } else {
+          // Clic court → comportement par défaut (attack si cible, sinon move)
+          this._defaultRightClick(pressed.x, pressed.y);
+        }
+        return;
+      }
+      // ── Clic gauche relâché : sélection drag ──
       if (!this.isDragging || pointer.button !== 0) return;
       this.isDragging = false;
       const x1 = Math.min(this.dragStartX, pointer.worldX);
@@ -368,7 +365,7 @@ class MainScene extends Phaser.Scene {
     const myId = Network.getMyId();
     const useAsset = this._hasAsset('village');
 
-    const VILLAGE_DISPLAY = 70;
+    const VILLAGE_DISPLAY = 110;
     for (const v of villages) {
       seen.add(v.id);
       const owner = v.ownerId ? players[v.ownerId] : null;
@@ -377,9 +374,9 @@ class MainScene extends Phaser.Scene {
 
       let sprite = this.villageSprites[v.id];
       if (!sprite) {
-        // Cercle de propriétaire dessous (depth 20, comme HDV)
-        const ownerDisc = this.add.circle(v.x, v.y + 18, 22, ownerColorInt, owner ? 0.6 : 0)
-          .setStrokeStyle(2.5, 0x000000, owner ? 0.5 : 0)
+        // Cercle de propriétaire dessous (depth 20, comme HDV) — plus gros & plus opaque
+        const ownerDisc = this.add.circle(v.x, v.y + 30, 38, ownerColorInt, owner ? 0.65 : 0)
+          .setStrokeStyle(3, 0x000000, owner ? 0.55 : 0)
           .setDepth(20);
 
         // Sprite principal village
@@ -396,21 +393,21 @@ class MainScene extends Phaser.Scene {
         }
 
         // Label : niveau village (Lv 1 / Lv 2)
-        const label = this.add.text(v.x, v.y + 32, `Village Lv ${v.level || 1}`, {
-          fontSize: '11px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold',
+        const label = this.add.text(v.x, v.y + 52, `Village Lv ${v.level || 1}`, {
+          fontSize: '13px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold',
           color: '#ffffff', stroke: '#000000', strokeThickness: 3,
         }).setOrigin(0.5, 0).setDepth(70);
 
         // Barre HP (au-dessus, depth 60)
-        const hpBarBg   = this.add.rectangle(v.x, v.y - 30, 70, 6, 0x111111, 0.9)
-          .setStrokeStyle(1, 0x000000, 0.6).setOrigin(0.5, 0.5).setDepth(60);
-        const hpBarFill = this.add.rectangle(v.x - 35, v.y - 30, 70 * (v.hp / MAX_HP), 6, 0x22c55e)
+        const hpBarBg   = this.add.rectangle(v.x, v.y - 52, 90, 8, 0x111111, 0.9)
+          .setStrokeStyle(1.5, 0x000000, 0.6).setOrigin(0.5, 0.5).setDepth(60);
+        const hpBarFill = this.add.rectangle(v.x - 45, v.y - 52, 90 * (v.hp / MAX_HP), 8, 0x22c55e)
           .setOrigin(0, 0.5).setDepth(60);
 
         // Barre de capture (en dessous de la barre HP, depth 60)
-        const capBarBg   = this.add.rectangle(v.x, v.y - 22, 70, 5, 0x222222, 0.9)
+        const capBarBg   = this.add.rectangle(v.x, v.y - 42, 90, 6, 0x222222, 0.9)
           .setStrokeStyle(1, 0x000000, 0.5).setOrigin(0.5, 0.5).setDepth(60);
-        const capBarFill = this.add.rectangle(v.x - 35, v.y - 22, 0, 5, 0xfbbf24)
+        const capBarFill = this.add.rectangle(v.x - 45, v.y - 42, 0, 6, 0xfbbf24)
           .setOrigin(0, 0.5).setDepth(60);
 
         // Click handler : si c'est MON village, ouvre le panel village
@@ -433,14 +430,14 @@ class MainScene extends Phaser.Scene {
       }
 
       // Update : positions + colors + visibility
-      sprite.ownerDisc.setPosition(v.x, v.y + 18);
-      sprite.ownerDisc.setFillStyle(ownerColorInt, owner ? 0.6 : 0);
-      sprite.ownerDisc.setStrokeStyle(2.5, 0x000000, owner ? 0.5 : 0);
+      sprite.ownerDisc.setPosition(v.x, v.y + 30);
+      sprite.ownerDisc.setFillStyle(ownerColorInt, owner ? 0.65 : 0);
+      sprite.ownerDisc.setStrokeStyle(3, 0x000000, owner ? 0.55 : 0);
 
       sprite.main.setPosition(v.x, v.y);
-      sprite.main.setAlpha(destroyed ? 0.35 : 1); // village détruit = grisé
+      sprite.main.setAlpha(destroyed ? 0.35 : 1);
 
-      sprite.label.setPosition(v.x, v.y + 32);
+      sprite.label.setPosition(v.x, v.y + 52);
       sprite.label.setText(destroyed ? '💥 Détruit' : `Village Lv ${v.level || 1}`);
       sprite.label.setColor(destroyed ? '#ef4444' : '#ffffff');
 
@@ -449,24 +446,23 @@ class MainScene extends Phaser.Scene {
       sprite.hpBarBg.setVisible(showHp);
       sprite.hpBarFill.setVisible(showHp);
       if (showHp) {
-        sprite.hpBarBg.setPosition(v.x, v.y - 30);
-        sprite.hpBarFill.setPosition(v.x - 35, v.y - 30);
+        sprite.hpBarBg.setPosition(v.x, v.y - 52);
+        sprite.hpBarFill.setPosition(v.x - 45, v.y - 52);
         const hpRatio = v.hp / MAX_HP;
-        sprite.hpBarFill.width = 70 * hpRatio;
+        sprite.hpBarFill.width = 90 * hpRatio;
         const c = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
         sprite.hpBarFill.setFillStyle(c);
       }
 
-      // Barre de capture si en cours
       const showCap = v.captureProgress > 0;
       const ratio   = Math.max(0, Math.min(1, v.captureProgress / CAP_TICKS));
       sprite.capBarBg.setVisible(showCap);
       sprite.capBarFill.setVisible(showCap);
       if (showCap) {
-        const capY = showHp ? v.y - 22 : v.y - 30;
+        const capY = showHp ? v.y - 42 : v.y - 52;
         sprite.capBarBg.setPosition(v.x, capY);
-        sprite.capBarFill.setPosition(v.x - 35, capY);
-        sprite.capBarFill.width = 70 * ratio;
+        sprite.capBarFill.setPosition(v.x - 45, capY);
+        sprite.capBarFill.width = 90 * ratio;
         const capturer = v.capturingPlayerId ? players[v.capturingPlayerId] : null;
         sprite.capBarFill.setFillStyle(capturer ? Phaser.Display.Color.HexStringToColor(capturer.color).color : 0xfbbf24);
       }
@@ -526,8 +522,10 @@ class MainScene extends Phaser.Scene {
     // Génère les textures procédurales (fallback si assets manquants)
     if (typeof SpriteFactory !== 'undefined') SpriteFactory.generateAll(this);
 
-    // Caméra : bornes exactes à la map réelle
-    this.cameras.main.setBounds(0, 0, this.MAP_W, this.MAP_H);
+    // Caméra : padding de 250px hors map pour pouvoir scroller un peu au-delà
+    // du bord (évite de devoir cliquer pile contre le bord de l'écran).
+    const CAM_PAD = 250;
+    this.cameras.main.setBounds(-CAM_PAD, -CAM_PAD, this.MAP_W + 2 * CAM_PAD, this.MAP_H + 2 * CAM_PAD);
     this._recomputeMinZoom();
     this.cameras.main.setZoom(this.minZoom);
 
@@ -546,6 +544,7 @@ class MainScene extends Phaser.Scene {
 
     // Mini-carte
     if (typeof Minimap !== 'undefined') Minimap.init(this.cameras.main);
+    if (typeof RadialMenu !== 'undefined') RadialMenu.init(this);
 
     this.mapBuilt = true;
     console.log(`Map built: ${this.MAP_W}×${this.MAP_H}, grid ${info.gridW}×${info.gridH}, minZoom ${this.minZoom.toFixed(3)}`);
@@ -658,7 +657,7 @@ class MainScene extends Phaser.Scene {
   _syncHDVs(players) {
     // HDV sprite : 80×80 (match HDV_HALF_SIZE * 2). Pas de tint sur le sprite,
     // mais un cercle de couleur dessous (depth 20) pour identifier le proprio.
-    const HDV_DISPLAY = 80;
+    const HDV_DISPLAY = 130;
     const BAR_W_HDV = 100, BAR_H_HDV = 10;
     const BAR_Y_OFF = -HDV_DISPLAY / 2 - 22;
     const myId = Network.getMyId();
@@ -675,7 +674,7 @@ class MainScene extends Phaser.Scene {
 
       if (!this.hdvSprites[id]) {
         // Cercle de propriétaire (depth 20) — sous le HDV
-        const ownerDisc = this.add.circle(player.x, player.y + HDV_DISPLAY / 2 - 5, 28, colorInt, 0.6)
+        const ownerDisc = this.add.circle(player.x, player.y + HDV_DISPLAY / 2 - 8, 42, colorInt, 0.65)
           .setStrokeStyle(3, 0x000000, 0.5)
           .setDepth(20);
 
@@ -734,7 +733,7 @@ class MainScene extends Phaser.Scene {
         }
 
         if (ownerDisc) {
-          ownerDisc.setPosition(player.x, player.y + HDV_DISPLAY / 2 - 5);
+          ownerDisc.setPosition(player.x, player.y + HDV_DISPLAY / 2 - 8);
           ownerDisc.setFillStyle(colorInt, destroyed ? 0.25 : 0.6);
         }
 
@@ -777,25 +776,25 @@ class MainScene extends Phaser.Scene {
       this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp };
 
       if (!this.unitSprites[id]) {
-        // Pour l'instant TOUTES les unités utilisent le sprite 'soldier' (l'intro
-        // des autres sprites archer/cavalry est une étape gameplay séparée).
-        // Cocarde de propriétaire : petit cercle coloré sous les pieds.
-        const useAsset = this._hasAsset('soldier');
+        // Chaque type d'unité a son propre sprite PNG
+        const assetKey = unit.type === 'archer'  ? 'archer'
+                       : unit.type === 'knight'  ? 'cavalry'
+                       : 'soldier';
+        const useAsset = this._hasAsset(assetKey);
+        const unitSize = unit.type === 'knight' ? 58 : 50;
 
-        const cockade = this.add.circle(unit.x, unit.y + 10, 6, colorInt, 0.95)
-          .setStrokeStyle(1.5, 0x000000, 0.7)
+        // Cercle d'équipe plus gros et clairement visible (toutes équipes, alliés comme ennemis)
+        const cockade = this.add.circle(unit.x, unit.y + 16, 14, colorInt, 0.75)
+          .setStrokeStyle(2.5, 0x000000, 0.8)
           .setDepth(40);
 
         let sprite;
         if (useAsset) {
-          sprite = this.add.sprite(unit.x, unit.y, 'soldier')
+          sprite = this.add.sprite(unit.x, unit.y, assetKey)
             .setOrigin(0.5, 0.5)
-            .setDisplaySize(32, 32)
+            .setDisplaySize(unitSize, unitSize)
             .setDepth(50);
-          // Léger tint pour différencier sans dénaturer le sprite (multiply doux)
-          sprite.setTint(colorInt);
         } else {
-          // Fallback : sprite procédural si pas d'asset PNG
           const texKey = unit.type === 'archer' ? 'unit-archer'
                       : unit.type === 'knight' ? 'unit-knight'
                       : 'unit-soldier';
@@ -804,9 +803,11 @@ class MainScene extends Phaser.Scene {
 
         sprite._unitId      = id;
         sprite._unitOwnerId = unit.ownerId;
+        sprite._unitType    = unit.type;
+        sprite._idlePhase   = Math.random() * Math.PI * 2; // décalage du wobble
 
         if (unit.ownerId === myId) {
-          sprite.setInteractive(new Phaser.Geom.Circle(sprite.width / 2, sprite.height / 2, 25), Phaser.Geom.Circle.Contains);
+          sprite.setInteractive(new Phaser.Geom.Circle(sprite.width / 2, sprite.height / 2, 30), Phaser.Geom.Circle.Contains);
           sprite.on('pointerover', () => this.input.setDefaultCursor('pointer'));
           sprite.on('pointerout',  () => this.input.setDefaultCursor('default'));
         }
@@ -816,18 +817,16 @@ class MainScene extends Phaser.Scene {
         const barFill = this.add.rectangle(unit.x - BAR_W / 2, unit.y + BAR_Y, BAR_W * (unit.hp / unit.maxHp), BAR_H, 0x22c55e)
           .setOrigin(0, 0.5).setDepth(60);
 
-        const badge = this.add.text(unit.x + 14, unit.y - 14, this._modeIcon(unit.mode), {
-          fontSize: '10px', fontFamily: '"Quicksand", sans-serif',
+        const badge = this.add.text(unit.x + 18, unit.y - 18, this._modeIcon(unit.mode), {
+          fontSize: '12px', fontFamily: '"Quicksand", sans-serif',
         }).setOrigin(0.5, 0.5).setDepth(70);
 
-        // [sprite, barBg, barFill, badge, cockade]
         this.unitSprites[id] = [sprite, barBg, barFill, badge, cockade];
 
       } else if (posChanged || hpChanged) {
         const [sprite, , barFill, badge, cockade] = this.unitSprites[id];
-        if (sprite.setTint) sprite.setTint(colorInt);
         if (badge) badge.setText(this._modeIcon(unit.mode));
-        if (cockade) cockade.setFillStyle(colorInt, 0.95);
+        if (cockade) cockade.setFillStyle(colorInt, 0.75);
 
         if (hpChanged) {
           const ratio = unit.hp / unit.maxHp;
@@ -882,13 +881,21 @@ class MainScene extends Phaser.Scene {
   }
 
   _updateUnitBarPositions() {
+    // Wobble idle léger (oscillation verticale ±2px)
+    const t = Date.now() / 380;
     for (const [, sprites] of Object.entries(this.unitSprites)) {
       if (sprites.length < 3) continue;
       const [sprite, barBg, barFill, badge, cockade] = sprites;
-      barBg.setPosition(sprite.x, sprite.y + BAR_Y);
-      barFill.setPosition(sprite.x - BAR_W / 2, sprite.y + BAR_Y);
-      if (badge) badge.setPosition(sprite.x + 14, sprite.y - 14);
-      if (cockade) cockade.setPosition(sprite.x, sprite.y + 10);
+      // Wobble : décalage vertical fluide, désynchronisé par sprite
+      const phase = (sprite._idlePhase || 0);
+      const wobble = Math.sin(t + phase) * 1.5;
+      barBg.setPosition(sprite.x, sprite.y + BAR_Y - 4);
+      barFill.setPosition(sprite.x - BAR_W / 2, sprite.y + BAR_Y - 4);
+      if (badge) badge.setPosition(sprite.x + 22, sprite.y - 22);
+      if (cockade) cockade.setPosition(sprite.x, sprite.y + 22);
+      // Applique le wobble à l'origine du sprite (ne touche pas à x/y serveur)
+      sprite.setY(sprite.y); // no-op for safety; the actual wobble is via scaleY pulse
+      sprite.setScale(1, 1 + wobble * 0.012);
     }
   }
 
@@ -897,6 +904,97 @@ class MainScene extends Phaser.Scene {
     if (mode === 'attack') return '⚔';
     if (mode === 'move')   return '';
     return '';
+  }
+
+  // Clic droit court : comportement par défaut (attack si cible, sinon move)
+  _defaultRightClick(wx, wy) {
+    const myId  = Network.getMyId();
+    const state = Network.getState();
+
+    let hitEnemyUnit = null;
+    for (const [uid, unit] of Object.entries(state.units || {})) {
+      if (unit.ownerId === myId) continue;
+      if (Math.hypot(wx - unit.x, wy - unit.y) <= 30) { hitEnemyUnit = uid; break; }
+    }
+    if (hitEnemyUnit) {
+      Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyUnit, 'unit');
+      this._showMoveIndicator(wx, wy, true);
+      return;
+    }
+
+    let hitEnemyHdv = null;
+    for (const [pid, player] of Object.entries(state.players || {})) {
+      if (pid === myId || player.hp <= 0) continue;
+      if (Math.abs(wx - player.x) <= 70 && Math.abs(wy - player.y) <= 70) { hitEnemyHdv = pid; break; }
+    }
+    if (hitEnemyHdv) {
+      Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyHdv, 'hdv');
+      this._showMoveIndicator(wx, wy, true);
+      return;
+    }
+
+    let hitEnemyVillage = null;
+    for (const v of (state.villages || [])) {
+      if (v.ownerId === myId) continue;
+      if (Math.abs(wx - v.x) <= 55 && Math.abs(wy - v.y) <= 55) { hitEnemyVillage = v.id; break; }
+    }
+    if (hitEnemyVillage) {
+      Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyVillage, 'village');
+      this._showMoveIndicator(wx, wy, true);
+      return;
+    }
+
+    Network.moveUnits(Array.from(this.selectedUnitIds), wx, wy);
+    this._showMoveIndicator(wx, wy, false);
+  }
+
+  // Action explicitement choisie via la roue radiale
+  _executeRadialAction(action, wx, wy) {
+    const ids = Array.from(this.selectedUnitIds);
+    if (ids.length === 0) return;
+    if (action === 'attack') {
+      // Cherche une cible proche (unit/HDV/village), sinon attack-move vers la position
+      const state = Network.getState();
+      const myId  = Network.getMyId();
+      let target = null, type = null;
+      for (const [uid, unit] of Object.entries(state.units || {})) {
+        if (unit.ownerId === myId) continue;
+        if (Math.hypot(wx - unit.x, wy - unit.y) <= 60) { target = uid; type = 'unit'; break; }
+      }
+      if (!target) {
+        for (const [pid, player] of Object.entries(state.players || {})) {
+          if (pid === myId || player.hp <= 0) continue;
+          if (Math.abs(wx - player.x) <= 100 && Math.abs(wy - player.y) <= 100) { target = pid; type = 'hdv'; break; }
+        }
+      }
+      if (!target) {
+        for (const v of (state.villages || [])) {
+          if (v.ownerId === myId) continue;
+          if (Math.abs(wx - v.x) <= 90 && Math.abs(wy - v.y) <= 90) { target = v.id; type = 'village'; break; }
+        }
+      }
+      if (target) {
+        Network.attackTarget(ids, target, type);
+      } else {
+        // Pas de cible : on déplace en mode attaque (move puis engage les ennemis sur le chemin)
+        Network.moveUnits(ids, wx, wy);
+      }
+      this._showMoveIndicator(wx, wy, true);
+    } else if (action === 'move') {
+      Network.moveUnits(ids, wx, wy);
+      this._showMoveIndicator(wx, wy, false);
+    } else if (action === 'defend') {
+      // Défendre la zone autour du clic
+      if (Network.defendArea) {
+        Network.defendArea(ids, wx, wy, 280);
+      }
+      // Indicateur visuel : grand cercle doré qui fade
+      const g = this.add.graphics();
+      g.lineStyle(3, 0xfbbf24, 1);
+      g.strokeCircle(0, 0, 60);
+      g.setPosition(wx, wy);
+      this.tweens.add({ targets: g, alpha: 0, duration: 600, ease: 'Power2', onComplete: () => g.destroy() });
+    }
   }
 
   // ── Visual effects ────────────────────────────────────────────────

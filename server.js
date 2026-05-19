@@ -6,27 +6,27 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const MAP_WIDTH  = 3500;
-const MAP_HEIGHT = 3500;
+const MAP_WIDTH  = 4500;
+const MAP_HEIGHT = 4500;
 const MAX_PLAYERS = 4;
 const GOLD_PER_SECOND = 1;
 const UNIT_RADIUS = 15;
 const TICK_RATE   = 20;
 const TICK_MS     = 1000 / TICK_RATE;
 const ATTACK_COOLDOWN_MS = 1000;
-const HDV_HALF_SIZE      = 40;
+const HDV_HALF_SIZE      = 60;
 const LOOK_AHEAD         = 60;
 const AVOID_BUFFER       = 25;
 const AVOID_STRENGTH     = 1.8;
-const SPAWN_MARGIN       = 400;   // distance min HDV ↔ bord
-const MIN_SPAWN_DIST     = 1200;  // distance min HDV ↔ HDV
+const SPAWN_MARGIN       = 500;   // distance min HDV ↔ bord
+const MIN_SPAWN_DIST     = 1500;  // distance min HDV ↔ HDV
 const SPAWN_MAX_ATTEMPTS = 500;
 
 // Fog of war — grille de tuiles pour calculer la visibilité
 const TILE_SIZE   = 50;
-const GRID_W      = MAP_WIDTH  / TILE_SIZE;   // 70
-const GRID_H      = MAP_HEIGHT / TILE_SIZE;   // 70
-const VISION_UNIT = 220;
+const GRID_W      = MAP_WIDTH  / TILE_SIZE;   // 90
+const GRID_H      = MAP_HEIGHT / TILE_SIZE;   // 90
+const VISION_UNIT = 240;
 
 // ────────── Tech tree, types d'unités, niveaux HDV ──────────
 
@@ -35,8 +35,8 @@ const UNIT_TYPES = {
              icon: '⚔️', desc: 'Polyvalent. Disponible dès le départ.' },
   archer:  { id: 'archer',  name: 'Archer',    cost: 15, hp: 30, speed:  80, range: 140, damage: 4, requiresTech: 'forging',
              icon: '🏹', desc: 'Longue portée mais fragile.' },
-  knight:  { id: 'knight',  name: 'Chevalier', cost: 25, hp: 80, speed: 140, range:  80, damage: 8, requiresTech: 'cavalry',
-             icon: '🐎', desc: 'Lourd et rapide, gros dégâts.' },
+  knight:  { id: 'knight',  name: 'Chevalier', cost: 25, hp: 80, speed: 140, range:  55, damage: 8, requiresTech: 'cavalry',
+             icon: '🐎', desc: 'Lourd et rapide, gros dégâts au contact.' },
 };
 
 const TECH_TREE = {
@@ -66,7 +66,7 @@ const VILLAGE_COUNT_MIN      = 5;
 const VILLAGE_COUNT_MAX      = 9;
 const VILLAGE_MAX_HP         = 300;             // PV du village (peut être détruit)
 const VILLAGE_GOLD_PER_SEC   = 0.5;             // gold passif au propriétaire
-const VILLAGE_HALF_SIZE      = 32;              // pour collisions / hitbox attaque
+const VILLAGE_HALF_SIZE      = 50;              // pour collisions / hitbox attaque
 const VILLAGE_VISION         = 220;             // vision donnée au propriétaire
 const VILLAGE_UPGRADE_COST   = 150;             // coût Lv1 → Lv2
 
@@ -284,10 +284,10 @@ function unitTypeUnlocked(player, typeId) {
 }
 
 const FALLBACK_SPAWNS = [
-  { x: 400,  y: 400  },
-  { x: 3100, y: 400  },
-  { x: 400,  y: 3100 },
-  { x: 3100, y: 3100 },
+  { x: 500,  y: 500  },
+  { x: 4000, y: 500  },
+  { x: 500,  y: 4000 },
+  { x: 4000, y: 4000 },
 ];
 
 const COLORS = ['#ff6b6b', '#4dabf7', '#69db7c', '#ffd43b']; // rouge corail, bleu ciel, vert pomme, jaune solaire
