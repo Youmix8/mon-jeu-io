@@ -199,6 +199,15 @@ class MainScene extends Phaser.Scene {
     // ── Input ─────────────────────────────────────────────────────
 
     this.input.on('pointerdown', (pointer, currentlyOver) => {
+      // Mode build prioritaire sur tous les autres clics
+      if (typeof BuildMode !== 'undefined' && BuildMode.isActive()) {
+        if (pointer.button === 0) {
+          BuildMode.tryPlace(pointer.worldX, pointer.worldY);
+        } else if (pointer.button === 2) {
+          BuildMode.cancel(); // clic droit = annule
+        }
+        return;
+      }
       if (pointer.button === 0) {
         const myId   = Network.getMyId();
         const hitUnit = currentlyOver.find(go => go._unitOwnerId === myId);
@@ -241,6 +250,10 @@ class MainScene extends Phaser.Scene {
     this.input.on('pointermove', (pointer) => {
       if (this._rightPressDown && typeof RadialMenu !== 'undefined' && RadialMenu.isActive()) {
         RadialMenu.updateMove(pointer.x, pointer.y);
+      }
+      // Mode build : déplace le sprite fantôme à la souris
+      if (typeof BuildMode !== 'undefined' && BuildMode.isActive()) {
+        BuildMode.update(pointer.worldX, pointer.worldY);
       }
     });
 
@@ -345,6 +358,7 @@ class MainScene extends Phaser.Scene {
 
     // Villages mis à jour à chaque tick (capture progress en temps réel)
     this._syncVillages(state.villages || [], state.players);
+    this._syncBuildings(state.buildings || [], state.players);
 
     const stateJson = JSON.stringify({ p: state.players, u: state.units });
     if (stateJson === this.lastStateJson) return;
@@ -355,6 +369,48 @@ class MainScene extends Phaser.Scene {
   }
 
   // ── Villages neutres ─────────────────────────────────────────────
+
+  _syncBuildings(buildings, players) {
+    if (!this.buildingSprites) this.buildingSprites = {};
+    const cfg = Network.getConfig();
+    const myId = Network.getMyId();
+    const seen = new Set();
+    for (const b of buildings) {
+      seen.add(b.id);
+      const def = (cfg.buildingTypes || {})[b.type] || {};
+      const owner = players[b.ownerId];
+      const colorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0xffffff;
+      let s = this.buildingSprites[b.id];
+      const SIZE = (def.halfSize || 22) * 2;
+      if (!s) {
+        // Placeholder visuel : icône emoji sur un fond carré tinté équipe
+        const bg = this.add.rectangle(b.x, b.y, SIZE, SIZE, colorInt, 0.85)
+          .setStrokeStyle(2.5, 0x111111, 0.9).setDepth(28);
+        const icon = this.add.text(b.x, b.y, def.icon || '🏗', {
+          fontSize: (SIZE * 0.7) + 'px',
+        }).setOrigin(0.5, 0.5).setDepth(29);
+        const hpBg   = this.add.rectangle(b.x, b.y - SIZE / 2 - 8, SIZE + 10, 5, 0x111111, 0.85)
+          .setStrokeStyle(1, 0x000000, 0.7).setOrigin(0.5, 0.5).setDepth(60);
+        const hpFill = this.add.rectangle(b.x - (SIZE + 10) / 2, b.y - SIZE / 2 - 8, (SIZE + 10), 5, 0x22c55e)
+          .setOrigin(0, 0.5).setDepth(60);
+        s = { bg, icon, hpBg, hpFill };
+        this.buildingSprites[b.id] = s;
+      }
+      s.bg.setFillStyle(colorInt, 0.85);
+      const hpRatio = b.hp / b.maxHp;
+      s.hpFill.width = (SIZE + 10) * hpRatio;
+      const c = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
+      s.hpFill.setFillStyle(c);
+    }
+    // Cleanup
+    for (const id of Object.keys(this.buildingSprites)) {
+      if (!seen.has(id)) {
+        const s = this.buildingSprites[id];
+        Object.values(s).forEach(o => o && o.destroy());
+        delete this.buildingSprites[id];
+      }
+    }
+  }
 
   _syncVillages(villages, players) {
     const cfg = Network.getConfig();
@@ -541,6 +597,8 @@ class MainScene extends Phaser.Scene {
     // Mini-carte
     if (typeof Minimap !== 'undefined') Minimap.init(this.cameras.main);
     if (typeof RadialMenu !== 'undefined') RadialMenu.init(this);
+    if (typeof BuildMode !== 'undefined') BuildMode.init(this);
+    this.buildingSprites = {};
 
     this.mapBuilt = true;
     console.log(`Map built: ${this.MAP_W}×${this.MAP_H}, grid ${info.gridW}×${info.gridH}, minZoom ${this.minZoom.toFixed(3)}`);
@@ -921,14 +979,37 @@ class MainScene extends Phaser.Scene {
       return;
     }
 
-    let hitEnemyVillage = null;
+    // Bâtiment ennemi → attaque
+    let hitEnemyBuilding = null;
+    for (const b of (state.buildings || [])) {
+      if (b.ownerId === myId) continue;
+      if (Math.abs(wx - b.x) <= 30 && Math.abs(wy - b.y) <= 30) { hitEnemyBuilding = b.id; break; }
+    }
+    if (hitEnemyBuilding) {
+      Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyBuilding, 'building');
+      this._showMoveIndicator(wx, wy, true);
+      return;
+    }
+
+    // Village : neutre → MOVE pour capturer (10s sur place) ; ennemi → ATTAQUE
+    let villageNeutral = null, villageEnemy = null;
     for (const v of (state.villages || [])) {
       if (v.ownerId === myId) continue;
-      if (Math.abs(wx - v.x) <= 55 && Math.abs(wy - v.y) <= 55) { hitEnemyVillage = v.id; break; }
+      if (Math.abs(wx - v.x) <= 55 && Math.abs(wy - v.y) <= 55) {
+        if (!v.ownerId) villageNeutral = v;
+        else villageEnemy = v.id;
+        break;
+      }
     }
-    if (hitEnemyVillage) {
-      Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyVillage, 'village');
+    if (villageEnemy) {
+      Network.attackTarget(Array.from(this.selectedUnitIds), villageEnemy, 'village');
       this._showMoveIndicator(wx, wy, true);
+      return;
+    }
+    if (villageNeutral) {
+      // Move au centre du village pour démarrer la capture (10s sur place)
+      Network.moveUnits(Array.from(this.selectedUnitIds), villageNeutral.x, villageNeutral.y);
+      this._showMoveIndicator(villageNeutral.x, villageNeutral.y, false);
       return;
     }
 
@@ -956,8 +1037,9 @@ class MainScene extends Phaser.Scene {
         }
       }
       if (!target) {
+        // Attack n'engage QUE les villages ennemis (pas les neutres → ceux-là se capturent au move)
         for (const v of (state.villages || [])) {
-          if (v.ownerId === myId) continue;
+          if (v.ownerId === myId || !v.ownerId) continue;
           if (Math.abs(wx - v.x) <= 90 && Math.abs(wy - v.y) <= 90) { target = v.id; type = 'village'; break; }
         }
       }

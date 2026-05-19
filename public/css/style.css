@@ -339,7 +339,7 @@ hr {
 }
 
 /* ─── HDV Panel ──────────────────────────────────────────────── */
-#hdv-panel {
+#hdv-panel, #village-panel {
   position: fixed;
   top: 16px;
   right: 16px;

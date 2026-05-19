@@ -7,9 +7,13 @@ const Network = (() => {
     unitTypes: {}, techTree: {}, hdvLevels: [],
     villageRadius: 70, villageCaptureTicks: 200, villageMaxHp: 300,
     villageUpgradeCost: 150, villageGoldPerSec: 0.5,
-    villageLevels: [{ level: 1, allowedUnits: ['soldier'] }, { level: 2, allowedUnits: 'all' }],
+    villageLevels: [
+      { level: 1, allowedUnits: ['soldier'], goldPerSec: 0.5, buildRadius: 160 },
+      { level: 2, allowedUnits: 'all',        goldPerSec: 1.0, buildRadius: 220 },
+    ],
     villageHalfSize: 32,
     spawnPositions: [],
+    buildingTypes: {},
   };
   let onSpawnFailedCallback      = null;
   let onAttackCallback           = null;
@@ -42,6 +46,7 @@ const Network = (() => {
       if (data.villageLevels)       config.villageLevels       = data.villageLevels;
       if (data.villageHalfSize)     config.villageHalfSize     = data.villageHalfSize;
       if (data.spawnPositions)      config.spawnPositions      = data.spawnPositions;
+      if (data.buildingTypes)       config.buildingTypes       = data.buildingTypes;
       initReceived = true;
       if (onInitReceivedCallback) onInitReceivedCallback();
     });
@@ -226,6 +231,9 @@ const Network = (() => {
   function addBot()         { if (socket) socket.emit('addBot'); }
   function upgradeVillage(villageId)  { if (socket) socket.emit('upgradeVillage', { villageId }); }
   function villageSpawnUnit(villageId, unitType) { if (socket) socket.emit('villageSpawnUnit', { villageId, unitType }); }
+  function buildBuilding(type, x, y, baseType, baseId) {
+    if (socket) socket.emit('buildBuilding', { type, x, y, baseType, baseId });
+  }
 
   function setOnSpawnFailed(cb)      { onSpawnFailedCallback = cb; }
   function setOnAttack(cb)           { onAttackCallback = cb; }
@@ -244,7 +252,7 @@ const Network = (() => {
   return {
     init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech, addBot,
-    upgradeVillage, villageSpawnUnit, defendArea,
+    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnInitReceived,
     isInitReceived,
