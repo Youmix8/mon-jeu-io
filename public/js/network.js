@@ -47,6 +47,8 @@ const Network = (() => {
       if (data.villageHalfSize)     config.villageHalfSize     = data.villageHalfSize;
       if (data.spawnPositions)      config.spawnPositions      = data.spawnPositions;
       if (data.buildingTypes)       config.buildingTypes       = data.buildingTypes;
+      if (data.buildGrid)           config.buildGrid           = data.buildGrid;
+      if (data.buildingMinDistHdv)  config.buildingMinDistHdv  = data.buildingMinDistHdv;
       initReceived = true;
       if (onInitReceivedCallback) onInitReceivedCallback();
     });

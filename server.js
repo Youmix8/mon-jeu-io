@@ -24,6 +24,15 @@ const SPAWN_MAX_ATTEMPTS = 500;
 
 // Fog of war — grille de tuiles pour calculer la visibilité
 const TILE_SIZE   = 50;
+const BUILD_GRID  = TILE_SIZE; // alias : la grille de construction = la grille du fog
+
+// Snap des coordonnées du monde au centre de la case de construction la plus proche
+function snapToGrid(x, y) {
+  return {
+    x: Math.floor(x / BUILD_GRID) * BUILD_GRID + BUILD_GRID / 2,
+    y: Math.floor(y / BUILD_GRID) * BUILD_GRID + BUILD_GRID / 2,
+  };
+}
 const GRID_W      = MAP_WIDTH  / TILE_SIZE;   // 90
 const GRID_H      = MAP_HEIGHT / TILE_SIZE;   // 90
 const VISION_UNIT = 240;
@@ -515,7 +524,7 @@ function getAvailableSlot() {
   return -1;
 }
 
-function computeDesiredDir(unit, goalX, goalY, skipPlayerId = null) {
+function computeDesiredDir(unit, goalX, goalY, skipPlayerId = null, skipBuildingId = null) {
   const dx = goalX - unit.x;
   const dy = goalY - unit.y;
   const dist = Math.hypot(dx, dy);
@@ -524,6 +533,7 @@ function computeDesiredDir(unit, goalX, goalY, skipPlayerId = null) {
   let desiredX = dx / dist;
   let desiredY = dy / dist;
 
+  // Évite les HDV
   for (const hdv of Object.values(gameState.players)) {
     if (skipPlayerId && hdv.id === skipPlayerId) continue;
     if (Math.hypot(goalX - hdv.x, goalY - hdv.y) < HDV_HALF_SIZE + 60) continue;
@@ -539,6 +549,28 @@ function computeDesiredDir(unit, goalX, goalY, skipPlayerId = null) {
       const strength = (1 - d / avoidR) * AVOID_STRENGTH;
       desiredX += (toHdvX / d) * strength;
       desiredY += (toHdvY / d) * strength;
+    }
+  }
+
+  // Évite les bâtiments (sauf si c'est la cible courante)
+  for (const b of gameState.buildings) {
+    if (skipBuildingId && b.id === skipBuildingId) continue;
+    const def = BUILDING_TYPES[b.type];
+    if (!def) continue;
+    const half = def.halfSize || 22;
+    // Si le goal est lui-même dans/près du bâtiment, on ne l'évite pas (on veut aller dessus)
+    if (Math.hypot(goalX - b.x, goalY - b.y) < half + 30) continue;
+    const aheadX = unit.x + desiredX * LOOK_AHEAD;
+    const aheadY = unit.y + desiredY * LOOK_AHEAD;
+    const toBX = aheadX - b.x;
+    const toBY = aheadY - b.y;
+    const distSq = toBX * toBX + toBY * toBY;
+    const avoidR = half + UNIT_RADIUS + 20; // buffer un peu plus petit que HDV
+    if (distSq > 0 && distSq < avoidR * avoidR) {
+      const d = Math.sqrt(distSq);
+      const strength = (1 - d / avoidR) * 1.4; // un peu plus doux que les HDV
+      desiredX += (toBX / d) * strength;
+      desiredY += (toBY / d) * strength;
     }
   }
 
@@ -741,6 +773,8 @@ io.on('connection', (socket) => {
     villageHalfSize: VILLAGE_HALF_SIZE,
     spawnPositions: currentSpawns,
     buildingTypes: BUILDING_TYPES,
+    buildGrid: BUILD_GRID,
+    buildingMinDistHdv: BUILDING_MIN_DIST_HDV,
   });
   broadcastFilteredState();
 
@@ -911,20 +945,24 @@ io.on('connection', (socket) => {
     } else {
       return;
     }
-    // Position doit être dans le rayon constructible
+    // Snap au centre de la case de la grille (Clash-of-Clans style)
+    const snapped = snapToGrid(x, y);
+    x = snapped.x;
+    y = snapped.y;
+    // Position doit être dans le carré constructible (norme L∞ = max(|dx|,|dy|))
     const r = baseBuildRadius(baseType, baseObj);
-    if (Math.hypot(x - base.x, y - base.y) > r) {
+    if (Math.max(Math.abs(x - base.x), Math.abs(y - base.y)) > r) {
       socket.emit('spawnFailed', { reason: 'out_of_build_zone' });
       return;
     }
-    // Distance minimale par rapport aux autres entités
+    // Une case = 1 bâtiment max (collision exacte sur même case)
     for (const b of gameState.buildings) {
-      if (Math.hypot(b.x - x, b.y - y) < BUILDING_MIN_DIST) {
-        socket.emit('spawnFailed', { reason: 'too_close_to_building' });
+      if (b.x === x && b.y === y) {
+        socket.emit('spawnFailed', { reason: 'cell_occupied' });
         return;
       }
     }
-    // Trop près d'un HDV/village
+    // Trop près d'un HDV/village (zone de respect autour des bases)
     for (const pl of Object.values(gameState.players)) {
       if (Math.hypot(pl.x - x, pl.y - y) < BUILDING_MIN_DIST_HDV) {
         socket.emit('spawnFailed', { reason: 'too_close_to_base' });
@@ -948,7 +986,7 @@ io.on('connection', (socket) => {
       id: bid,
       ownerId: p.id,
       type,
-      x: Math.round(x), y: Math.round(y),
+      x, y,
       hp: def.hp, maxHp: def.hp,
       lastAttackTime: 0,
     });
@@ -1129,7 +1167,7 @@ setInterval(() => {
     const uRange = unit.range || 80;
     const step = uSpeed / TICK_RATE;
     const effectiveRange = uRange - UNIT_RADIUS;
-    let goalX, goalY, skipPlayerId = null;
+    let goalX, goalY, skipPlayerId = null, skipBuildingId = null;
 
     if (unit.attackTargetId !== null) {
       if (unit.attackTargetType === 'unit') {
@@ -1147,6 +1185,7 @@ setInterval(() => {
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
         if (unitToBuildingDist(unit, target) <= effectiveRange) continue;
         goalX = target.x; goalY = target.y;
+        skipBuildingId = unit.attackTargetId;
       } else {
         const target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
@@ -1166,7 +1205,7 @@ setInterval(() => {
       continue;
     }
 
-    const [nx, ny] = computeDesiredDir(unit, goalX, goalY, skipPlayerId);
+    const [nx, ny] = computeDesiredDir(unit, goalX, goalY, skipPlayerId, skipBuildingId);
     unit.x += nx * step;
     unit.y += ny * step;
   }
@@ -1196,6 +1235,26 @@ setInterval(() => {
     for (const player of playerArr) {
       const cx = Math.max(player.x - HDV_HALF_SIZE, Math.min(unit.x, player.x + HDV_HALF_SIZE));
       const cy = Math.max(player.y - HDV_HALF_SIZE, Math.min(unit.y, player.y + HDV_HALF_SIZE));
+      const dx = unit.x - cx, dy = unit.y - cy;
+      const distSq = dx * dx + dy * dy;
+      if (distSq === 0) { unit.x += UNIT_RADIUS + 1; continue; }
+      if (distSq < UNIT_RADIUS * UNIT_RADIUS) {
+        const dist = Math.sqrt(distSq);
+        const overlap = UNIT_RADIUS - dist;
+        unit.x += (dx / dist) * overlap;
+        unit.y += (dy / dist) * overlap;
+      }
+    }
+  }
+
+  // Collision unités vs bâtiments (push out) — les remparts forment de vraies barrières
+  for (const unit of unitArr) {
+    for (const b of gameState.buildings) {
+      if (b.hp <= 0) continue;
+      const def = BUILDING_TYPES[b.type];
+      const half = (def && def.halfSize) || 22;
+      const cx = Math.max(b.x - half, Math.min(unit.x, b.x + half));
+      const cy = Math.max(b.y - half, Math.min(unit.y, b.y + half));
       const dx = unit.x - cx, dy = unit.y - cy;
       const distSq = dx * dx + dy * dy;
       if (distSq === 0) { unit.x += UNIT_RADIUS + 1; continue; }
