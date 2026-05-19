@@ -1,24 +1,39 @@
-// BuildMode : mode placement de bâtiment.
-// Activé depuis le panel HDV/village → un sprite fantôme suit la souris.
-// Clic dans la zone valide = construit ; clic droit / Échap = annule.
+// BuildMode v2 : placement Clash-of-Clans style.
+// - Snap au centre de la case de la grille (50px)
+// - Zone constructible CARRÉE (norme L∞) bordée de la couleur d'équipe
+// - Mode classique pour Tour : 1 clic = pose
+// - Mode "line" pour Rempart : 1er clic = ancre, 2e clic = pose la ligne H/V
 
 const BuildMode = (() => {
   let scene = null;
   let active = false;
   let buildingType = null;
-  let baseType = null;   // 'hdv' | 'village'
-  let baseId   = null;   // socket.id (hdv) ou village.id
-  let ghost = null;      // sprite fantôme
-  let zoneCircle = null; // cercle de zone constructible
-  let validMark = null;  // cercle vert/rouge sous le fantôme
+  let baseType = null;
+  let baseId   = null;
 
-  function init(phaserScene) {
-    scene = phaserScene;
+  // Visuels
+  let zoneRect = null;     // contour rectangulaire de la zone constructible
+  let gridOverlay = null;  // quadrillage léger
+  let ghosts = [];         // sprites fantômes (1 pour tour, N pour rempart en ligne)
+  let validMarks = [];     // cercles vert/rouge sous chaque fantôme
+
+  // Sous-mode "line" pour le rempart
+  let lineMode = false;        // true si le bâtiment est de type 'wall'
+  let lineDrawing = false;     // true après le 1er clic, en attente du 2e
+  let lineStart = null;        // { x, y } position grid du 1er clic
+
+  function init(phaserScene) { scene = phaserScene; }
+
+  function _grid() { return (Network.getConfig().buildGrid || 50); }
+
+  function snapToGrid(x, y) {
+    const g = _grid();
+    return { x: Math.floor(x / g) * g + g / 2, y: Math.floor(y / g) * g + g / 2 };
   }
 
   function activate(type, base) {
     if (!scene) return;
-    cancel(); // cleanup précédent
+    cancel();
 
     const cfg = Network.getConfig();
     const def = cfg.buildingTypes && cfg.buildingTypes[type];
@@ -28,53 +43,169 @@ const BuildMode = (() => {
     buildingType = type;
     baseType = base.baseType;
     baseId   = base.baseId;
+    lineMode = (type === 'wall');
+    lineDrawing = false;
+    lineStart = null;
 
-    // Ferme les panels pendant le placement pour ne pas gêner
     if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible && HdvPanel.isVisible()) HdvPanel.close();
     if (typeof VillagePanel !== 'undefined' && VillagePanel.isVisible && VillagePanel.isVisible()) VillagePanel.close();
 
-    // Zone constructible (cercle jaune transparent)
     const r = _baseRadius();
     const baseObj = _baseObj();
     if (!baseObj) { cancel(); return; }
-    zoneCircle = scene.add.graphics().setDepth(45);
-    zoneCircle.lineStyle(3, 0xfbbf24, 0.7);
-    zoneCircle.strokeCircle(baseObj.x, baseObj.y, r);
-    zoneCircle.fillStyle(0xfbbf24, 0.08);
-    zoneCircle.fillCircle(baseObj.x, baseObj.y, r);
 
-    // Sprite fantôme : icône emoji + cercle de couleur
-    const initialX = scene.input.activePointer.worldX;
-    const initialY = scene.input.activePointer.worldY;
-    ghost = scene.add.text(initialX, initialY, def.icon, {
+    // Zone carrée — strokeRect + remplissage léger
+    zoneRect = scene.add.graphics().setDepth(45);
+    zoneRect.lineStyle(3, 0xfbbf24, 0.7);
+    zoneRect.strokeRect(baseObj.x - r, baseObj.y - r, r * 2, r * 2);
+    zoneRect.fillStyle(0xfbbf24, 0.06);
+    zoneRect.fillRect(baseObj.x - r, baseObj.y - r, r * 2, r * 2);
+
+    // Quadrillage léger à l'intérieur
+    gridOverlay = scene.add.graphics().setDepth(46);
+    gridOverlay.lineStyle(1, 0xfbbf24, 0.20);
+    const g = _grid();
+    const startX = baseObj.x - r, endX = baseObj.x + r;
+    const startY = baseObj.y - r, endY = baseObj.y + r;
+    // Aligne le premier trait sur la grille
+    const firstX = Math.ceil(startX / g) * g;
+    const firstY = Math.ceil(startY / g) * g;
+    for (let xx = firstX; xx <= endX; xx += g) gridOverlay.lineBetween(xx, startY, xx, endY);
+    for (let yy = firstY; yy <= endY; yy += g) gridOverlay.lineBetween(startX, yy, endX, yy);
+
+    // 1er sprite fantôme à la position souris
+    _spawnGhost(scene.input.activePointer.worldX, scene.input.activePointer.worldY);
+
+    if (lineMode) {
+      _toast(`🧱 Rempart : clique pour le 1er point, puis bouge pour tracer la ligne — ${def.cost} 💰 / case`);
+    } else {
+      _toast(`Place ton ${def.name} (clic = construire, clic droit / Échap = annuler) — ${def.cost} 💰`);
+    }
+  }
+
+  function _spawnGhost(wx, wy) {
+    const cfg = Network.getConfig();
+    const def = cfg.buildingTypes[buildingType];
+    const snap = snapToGrid(wx, wy);
+    const ghost = scene.add.text(snap.x, snap.y, def.icon, {
       fontSize: '32px', fontFamily: '"Quicksand", sans-serif',
     }).setOrigin(0.5, 0.5).setDepth(110).setAlpha(0.85);
+    const mark = scene.add.circle(snap.x, snap.y, 22, 0x22c55e, 0.25)
+      .setStrokeStyle(2, 0x22c55e, 0.9).setDepth(108);
+    ghosts.push(ghost);
+    validMarks.push(mark);
+  }
 
-    validMark = scene.add.circle(initialX, initialY, 28, 0x22c55e, 0.25)
-      .setStrokeStyle(2, 0x22c55e, 0.9)
-      .setDepth(108);
+  function _clearGhosts() {
+    ghosts.forEach(g => g.destroy());
+    validMarks.forEach(m => m.destroy());
+    ghosts = [];
+    validMarks = [];
+  }
 
-    // Hint
-    _toast(`Place ton ${def.name} (clic = construire, clic droit / Échap = annuler) — ${def.cost} 💰`, def.icon);
+  // Génère la liste des cellules entre 2 points snap, en ligne droite H ou V (dominante)
+  function _lineCells(startSnap, endSnap) {
+    const g = _grid();
+    const dx = endSnap.x - startSnap.x;
+    const dy = endSnap.y - startSnap.y;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      // Horizontal
+      const sign = dx >= 0 ? 1 : -1;
+      const n = Math.abs(dx / g) + 1;
+      const cells = [];
+      for (let i = 0; i < n; i++) cells.push({ x: startSnap.x + sign * i * g, y: startSnap.y });
+      return cells;
+    } else {
+      const sign = dy >= 0 ? 1 : -1;
+      const n = Math.abs(dy / g) + 1;
+      const cells = [];
+      for (let i = 0; i < n; i++) cells.push({ x: startSnap.x, y: startSnap.y + sign * i * g });
+      return cells;
+    }
   }
 
   function update(worldX, worldY) {
-    if (!active || !ghost) return;
-    ghost.setPosition(worldX, worldY);
-    if (validMark) validMark.setPosition(worldX, worldY);
-    // Valide si dans le rayon
-    const valid = _isPlacementValid(worldX, worldY);
-    if (validMark) {
-      validMark.setFillStyle(valid ? 0x22c55e : 0xef4444, 0.25);
-      validMark.setStrokeStyle(2, valid ? 0x22c55e : 0xef4444, 0.9);
+    if (!active) return;
+
+    const snap = snapToGrid(worldX, worldY);
+
+    // Mode ligne (rempart) + 1er clic déjà fait : tracer la ligne
+    if (lineMode && lineDrawing && lineStart) {
+      const cells = _lineCells(lineStart, snap);
+      // Resize sprites pour matcher le nombre de cellules
+      while (ghosts.length < cells.length) _spawnGhost(0, 0);
+      while (ghosts.length > cells.length) {
+        ghosts.pop().destroy();
+        validMarks.pop().destroy();
+      }
+      let allValid = true;
+      for (let i = 0; i < cells.length; i++) {
+        const c = cells[i];
+        ghosts[i].setPosition(c.x, c.y);
+        validMarks[i].setPosition(c.x, c.y);
+        const ok = _isPlacementValid(c.x, c.y);
+        if (!ok) allValid = false;
+        validMarks[i].setFillStyle(ok ? 0x22c55e : 0xef4444, 0.25);
+        validMarks[i].setStrokeStyle(2, ok ? 0x22c55e : 0xef4444, 0.9);
+        ghosts[i].setAlpha(ok ? 0.85 : 0.4);
+      }
+      // Toast compteur de coût
+      const cfg = Network.getConfig();
+      const wallCost = cfg.buildingTypes.wall.cost;
+      const N = cells.length;
+      const totalCost = N * wallCost;
+      const myGold = (Network.getState().players[Network.getMyId()] || {}).gold || 0;
+      const affordable = myGold >= totalCost;
+      _toast(`🧱 ${N} rempart${N > 1 ? 's' : ''} × ${wallCost} = ${totalCost} 💰 ${affordable ? '' : '⛔ (gold insuffisant)'} — clic = poser, Échap = annuler`);
+      return;
     }
-    if (ghost) ghost.setAlpha(valid ? 0.85 : 0.5);
+
+    // Mode classique : 1 ghost qui suit
+    if (ghosts.length === 0) _spawnGhost(worldX, worldY);
+    const ghost = ghosts[0];
+    const mark = validMarks[0];
+    ghost.setPosition(snap.x, snap.y);
+    mark.setPosition(snap.x, snap.y);
+    const ok = _isPlacementValid(snap.x, snap.y);
+    mark.setFillStyle(ok ? 0x22c55e : 0xef4444, 0.25);
+    mark.setStrokeStyle(2, ok ? 0x22c55e : 0xef4444, 0.9);
+    ghost.setAlpha(ok ? 0.85 : 0.4);
   }
 
+  // Appelé par MainScene au clic gauche
   function tryPlace(worldX, worldY) {
     if (!active) return false;
-    if (!_isPlacementValid(worldX, worldY)) return false;
-    Network.buildBuilding(buildingType, Math.round(worldX), Math.round(worldY), baseType, baseId);
+    const snap = snapToGrid(worldX, worldY);
+
+    if (lineMode) {
+      // 1er clic : enregistre le point de départ et passe en mode dessin
+      if (!lineDrawing) {
+        if (!_isPlacementValid(snap.x, snap.y)) return false;
+        lineStart = snap;
+        lineDrawing = true;
+        return true;
+      }
+      // 2e clic : valide la ligne complète
+      const cells = _lineCells(lineStart, snap);
+      const cfg = Network.getConfig();
+      const wallCost = cfg.buildingTypes.wall.cost;
+      const myGold = (Network.getState().players[Network.getMyId()] || {}).gold || 0;
+      // Vérif globale : toutes les cases valides + assez de gold
+      for (const c of cells) {
+        if (!_isPlacementValid(c.x, c.y)) return false;
+      }
+      if (myGold < cells.length * wallCost) return false;
+      // Envoi serveur (un buildBuilding par case)
+      for (const c of cells) {
+        Network.buildBuilding('wall', c.x, c.y, baseType, baseId);
+      }
+      cancel();
+      return true;
+    }
+
+    // Mode classique : 1 clic = pose
+    if (!_isPlacementValid(snap.x, snap.y)) return false;
+    Network.buildBuilding(buildingType, snap.x, snap.y, baseType, baseId);
     cancel();
     return true;
   }
@@ -82,9 +213,13 @@ const BuildMode = (() => {
   function cancel() {
     active = false;
     buildingType = null;
-    if (ghost)      { ghost.destroy(); ghost = null; }
-    if (zoneCircle) { zoneCircle.destroy(); zoneCircle = null; }
-    if (validMark)  { validMark.destroy(); validMark = null; }
+    lineMode = false;
+    lineDrawing = false;
+    lineStart = null;
+    _clearGhosts();
+    if (zoneRect)    { zoneRect.destroy(); zoneRect = null; }
+    if (gridOverlay) { gridOverlay.destroy(); gridOverlay = null; }
+    _hideToast();
   }
 
   function isActive() { return active; }
@@ -109,13 +244,30 @@ const BuildMode = (() => {
     return null;
   }
 
-  function _isPlacementValid(wx, wy) {
+  function _isPlacementValid(snapX, snapY) {
     const baseObj = _baseObj();
     if (!baseObj) return false;
-    return Math.hypot(wx - baseObj.x, wy - baseObj.y) <= _baseRadius();
+    const r = _baseRadius();
+    // Doit être dans le carré (L∞)
+    if (Math.max(Math.abs(snapX - baseObj.x), Math.abs(snapY - baseObj.y)) > r) return false;
+    // Pas trop près d'un HDV / village existant
+    const cfg = Network.getConfig();
+    const minDistBase = cfg.buildingMinDistHdv || 70;
+    const state = Network.getState();
+    for (const p of Object.values(state.players || {})) {
+      if (Math.hypot(snapX - p.x, snapY - p.y) < minDistBase) return false;
+    }
+    for (const v of (state.villages || [])) {
+      if (Math.hypot(snapX - v.x, snapY - v.y) < minDistBase) return false;
+    }
+    // Case déjà occupée par un bâtiment
+    for (const b of (state.buildings || [])) {
+      if (b.x === snapX && b.y === snapY) return false;
+    }
+    return true;
   }
 
-  function _toast(msg, icon) {
+  function _toast(msg) {
     let el = document.getElementById('build-toast');
     if (!el) {
       el = document.createElement('div');
@@ -133,11 +285,13 @@ const BuildMode = (() => {
     }
     el.textContent = msg;
     el.style.display = 'block';
-    if (BuildMode._toastTimer) clearTimeout(BuildMode._toastTimer);
-    BuildMode._toastTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
   }
 
-  // Échap → cancel
+  function _hideToast() {
+    const el = document.getElementById('build-toast');
+    if (el) el.style.display = 'none';
+  }
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && active) cancel();
   });

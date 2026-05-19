@@ -160,10 +160,9 @@ class MainScene extends Phaser.Scene {
     });
 
     Network.setOnAttack((data) => {
-      const state    = Network.getState();
-      const attacker = state.units && state.units[data.attackerId];
-      if (!attacker) return;
+      const state = Network.getState();
 
+      // ── Résoudre la position de la cible ──
       let tx, ty;
       if (data.targetType === 'unit') {
         const t = state.units && state.units[data.targetId];
@@ -177,6 +176,14 @@ class MainScene extends Phaser.Scene {
             : 0xffffff;
           this._spawnDeathParticles(t.x, t.y, colorInt);
         }
+      } else if (data.targetType === 'village') {
+        const v = (state.villages || []).find(vv => vv.id === data.targetId);
+        if (!v) return;
+        tx = v.x; ty = v.y;
+      } else if (data.targetType === 'building') {
+        const b = (state.buildings || []).find(bb => bb.id === data.targetId);
+        if (!b) return;
+        tx = b.x; ty = b.y;
       } else {
         const t = state.players && state.players[data.targetId];
         if (!t) return;
@@ -184,14 +191,22 @@ class MainScene extends Phaser.Scene {
         this._flashHdv(data.targetId);
       }
 
-      // ── Animation selon le type d'attaquant ───────────────────
-      this._playAttackAnimation(attacker, tx, ty);
-
-      // Kill feed for unit kills
-      if (data.killed && data.targetType === 'unit') {
-        const killerOwner = state.players[attacker.ownerId];
-        if (killerOwner) {
-          this._addKillFeedEntry(`⚔️ ${killerOwner.name} a tué une unité`, killerOwner.color);
+      // ── Résoudre l'attaquant (unité OU bâtiment) ──
+      if (data.attackerType === 'building') {
+        // Flèche depuis le bâtiment (les coords sont fournies en bx, by)
+        const ax = (data.bx != null) ? data.bx : tx;
+        const ay = (data.by != null) ? data.by : ty;
+        this._playArrowAnimation(ax, ay, tx, ty);
+      } else {
+        const attacker = state.units && state.units[data.attackerId];
+        if (!attacker) return;
+        this._playAttackAnimation(attacker, tx, ty);
+        // Kill feed unit→unit
+        if (data.killed && data.targetType === 'unit') {
+          const killerOwner = state.players[attacker.ownerId];
+          if (killerOwner) {
+            this._addKillFeedEntry(`⚔️ ${killerOwner.name} a tué une unité`, killerOwner.color);
+          }
         }
       }
     });
@@ -393,10 +408,32 @@ class MainScene extends Phaser.Scene {
           .setStrokeStyle(1, 0x000000, 0.7).setOrigin(0.5, 0.5).setDepth(60);
         const hpFill = this.add.rectangle(b.x - (SIZE + 10) / 2, b.y - SIZE / 2 - 8, (SIZE + 10), 5, 0x22c55e)
           .setOrigin(0, 0.5).setDepth(60);
+
+        // Click handler : sur une tour → affiche le cercle de portée 2.5s
+        if (b.type === 'tower' && def.range) {
+          bg.setInteractive();
+          bg.on('pointerdown', () => {
+            const ring = this.add.graphics().setDepth(90);
+            ring.lineStyle(2, 0xfbbf24, 0.85);
+            ring.strokeCircle(b.x, b.y, def.range);
+            ring.fillStyle(0xfbbf24, 0.05);
+            ring.fillCircle(b.x, b.y, def.range);
+            this.tweens.add({
+              targets: ring, alpha: { from: 1, to: 0 },
+              duration: 2500, ease: 'Quad.easeIn',
+              onComplete: () => ring.destroy(),
+            });
+          });
+        }
+
         s = { bg, icon, hpBg, hpFill };
         this.buildingSprites[b.id] = s;
       }
+      s.bg.setPosition(b.x, b.y);
       s.bg.setFillStyle(colorInt, 0.85);
+      s.icon.setPosition(b.x, b.y);
+      s.hpBg.setPosition(b.x, b.y - SIZE / 2 - 8);
+      s.hpFill.setPosition(b.x - (SIZE + 10) / 2, b.y - SIZE / 2 - 8);
       const hpRatio = b.hp / b.maxHp;
       s.hpFill.width = (SIZE + 10) * hpRatio;
       const c = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
@@ -463,6 +500,9 @@ class MainScene extends Phaser.Scene {
         const capBarFill = this.add.rectangle(v.x - 45, v.y - 42, 0, 6, 0xfbbf24)
           .setOrigin(0, 0.5).setDepth(60);
 
+        // Bordure carrée couleur équipe (depth 5) — visible UNIQUEMENT si possédé
+        const zoneBorder = this.add.graphics().setDepth(5);
+
         // Click handler : si c'est MON village, ouvre le panel village
         if (useAsset && main.setInteractive) {
           main.setInteractive();
@@ -478,8 +518,20 @@ class MainScene extends Phaser.Scene {
           });
         }
 
-        sprite = { main, label, hpBarBg, hpBarFill, capBarBg, capBarFill };
+        sprite = { main, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder };
         this.villageSprites[v.id] = sprite;
+      }
+
+      // Met à jour la bordure carrée si possédé (sinon cachée)
+      if (sprite.zoneBorder) {
+        sprite.zoneBorder.clear();
+        if (owner && !destroyed) {
+          const vLvls = cfg.villageLevels || [];
+          const lvl = vLvls[(v.level || 1) - 1] || vLvls[0] || {};
+          const buildR = lvl.buildRadius || 160;
+          sprite.zoneBorder.lineStyle(3, ownerColorInt, 0.55);
+          sprite.zoneBorder.strokeRect(v.x - buildR, v.y - buildR, buildR * 2, buildR * 2);
+        }
       }
 
       // Update : positions + tint + visibility
@@ -726,7 +778,18 @@ class MainScene extends Phaser.Scene {
       const hpRatio   = Math.max(0, player.hp / player.maxHp);
       const destroyed = player.hp <= 0;
 
+      // Rayon de zone constructible selon le level HDV (récupéré depuis la config)
+      const cfgH = Network.getConfig();
+      const hdvLvls = cfgH.hdvLevels || [];
+      const lvl = hdvLvls[(player.hdvLevel || 1) - 1] || hdvLvls[0] || {};
+      const buildR = lvl.buildRadius || 240;
+
       if (!this.hdvSprites[id]) {
+        // Bordure carrée permanente couleur équipe (depth 5, derrière tout le reste)
+        const zoneBorder = this.add.graphics().setDepth(5);
+        zoneBorder.lineStyle(3, colorInt, 0.55);
+        zoneBorder.strokeRect(player.x - buildR, player.y - buildR, buildR * 2, buildR * 2);
+
         // HDV : sprite PNG tinté équipe, sinon fallback procédural
         let hdvObj;
         if (useAsset) {
@@ -766,19 +829,27 @@ class MainScene extends Phaser.Scene {
           { fontSize: '13px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
         ).setOrigin(0.5, 0).setDepth(70);
 
-        // [hdvObj, barBg, barFill, nameLabel, hpLabel] — plus d'ownerDisc
-        this.hdvSprites[id] = [hdvObj, barBg, barFill, nameLabel, hpLabel];
+        // [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder]
+        this.hdvSprites[id] = [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder];
+        this.hdvSprites[id]._currentBuildR = buildR; // mémorise pour détecter les changements de level
 
       } else {
-        const [hdvObj, barBg, barFill, nameLabel, hpLabel] = this.hdvSprites[id];
+        const [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder] = this.hdvSprites[id];
 
         hdvObj.setPosition(player.x, player.y);
         if (hdvObj.setTint) hdvObj.setTint(destroyed ? 0x888888 : colorInt);
         hdvObj.setAlpha(destroyed ? 0.45 : 1);
 
-        // Pulse subtil quand HP < 30%
         if (!destroyed && hpRatio < 0.3) {
           hdvObj.setAlpha(0.9 + 0.1 * Math.sin(Date.now() / 200));
+        }
+
+        // Update zone border si le level a changé (rayon différent) ou si le HDV bouge
+        if (zoneBorder && (this.hdvSprites[id]._currentBuildR !== buildR || true)) {
+          zoneBorder.clear();
+          zoneBorder.lineStyle(3, colorInt, destroyed ? 0.15 : 0.55);
+          zoneBorder.strokeRect(player.x - buildR, player.y - buildR, buildR * 2, buildR * 2);
+          this.hdvSprites[id]._currentBuildR = buildR;
         }
 
         barBg.setPosition(player.x, player.y + BAR_Y_OFF);
@@ -1103,6 +1174,21 @@ class MainScene extends Phaser.Scene {
     });
     emitter.explode(10);
     this.time.delayedCall(700, () => emitter.destroy());
+  }
+
+  // Flèche générique (pour les tours et autres attaquants distants)
+  _playArrowAnimation(ax, ay, tx, ty) {
+    const angle = Math.atan2(ty - ay, tx - ax);
+    const arrow = this.add.sprite(ax, ay, 'arrow')
+      .setRotation(angle)
+      .setDepth(55);
+    this.tweens.add({
+      targets: arrow,
+      x: tx, y: ty,
+      duration: 220,
+      ease: 'Quad.easeOut',
+      onComplete: () => arrow.destroy(),
+    });
   }
 
   // ── Animations d'attaque selon le type d'unité ──────────────────
