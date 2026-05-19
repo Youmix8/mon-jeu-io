@@ -29,6 +29,22 @@ const HdvPanel = (() => {
       Network.spawnUnit(unitId);
     });
 
+    // Cartes construction
+    const buildEl = document.getElementById('hdv-panel-buildings');
+    if (buildEl) {
+      buildEl.addEventListener('click', (e) => {
+        const card = e.target.closest('.unit-card');
+        if (!card || card.classList.contains('locked')) return;
+        const buildingType = card.dataset.buildingType;
+        if (!buildingType) return;
+        _animateClick(card);
+        // Active le mode build (le panel se ferme dans BuildMode.activate)
+        if (typeof BuildMode !== 'undefined') {
+          BuildMode.activate(buildingType, { baseType: 'hdv', baseId: Network.getMyId() });
+        }
+      });
+    }
+
     techEl.addEventListener('click', (e) => {
       const card = e.target.closest('.tech-card');
       if (!card) return;
@@ -62,7 +78,14 @@ const HdvPanel = (() => {
     el.classList.add('error-flash');
   }
 
-  function open()      { _initListenersOnce(); panelEl.style.display = 'block'; isOpen = true; refresh(); }
+  function open() {
+    _initListenersOnce();
+    // Ferme le panel village s'il est ouvert (un seul panel ouvert à la fois)
+    if (typeof VillagePanel !== 'undefined' && VillagePanel.isVisible && VillagePanel.isVisible()) VillagePanel.close();
+    panelEl.style.display = 'block';
+    isOpen = true;
+    refresh();
+  }
   function close()     { if (panelEl) panelEl.style.display = 'none';  isOpen = false; }
   function toggle()    { isOpen ? close() : open(); }
   function isVisible() { return isOpen; }
@@ -101,6 +124,19 @@ const HdvPanel = (() => {
         <div class="tech-card-status" data-role="status"></div>
       </div>
     `).join('');
+
+    // Cartes construction
+    const buildEl = document.getElementById('hdv-panel-buildings');
+    if (buildEl && cfg.buildingTypes) {
+      buildEl.innerHTML = Object.values(cfg.buildingTypes).map(b => `
+        <div class="unit-card" data-building-type="${b.id}">
+          <div class="unit-card-icon">${b.icon}</div>
+          <div class="unit-card-name">${b.name}</div>
+          <div class="unit-card-stats">${b.desc || ''}</div>
+          <div class="unit-card-cost">${b.cost} 💰</div>
+        </div>
+      `).join('');
+    }
 
     cardsBuilt = true;
     return true;
@@ -182,6 +218,17 @@ const HdvPanel = (() => {
         statusEl.textContent = researched ? '✓ Recherchée'
           : !prereqsOk ? `🔒 ${t.requires.map(r => techNameOf(r)).join(', ')}`
           : `🔬 ${t.cost} pt`;
+      }
+    }
+
+    // ── Building cards : update affordability ─────────────────────────
+    const buildEl = document.getElementById('hdv-panel-buildings');
+    if (buildEl && cfg.buildingTypes) {
+      for (const card of buildEl.querySelectorAll('.unit-card')) {
+        const b = cfg.buildingTypes[card.dataset.buildingType];
+        if (!b) continue;
+        const affordable = me.gold >= b.cost;
+        card.classList.toggle('poor', !affordable);
       }
     }
   }

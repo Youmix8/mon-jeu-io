@@ -27,6 +27,21 @@ const VillagePanel = (() => {
       Network.villageSpawnUnit(currentVillageId, unitId);
     });
 
+    // Cartes construction
+    const buildEl = document.getElementById('village-panel-buildings');
+    if (buildEl) {
+      buildEl.addEventListener('click', (e) => {
+        const card = e.target.closest('.unit-card');
+        if (!card || card.classList.contains('locked')) return;
+        const buildingType = card.dataset.buildingType;
+        if (!buildingType || !currentVillageId) return;
+        _animateClick(card);
+        if (typeof BuildMode !== 'undefined') {
+          BuildMode.activate(buildingType, { baseType: 'village', baseId: currentVillageId });
+        }
+      });
+    }
+
     upgradeBtn.addEventListener('click', () => {
       if (!currentVillageId) return;
       Network.upgradeVillage(currentVillageId);
@@ -49,6 +64,8 @@ const VillagePanel = (() => {
   function open(villageId) {
     _initOnce();
     if (!panelEl) return;
+    // Ferme le panel HDV s'il est ouvert
+    if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible && HdvPanel.isVisible()) HdvPanel.close();
     currentVillageId = villageId;
     cardsBuilt = false;
     panelEl.style.display = 'block';
@@ -76,6 +93,20 @@ const VillagePanel = (() => {
         <div class="locked-note" data-role="lock"></div>
       </div>
     `).join('');
+
+    // Construction cards
+    const buildEl = document.getElementById('village-panel-buildings');
+    if (buildEl && cfg.buildingTypes) {
+      buildEl.innerHTML = Object.values(cfg.buildingTypes).map(b => `
+        <div class="unit-card" data-building-type="${b.id}">
+          <div class="unit-card-icon">${b.icon}</div>
+          <div class="unit-card-name">${b.name}</div>
+          <div class="unit-card-stats">${b.desc || ''}</div>
+          <div class="unit-card-cost">${b.cost} 💰</div>
+        </div>
+      `).join('');
+    }
+
     cardsBuilt = true;
     return true;
   }
@@ -136,6 +167,16 @@ const VillagePanel = (() => {
         } else {
           lockNote.style.display = 'none';
         }
+      }
+    }
+
+    // Building cards : affordability
+    const buildEl = document.getElementById('village-panel-buildings');
+    if (buildEl && cfg.buildingTypes) {
+      for (const card of buildEl.querySelectorAll('.unit-card')) {
+        const b = cfg.buildingTypes[card.dataset.buildingType];
+        if (!b) continue;
+        card.classList.toggle('poor', me.gold < b.cost);
       }
     }
   }

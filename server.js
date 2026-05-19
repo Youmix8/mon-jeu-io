@@ -47,15 +47,38 @@ const TECH_TREE = {
 };
 
 // hdvLevel 1 = état de départ
+// goldPerSec : taux de gold passif de l'HDV à ce niveau
+// buildRadius : rayon de la zone constructible (plus petit que la vision)
 const HDV_LEVELS = [
-  { level: 1, maxHp: 1000, vision: 340, upgradeCost:  100 },
-  { level: 2, maxHp: 1200, vision: 380, upgradeCost:  250 },
-  { level: 3, maxHp: 1400, vision: 420, upgradeCost:  500 },
-  { level: 4, maxHp: 1600, vision: 460, upgradeCost: 1000 },
-  { level: 5, maxHp: 1800, vision: 500, upgradeCost: null }, // max
+  { level: 1, maxHp: 1000, vision: 340, upgradeCost:   50, goldPerSec: 1, buildRadius: 240 },
+  { level: 2, maxHp: 1200, vision: 380, upgradeCost:  150, goldPerSec: 2, buildRadius: 280 },
+  { level: 3, maxHp: 1400, vision: 420, upgradeCost:  350, goldPerSec: 3, buildRadius: 320 },
+  { level: 4, maxHp: 1600, vision: 460, upgradeCost:  700, goldPerSec: 4, buildRadius: 360 },
+  { level: 5, maxHp: 1800, vision: 500, upgradeCost: null, goldPerSec: 5, buildRadius: 400 }, // max
 ];
 
 const MAX_HDV_LEVEL = HDV_LEVELS.length;
+
+// ────────── Bâtiments constructibles ──────────
+const BUILDING_TYPES = {
+  tower: {
+    id: 'tower', name: 'Tour d\'archer', icon: '🏹',
+    cost: 60, hp: 250,
+    range: 220, damage: 6, cooldownMs: 1100,
+    halfSize: 22, // pour hitbox
+    desc: 'Tire automatiquement les ennemis à portée.',
+  },
+  wall: {
+    id: 'wall', name: 'Rempart', icon: '🧱',
+    cost: 25, hp: 500,
+    range: 0, damage: 0, cooldownMs: 0,
+    halfSize: 25,
+    desc: 'Mur solide. Bloque le passage, pas d\'attaque.',
+  },
+};
+
+const BUILDING_MIN_DIST     = 60;  // distance min entre 2 bâtiments
+const BUILDING_MIN_DIST_HDV = 70;  // distance min HDV / village ↔ bâtiment
 
 // ────────── Villages neutres (modèle Polytopia : base secondaire conquérable) ──────────
 const VILLAGE_RADIUS         = 70;              // rayon de capture
@@ -71,8 +94,8 @@ const VILLAGE_VISION         = 220;             // vision donnée au propriétai
 const VILLAGE_UPGRADE_COST   = 150;             // coût Lv1 → Lv2
 
 const VILLAGE_LEVELS = [
-  { level: 1, allowedUnits: ['soldier'] },
-  { level: 2, allowedUnits: 'all' }, // toutes les unités débloquées par le joueur via tech
+  { level: 1, allowedUnits: ['soldier'], goldPerSec: 0.5, buildRadius: 160 },
+  { level: 2, allowedUnits: 'all',        goldPerSec: 1.0, buildRadius: 220 },
 ];
 
 function generateVillages(spawns) {
@@ -115,6 +138,26 @@ function unitToVillageDist(unit, v) {
   return Math.hypot(unit.x - cx, unit.y - cy);
 }
 
+// Distance bord-à-bord entre une unité et un bâtiment
+function unitToBuildingDist(unit, b) {
+  const def = BUILDING_TYPES[b.type];
+  const half = (def && def.halfSize) || 22;
+  const cx = Math.max(b.x - half, Math.min(unit.x, b.x + half));
+  const cy = Math.max(b.y - half, Math.min(unit.y, b.y + half));
+  return Math.hypot(unit.x - cx, unit.y - cy);
+}
+
+// Rayon constructible autour d'une base (HDV ou village)
+function baseBuildRadius(baseType, baseObj) {
+  if (baseType === 'hdv') {
+    const lvl = HDV_LEVELS[(baseObj.hdvLevel || 1) - 1] || HDV_LEVELS[0];
+    return lvl.buildRadius || 240;
+  } else {
+    const lvl = VILLAGE_LEVELS[(baseObj.level || 1) - 1] || VILLAGE_LEVELS[0];
+    return lvl.buildRadius || 160;
+  }
+}
+
 // Recalcule maxHp et vision du HDV en fonction du niveau + techs recherchées
 function recomputeHdvStats(player) {
   const lvl = HDV_LEVELS[player.hdvLevel - 1] || HDV_LEVELS[0];
@@ -131,14 +174,19 @@ function recomputeHdvStats(player) {
 }
 
 function computeGoldRate(player) {
-  let rate = GOLD_PER_SECOND;
+  // Base : taux de l'HDV selon son niveau
+  const hdvLvl = HDV_LEVELS[(player.hdvLevel || 1) - 1] || HDV_LEVELS[0];
+  let rate = hdvLvl.goldPerSec || GOLD_PER_SECOND;
+  // Bonus techs
   for (const techId of player.researchedTechs) {
     const eff = TECH_TREE[techId] && TECH_TREE[techId].effect;
     if (eff && eff.goldBonus) rate += eff.goldBonus;
   }
-  // Chaque village possédé donne VILLAGE_GOLD_PER_SEC au propriétaire
+  // Bonus villages possédés (selon leur niveau)
   for (const v of gameState.villages) {
-    if (v.ownerId === player.id && !v.destroyed) rate += VILLAGE_GOLD_PER_SEC;
+    if (v.ownerId !== player.id || v.hp <= 0) continue;
+    const vLvl = VILLAGE_LEVELS[(v.level || 1) - 1] || VILLAGE_LEVELS[0];
+    rate += vLvl.goldPerSec || VILLAGE_GOLD_PER_SEC;
   }
   return rate;
 }
@@ -398,7 +446,6 @@ function buildFilteredState(viewerId) {
   }
 
   // Villages — visibles si tuile actuellement visible OU explorée
-  // (HDV-like : une fois découverts, on garde la mémoire de leur position)
   const filteredVillages = [];
   for (const v of gameState.villages) {
     if (seeAll) { filteredVillages.push(v); continue; }
@@ -406,10 +453,20 @@ function buildFilteredState(viewerId) {
     if (vis.visible[idx] || vis.explored[idx]) filteredVillages.push(v);
   }
 
+  // Bâtiments — visibles uniquement si tuile actuellement visible (pas la mémoire)
+  // (les bâtiments peuvent être détruits, donc on ne montre pas un fantôme exploré)
+  const filteredBuildings = [];
+  for (const b of gameState.buildings) {
+    if (seeAll || b.ownerId === viewerId) { filteredBuildings.push(b); continue; }
+    const idx = Math.floor(b.y / TILE_SIZE) * GRID_W + Math.floor(b.x / TILE_SIZE);
+    if (vis.visible[idx]) filteredBuildings.push(b);
+  }
+
   return {
     players: filteredPlayers,
     units: filteredUnits,
     villages: filteredVillages,
+    buildings: filteredBuildings,
     matchState: gameState.matchState,
     winnerId: gameState.winnerId,
     matchStartTime: gameState.matchStartTime,
@@ -438,10 +495,12 @@ const gameState = {
   players: {},
   units: {},
   villages: initialVillages,
+  buildings: [],
   matchState: 'waiting',
   winnerId: null,
   matchStartTime: null,
 };
+let nextBuildingId = 1;
 let nextUnitId = 1;
 let tickCount  = 0;
 let peakPlayerCount = 0;
@@ -573,6 +632,7 @@ function eliminatePlayer(player, toDelete) {
 function resetMatch() {
   currentSpawns = generateSpawns();
   gameState.villages = generateVillages(currentSpawns);
+  gameState.buildings = [];
   resetVisibilityAll();
   for (const p of Object.values(gameState.players)) {
     p.hdvLevel        = 1;
@@ -611,6 +671,7 @@ io.on('connection', (socket) => {
     for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
     currentSpawns = generateSpawns();
     gameState.villages = generateVillages(currentSpawns);
+    gameState.buildings = [];
     console.log('Recovered zombie ended state on new connection');
   }
 
@@ -679,6 +740,7 @@ io.on('connection', (socket) => {
     villageLevels: VILLAGE_LEVELS,
     villageHalfSize: VILLAGE_HALF_SIZE,
     spawnPositions: currentSpawns,
+    buildingTypes: BUILDING_TYPES,
   });
   broadcastFilteredState();
 
@@ -830,6 +892,69 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ── Construction d'un bâtiment dans la zone d'une base (HDV/village) ──
+  socket.on('buildBuilding', ({ type, x, y, baseType, baseId }) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const def = BUILDING_TYPES[type];
+    if (!def) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    // Détermine la base ancre (HDV propre OU village possédé)
+    let base, baseObj;
+    if (baseType === 'hdv') {
+      if (baseId && baseId !== p.id) return; // doit être son HDV
+      baseObj = p; base = p;
+    } else if (baseType === 'village') {
+      const v = gameState.villages.find(vv => vv.id === baseId);
+      if (!v || v.ownerId !== p.id) return;
+      baseObj = v; base = v;
+    } else {
+      return;
+    }
+    // Position doit être dans le rayon constructible
+    const r = baseBuildRadius(baseType, baseObj);
+    if (Math.hypot(x - base.x, y - base.y) > r) {
+      socket.emit('spawnFailed', { reason: 'out_of_build_zone' });
+      return;
+    }
+    // Distance minimale par rapport aux autres entités
+    for (const b of gameState.buildings) {
+      if (Math.hypot(b.x - x, b.y - y) < BUILDING_MIN_DIST) {
+        socket.emit('spawnFailed', { reason: 'too_close_to_building' });
+        return;
+      }
+    }
+    // Trop près d'un HDV/village
+    for (const pl of Object.values(gameState.players)) {
+      if (Math.hypot(pl.x - x, pl.y - y) < BUILDING_MIN_DIST_HDV) {
+        socket.emit('spawnFailed', { reason: 'too_close_to_base' });
+        return;
+      }
+    }
+    for (const vv of gameState.villages) {
+      if (Math.hypot(vv.x - x, vv.y - y) < BUILDING_MIN_DIST_HDV) {
+        socket.emit('spawnFailed', { reason: 'too_close_to_base' });
+        return;
+      }
+    }
+    // Coût
+    if (p.gold < def.cost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_gold' });
+      return;
+    }
+    p.gold -= def.cost;
+    const bid = `b_${nextBuildingId++}`;
+    gameState.buildings.push({
+      id: bid,
+      ownerId: p.id,
+      type,
+      x: Math.round(x), y: Math.round(y),
+      hp: def.hp, maxHp: def.hp,
+      lastAttackTime: 0,
+    });
+    console.log(`Bâtiment ${type} construit par ${p.name} en (${Math.round(x)},${Math.round(y)})`);
+  });
+
   // ── Village : améliorer Lv1 → Lv2 ────────────────────────────
   socket.on('upgradeVillage', ({ villageId }) => {
     const p = gameState.players[socket.id];
@@ -844,7 +969,8 @@ io.on('connection', (socket) => {
     p.gold -= VILLAGE_UPGRADE_COST;
     v.level = 2;
     v.hp = Math.min(v.maxHp, v.hp + 100); // bonus heal
-    console.log(`Village ${v.id} amélioré Lv 2 par ${p.name}`);
+    p.techPoints = (p.techPoints || 0) + 1; // bonus pt tech à l'upgrade village
+    console.log(`Village ${v.id} amélioré Lv 2 par ${p.name} (+1 pt tech)`);
   });
 
   // ── Village : produire une unité (similaire à spawnUnit mais depuis un village) ──
@@ -926,6 +1052,7 @@ io.on('connection', (socket) => {
       peakPlayerCount          = 0;
       currentSpawns = generateSpawns();
       gameState.villages = generateVillages(currentSpawns);
+      gameState.buildings = [];
       console.log('No humans left, full reset (bots removed)');
     } else if (wasAlive) {
       checkMatchState();
@@ -1015,6 +1142,11 @@ setInterval(() => {
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
         if (unitToVillageDist(unit, target) <= effectiveRange) continue;
         goalX = target.x; goalY = target.y;
+      } else if (unit.attackTargetType === 'building') {
+        const target = gameState.buildings.find(bb => bb.id === unit.attackTargetId);
+        if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
+        if (unitToBuildingDist(unit, target) <= effectiveRange) continue;
+        goalX = target.x; goalY = target.y;
       } else {
         const target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
@@ -1103,6 +1235,10 @@ setInterval(() => {
         target = gameState.villages.find(vv => vv.id === unit.attackTargetId);
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
         inRange = unitToVillageDist(unit, target) <= effectiveRange;
+      } else if (unit.attackTargetType === 'building') {
+        target = gameState.buildings.find(bb => bb.id === unit.attackTargetId);
+        if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
+        inRange = unitToBuildingDist(unit, target) <= effectiveRange;
       } else {
         target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
@@ -1130,9 +1266,14 @@ setInterval(() => {
         target.level = 1;
         target.captureProgress = 0;
         target.capturingPlayerId = null;
-        target.hp = 0; // reste à 0 jusqu'à la reprise
+        target.hp = 0;
         attackEntry.killed = true;
         io.emit('villageDestroyed', { villageId: target.id, byPlayerId: unit.ownerId, prevOwnerId: prevOwner });
+        unit.attackTargetId = null; unit.attackTargetType = null;
+      } else if (unit.attackTargetType === 'building' && target.hp <= 0) {
+        // Bâtiment détruit : supprimé du state
+        target._toDelete = true;
+        attackEntry.killed = true;
         unit.attackTargetId = null; unit.attackTargetType = null;
       }
       attacks.push(attackEntry);
@@ -1173,10 +1314,43 @@ setInterval(() => {
     // MOVE: skip combat
   }
 
+  // 3.4. Bâtiments combat : Tours tirent automatiquement sur les unités ennemies à portée
+  for (const b of gameState.buildings) {
+    if (b.hp <= 0) continue;
+    const def = BUILDING_TYPES[b.type];
+    if (!def || !def.damage || def.damage <= 0) continue; // Wall : pas d'attaque
+    if (nowMs - b.lastAttackTime < (def.cooldownMs || 1000)) continue;
+    // Cherche l'ennemi le plus proche (unité) à portée
+    let bestTarget = null, bestDist = def.range;
+    for (const u of Object.values(gameState.units)) {
+      if (u.ownerId === b.ownerId || toDelete.has(u.id)) continue;
+      const d = Math.hypot(u.x - b.x, u.y - b.y);
+      if (d < bestDist) { bestDist = d; bestTarget = u; }
+    }
+    if (bestTarget) {
+      b.lastAttackTime = nowMs;
+      bestTarget.hp = Math.max(0, bestTarget.hp - def.damage);
+      const entry = { attackerId: b.id, attackerType: 'building', targetType: 'unit', targetId: bestTarget.id, bx: b.x, by: b.y };
+      if (bestTarget.hp <= 0) {
+        toDelete.add(bestTarget.id);
+        entry.killed = true;
+        const owner = gameState.players[b.ownerId];
+        if (owner && !owner.eliminated) owner.kills++;
+      }
+      attacks.push(entry);
+    }
+  }
+
   if (attacks.length > 0) io.emit('attacks', attacks);
 
   for (const id of toDelete) {
     delete gameState.units[id];
+  }
+  // Supprime les bâtiments détruits
+  for (let i = gameState.buildings.length - 1; i >= 0; i--) {
+    if (gameState.buildings[i]._toDelete || gameState.buildings[i].hp <= 0) {
+      gameState.buildings.splice(i, 1);
+    }
   }
 
   // 3.5. Villages — capture progressive (10 s) si une seule team présente.
