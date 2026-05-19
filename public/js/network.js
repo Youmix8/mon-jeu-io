@@ -219,6 +219,9 @@ const Network = (() => {
   }
   function requestRestart() { if (socket) socket.emit('requestRestart'); }
   function upgradeHdv()     { if (socket) socket.emit('upgradeHdv'); }
+  function defendArea(unitIds, x, y, radius) {
+    if (socket) socket.emit('defendArea', { unitIds, x, y, radius: radius || 280 });
+  }
   function researchTech(techId) { if (socket) socket.emit('researchTech', { techId }); }
   function addBot()         { if (socket) socket.emit('addBot'); }
   function upgradeVillage(villageId)  { if (socket) socket.emit('upgradeVillage', { villageId }); }
@@ -241,7 +244,7 @@ const Network = (() => {
   return {
     init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech, addBot,
-    upgradeVillage, villageSpawnUnit,
+    upgradeVillage, villageSpawnUnit, defendArea,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnInitReceived,
     isInitReceived,

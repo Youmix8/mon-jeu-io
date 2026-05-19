@@ -40,12 +40,12 @@
     <hr />
     <div id="instructions">
       🏛 Clic HDV : production & tech<br />
+      🏘 Clic village : production & upgrade<br />
       📦 Clic / Drag : sélectionner<br />
-      👉 Clic droit : déplacer / attaquer<br />
-      ⌨️ ZQSD / drag 2 doigts : caméra<br />
-      🔍 Pinch / Ctrl+scroll : zoom<br />
-      🗺 <strong>F</strong> : voir toute la map<br />
-      ✅ Ctrl+A : tout sélectionner
+      👉 Clic droit court : déplacer / attaquer<br />
+      🎯 <strong>Maintien clic droit</strong> : roue (Attaquer / Déplacer / Défendre)<br />
+      ⌨️ ZQSD : caméra &nbsp; 🔍 Ctrl+scroll : zoom<br />
+      🗺 <strong>F</strong> : voir toute la map &nbsp; ✅ Ctrl+A : tout
     </div>
     <div id="waiting-msg" style="display:none; margin-top:8px; font-size:12px; color:#aaaaaa;">⏳ En attente d'au moins 2 joueurs…</div>
     <button id="add-bot-btn" class="hud-btn" onclick="Network.addBot()" style="margin-top:8px;">🤖 Ajouter un bot</button>
@@ -88,21 +88,24 @@
     </div>
   </div>
 
-  <!-- Village Panel (clic sur un village possédé) -->
+  <!-- Village Panel (clic sur un village possédé) — style harmonisé avec HDV -->
   <div id="village-panel" style="display:none;">
     <div class="hdv-panel-header">
       <span id="village-panel-title">🏘 Mon village</span>
       <button class="hdv-panel-close">✕</button>
     </div>
+
     <div class="hdv-panel-section">
       <div class="hdv-panel-section-title">Base secondaire</div>
-      <div id="village-panel-empire" style="font-size:13px; line-height:1.85; font-weight:500;">
+      <div id="hdv-panel-empire">
         <div>Niveau : <strong><span id="village-level">1</span> / 2</strong></div>
         <div>❤️ HP : <span id="village-hp">300/300</span></div>
-        <div>💰 Production passive : <span id="village-rate">+0.5/s</span></div>
+        <div>💰 Production passive : <strong><span id="village-rate">+0.5</span>/s</strong></div>
+        <div>🛡 Garnison : <span id="village-garrison">0</span> unités</div>
         <button id="village-upgrade-btn" class="hdv-action-btn">⬆ Améliorer Lv 2 (— gold)</button>
       </div>
     </div>
+
     <div class="hdv-panel-section">
       <div class="hdv-panel-section-title">Production</div>
       <div id="village-panel-production" class="production-grid"></div>
@@ -150,6 +153,7 @@
   <script src="/js/sprite-factory.js"></script>
   <script src="/js/hdv-panel.js"></script>
   <script src="/js/village-panel.js"></script>
+  <script src="/js/radial-menu.js"></script>
   <script src="/js/minimap.js"></script>
   <script src="/js/scenes/MainScene.js"></script>
   <script src="/js/game.js"></script>

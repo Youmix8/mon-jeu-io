@@ -96,7 +96,15 @@ const VillagePanel = (() => {
     // Empire mini-stats
     levelEl.textContent = v.level || 1;
     hpEl.textContent    = `${v.hp}/${v.maxHp || cfg.villageMaxHp}`;
-    ratesEl.textContent = `+${cfg.villageGoldPerSec || 0.5}/s`;
+    ratesEl.textContent = `+${cfg.villageGoldPerSec || 0.5}`;
+    // Garnison : unités à moins de 200px du village
+    const garrisonEl = document.getElementById('village-garrison');
+    if (garrisonEl) {
+      const nearby = Object.values(state.units || {}).filter(u =>
+        u.ownerId === myId && Math.hypot(u.x - v.x, u.y - v.y) < 200
+      ).length;
+      garrisonEl.textContent = nearby;
+    }
 
     // Upgrade button
     const cost = cfg.villageUpgradeCost || 150;
