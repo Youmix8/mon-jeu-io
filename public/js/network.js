@@ -3,13 +3,21 @@ const Network = (() => {
   let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, playerSummary: [], fog: null };
   let myId   = null;
   let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50 };
-  let config  = { unitTypes: {}, techTree: {}, hdvLevels: [], villageTypes: {}, villageRadius: 70, villageCaptureTicks: 200 };
+  let config  = {
+    unitTypes: {}, techTree: {}, hdvLevels: [],
+    villageRadius: 70, villageCaptureTicks: 200, villageMaxHp: 300,
+    villageUpgradeCost: 150, villageGoldPerSec: 0.5,
+    villageLevels: [{ level: 1, allowedUnits: ['soldier'] }, { level: 2, allowedUnits: 'all' }],
+    villageHalfSize: 32,
+    spawnPositions: [],
+  };
   let onSpawnFailedCallback      = null;
   let onAttackCallback           = null;
   let onPlayerEliminatedCallback = null;
   let onGameOverCallback         = null;
   let onMatchRestartedCallback   = null;
   let onVillageCapturedCallback  = null;
+  let onVillageDestroyedCallback = null;
   let onInitReceivedCallback     = null;
   let initReceived = false;
 
@@ -26,9 +34,14 @@ const Network = (() => {
       if (data.unitTypes)   config.unitTypes   = data.unitTypes;
       if (data.techTree)    config.techTree    = data.techTree;
       if (data.hdvLevels)   config.hdvLevels   = data.hdvLevels;
-      if (data.villageTypes)        config.villageTypes        = data.villageTypes;
       if (data.villageRadius)       config.villageRadius       = data.villageRadius;
       if (data.villageCaptureTicks) config.villageCaptureTicks = data.villageCaptureTicks;
+      if (data.villageMaxHp)        config.villageMaxHp        = data.villageMaxHp;
+      if (data.villageUpgradeCost)  config.villageUpgradeCost  = data.villageUpgradeCost;
+      if (data.villageGoldPerSec)   config.villageGoldPerSec   = data.villageGoldPerSec;
+      if (data.villageLevels)       config.villageLevels       = data.villageLevels;
+      if (data.villageHalfSize)     config.villageHalfSize     = data.villageHalfSize;
+      if (data.spawnPositions)      config.spawnPositions      = data.spawnPositions;
       initReceived = true;
       if (onInitReceivedCallback) onInitReceivedCallback();
     });
@@ -89,6 +102,7 @@ const Network = (() => {
 
       // Rafraîchit le panneau HDV s'il est ouvert (gold, HP, techs en temps réel)
       if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible()) HdvPanel.refresh();
+      if (typeof VillagePanel !== 'undefined' && VillagePanel.isVisible()) VillagePanel.refresh();
     });
 
     socket.on('attacks', (attacks) => {
@@ -111,6 +125,10 @@ const Network = (() => {
 
     socket.on('villageCaptured', (data) => {
       if (onVillageCapturedCallback) onVillageCapturedCallback(data);
+    });
+
+    socket.on('villageDestroyed', (data) => {
+      if (onVillageDestroyedCallback) onVillageDestroyedCallback(data);
     });
 
     socket.on('gameOver', (data) => {
@@ -203,6 +221,8 @@ const Network = (() => {
   function upgradeHdv()     { if (socket) socket.emit('upgradeHdv'); }
   function researchTech(techId) { if (socket) socket.emit('researchTech', { techId }); }
   function addBot()         { if (socket) socket.emit('addBot'); }
+  function upgradeVillage(villageId)  { if (socket) socket.emit('upgradeVillage', { villageId }); }
+  function villageSpawnUnit(villageId, unitType) { if (socket) socket.emit('villageSpawnUnit', { villageId, unitType }); }
 
   function setOnSpawnFailed(cb)      { onSpawnFailedCallback = cb; }
   function setOnAttack(cb)           { onAttackCallback = cb; }
@@ -210,6 +230,7 @@ const Network = (() => {
   function setOnGameOver(cb)         { onGameOverCallback = cb; }
   function setOnMatchRestarted(cb)   { onMatchRestartedCallback = cb; }
   function setOnVillageCaptured(cb)  { onVillageCapturedCallback = cb; }
+  function setOnVillageDestroyed(cb) { onVillageDestroyedCallback = cb; }
   function setOnInitReceived(cb)     { onInitReceivedCallback = cb; if (initReceived && cb) cb(); }
   function isInitReceived()          { return initReceived; }
   function getState()                { return state; }
@@ -220,8 +241,9 @@ const Network = (() => {
   return {
     init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech, addBot,
+    upgradeVillage, villageSpawnUnit,
     setOnSpawnFailed, setOnAttack,
-    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnInitReceived,
+    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnInitReceived,
     isInitReceived,
   };
 })();

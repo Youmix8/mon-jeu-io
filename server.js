@@ -57,47 +57,62 @@ const HDV_LEVELS = [
 
 const MAX_HDV_LEVEL = HDV_LEVELS.length;
 
-// ────────── Villages neutres ──────────
-const VILLAGE_RADIUS         = 70;             // rayon de capture
-const VILLAGE_CAPTURE_TICKS  = 10 * TICK_RATE; // 10 s à 20 Hz = 200 ticks
-const VILLAGE_MIN_DIST_HDV   = 700;            // distance min HDV ↔ village
-const VILLAGE_MIN_DIST_OTHER = 600;            // distance min village ↔ village
-const VILLAGE_COUNT_MIN      = 6;
-const VILLAGE_COUNT_MAX      = 10;
+// ────────── Villages neutres (modèle Polytopia : base secondaire conquérable) ──────────
+const VILLAGE_RADIUS         = 70;              // rayon de capture
+const VILLAGE_CAPTURE_TICKS  = 10 * TICK_RATE;  // 10 s à 20 Hz = 200 ticks
+const VILLAGE_MIN_DIST_HDV   = 700;
+const VILLAGE_MIN_DIST_OTHER = 600;
+const VILLAGE_COUNT_MIN      = 5;
+const VILLAGE_COUNT_MAX      = 9;
+const VILLAGE_MAX_HP         = 300;             // PV du village (peut être détruit)
+const VILLAGE_GOLD_PER_SEC   = 0.5;             // gold passif au propriétaire
+const VILLAGE_HALF_SIZE      = 32;              // pour collisions / hitbox attaque
+const VILLAGE_VISION         = 220;             // vision donnée au propriétaire
+const VILLAGE_UPGRADE_COST   = 150;             // coût Lv1 → Lv2
 
-const VILLAGE_TYPES = {
-  goldmine:    { id: 'goldmine',    name: "Mine d'or",      icon: '💰', desc: '+0.5 gold/sec passif',     effect: { goldBonus: 0.5 } },
-  watchtower:  { id: 'watchtower',  name: 'Tour de guet',   icon: '🔭', desc: 'Vision permanente autour', effect: { visionAura: 220 } },
-  shrine:      { id: 'shrine',      name: 'Sanctuaire',     icon: '✨', desc: '+1 pt tech toutes les 60s', effect: { techTickEvery: 60 } },
-  forge:       { id: 'forge',       name: 'Forge',          icon: '🗡', desc: 'Unités spawn avec +5 HP',   effect: { unitHpBonus: 5 } },
-};
+const VILLAGE_LEVELS = [
+  { level: 1, allowedUnits: ['soldier'] },
+  { level: 2, allowedUnits: 'all' }, // toutes les unités débloquées par le joueur via tech
+];
 
 function generateVillages(spawns) {
-  const types = Object.keys(VILLAGE_TYPES);
   const count = VILLAGE_COUNT_MIN + Math.floor(Math.random() * (VILLAGE_COUNT_MAX - VILLAGE_COUNT_MIN + 1));
   const villages = [];
-  let attempts = 0;
+  let attempts = 0, idCounter = 1;
   while (villages.length < count && attempts < 800) {
     attempts++;
     const x = 200 + Math.random() * (MAP_WIDTH  - 400);
     const y = 200 + Math.random() * (MAP_HEIGHT - 400);
-    // Pas trop près d'un HDV
     if (spawns.some(s => Math.hypot(s.x - x, s.y - y) < VILLAGE_MIN_DIST_HDV)) continue;
-    // Pas trop près d'un autre village
     if (villages.some(v => Math.hypot(v.x - x, v.y - y) < VILLAGE_MIN_DIST_OTHER)) continue;
-    const typeId = types[Math.floor(Math.random() * types.length)];
     villages.push({
-      id: `v_${villages.length + 1}`,
+      id: `v_${idCounter++}`,
       x: Math.round(x), y: Math.round(y),
-      type: typeId,
       ownerId: null,
-      captureProgress: 0,        // 0 → VILLAGE_CAPTURE_TICKS
-      capturingPlayerId: null,   // joueur qui capture en ce moment
-      techTickCounter: 0,        // pour shrines (compte les sec depuis dernière distribution)
+      hp: VILLAGE_MAX_HP, maxHp: VILLAGE_MAX_HP,
+      captureProgress: 0,
+      capturingPlayerId: null,
+      level: 1,
+      lastAttackTime: 0, // pas utilisé pour combat mais cohérent
     });
   }
   console.log(`Villages générés: ${villages.length} (${count} demandés)`);
   return villages;
+}
+
+function villageAllowsUnit(village, player, typeId) {
+  const def = UNIT_TYPES[typeId];
+  if (!def) return false;
+  if (village.level === 1) return typeId === 'soldier';
+  // Level 2 : tout ce que le joueur a débloqué
+  return !def.requiresTech || (player.researchedTechs || []).includes(def.requiresTech);
+}
+
+// Distance bord-à-bord entre une unité et un village (cercle vs AABB carré)
+function unitToVillageDist(unit, v) {
+  const cx = Math.max(v.x - VILLAGE_HALF_SIZE, Math.min(unit.x, v.x + VILLAGE_HALF_SIZE));
+  const cy = Math.max(v.y - VILLAGE_HALF_SIZE, Math.min(unit.y, v.y + VILLAGE_HALF_SIZE));
+  return Math.hypot(unit.x - cx, unit.y - cy);
 }
 
 // Recalcule maxHp et vision du HDV en fonction du niveau + techs recherchées
@@ -121,23 +136,16 @@ function computeGoldRate(player) {
     const eff = TECH_TREE[techId] && TECH_TREE[techId].effect;
     if (eff && eff.goldBonus) rate += eff.goldBonus;
   }
-  // Bonus villages possédés
+  // Chaque village possédé donne VILLAGE_GOLD_PER_SEC au propriétaire
   for (const v of gameState.villages) {
-    if (v.ownerId !== player.id) continue;
-    const eff = VILLAGE_TYPES[v.type] && VILLAGE_TYPES[v.type].effect;
-    if (eff && eff.goldBonus) rate += eff.goldBonus;
+    if (v.ownerId === player.id && !v.destroyed) rate += VILLAGE_GOLD_PER_SEC;
   }
   return rate;
 }
 
-function unitHpBonusFromVillages(player) {
-  let bonus = 0;
-  for (const v of gameState.villages) {
-    if (v.ownerId !== player.id) continue;
-    const eff = VILLAGE_TYPES[v.type] && VILLAGE_TYPES[v.type].effect;
-    if (eff && eff.unitHpBonus) bonus += eff.unitHpBonus;
-  }
-  return bonus;
+function unitHpBonusFromVillages(_player) {
+  // Plus de bonus HP via village (les villages ne sont plus typés)
+  return 0;
 }
 
 // ────────── Bot IA ──────────
@@ -353,11 +361,10 @@ function computeVisibility(player) {
     for (const unit of Object.values(gameState.units)) {
       if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, VISION_UNIT);
     }
-    // Villages possédés donnant une aura de vision (Tour de guet)
+    // Chaque village possédé donne sa propre aura de vision
     for (const v of gameState.villages) {
-      if (v.ownerId !== player.id) continue;
-      const eff = VILLAGE_TYPES[v.type] && VILLAGE_TYPES[v.type].effect;
-      if (eff && eff.visionAura) markCircle(vis.visible, v.x, v.y, eff.visionAura);
+      if (v.ownerId !== player.id || v.destroyed) continue;
+      markCircle(vis.visible, v.x, v.y, VILLAGE_VISION);
     }
   }
   // OR dans explored
@@ -664,9 +671,14 @@ io.on('connection', (socket) => {
     unitTypes: UNIT_TYPES,
     techTree: TECH_TREE,
     hdvLevels: HDV_LEVELS,
-    villageTypes: VILLAGE_TYPES,
     villageRadius: VILLAGE_RADIUS,
     villageCaptureTicks: VILLAGE_CAPTURE_TICKS,
+    villageMaxHp: VILLAGE_MAX_HP,
+    villageUpgradeCost: VILLAGE_UPGRADE_COST,
+    villageGoldPerSec: VILLAGE_GOLD_PER_SEC,
+    villageLevels: VILLAGE_LEVELS,
+    villageHalfSize: VILLAGE_HALF_SIZE,
+    spawnPositions: currentSpawns,
   });
   broadcastFilteredState();
 
@@ -803,7 +815,7 @@ io.on('connection', (socket) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
     if (!Array.isArray(unitIds)) return;
-    if (!targetId || (targetType !== 'unit' && targetType !== 'hdv')) return;
+    if (!targetId || (targetType !== 'unit' && targetType !== 'hdv' && targetType !== 'village')) return;
 
     const valid = unitIds.filter(id => gameState.units[id] && gameState.units[id].ownerId === socket.id);
     if (valid.length === 0) return;
@@ -816,6 +828,60 @@ io.on('connection', (socket) => {
       unit.targetY = null;
       unit.mode = 'attack';
     }
+  });
+
+  // ── Village : améliorer Lv1 → Lv2 ────────────────────────────
+  socket.on('upgradeVillage', ({ villageId }) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const v = gameState.villages.find(vv => vv.id === villageId);
+    if (!v || v.ownerId !== socket.id) return;
+    if (v.level >= 2) return;
+    if (p.gold < VILLAGE_UPGRADE_COST) {
+      socket.emit('spawnFailed', { reason: 'not_enough_gold' });
+      return;
+    }
+    p.gold -= VILLAGE_UPGRADE_COST;
+    v.level = 2;
+    v.hp = Math.min(v.maxHp, v.hp + 100); // bonus heal
+    console.log(`Village ${v.id} amélioré Lv 2 par ${p.name}`);
+  });
+
+  // ── Village : produire une unité (similaire à spawnUnit mais depuis un village) ──
+  socket.on('villageSpawnUnit', ({ villageId, unitType }) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const v = gameState.villages.find(vv => vv.id === villageId);
+    if (!v || v.ownerId !== socket.id) return;
+    const typeId = unitType || 'soldier';
+    const def = UNIT_TYPES[typeId];
+    if (!def) { socket.emit('spawnFailed', { reason: 'invalid_unit_type' }); return; }
+    if (!villageAllowsUnit(v, p, typeId)) {
+      socket.emit('spawnFailed', { reason: 'unit_locked_at_village' });
+      return;
+    }
+    if (p.gold < def.cost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_gold' });
+      return;
+    }
+    p.gold -= def.cost;
+    p.unitsCreated++;
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = 50 + Math.random() * 30;
+    const unitId = `unit_${nextUnitId++}`;
+    gameState.units[unitId] = {
+      id: unitId, ownerId: socket.id,
+      x: Math.round(v.x + Math.cos(angle) * dist),
+      y: Math.round(v.y + Math.sin(angle) * dist),
+      type: typeId,
+      hp: def.hp, maxHp: def.hp,
+      speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
+      targetX: null, targetY: null,
+      attackTargetId: null, attackTargetType: null,
+      lastAttackTime: 0,
+      // Mode défense centré sur le village (base secondaire)
+      mode: 'defend', defendX: v.x, defendY: v.y, defendRadius: 280,
+    };
   });
 
   socket.on('addBot', () => {
@@ -944,6 +1010,11 @@ setInterval(() => {
         if (!target) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
         if (Math.hypot(target.x - unit.x, target.y - unit.y) <= uRange) continue;
         goalX = target.x; goalY = target.y;
+      } else if (unit.attackTargetType === 'village') {
+        const target = gameState.villages.find(vv => vv.id === unit.attackTargetId);
+        if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
+        if (unitToVillageDist(unit, target) <= effectiveRange) continue;
+        goalX = target.x; goalY = target.y;
       } else {
         const target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
@@ -1028,6 +1099,10 @@ setInterval(() => {
         target = gameState.units[unit.attackTargetId];
         if (!target || toDelete.has(target.id)) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
         inRange = Math.hypot(target.x - unit.x, target.y - unit.y) <= uRange;
+      } else if (unit.attackTargetType === 'village') {
+        target = gameState.villages.find(vv => vv.id === unit.attackTargetId);
+        if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
+        inRange = unitToVillageDist(unit, target) <= effectiveRange;
       } else {
         target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
@@ -1047,6 +1122,17 @@ setInterval(() => {
         unit.attackTargetId = null; unit.attackTargetType = null;
       } else if (unit.attackTargetType === 'hdv' && target.hp <= 0) {
         eliminatePlayer(target, toDelete);
+        unit.attackTargetId = null; unit.attackTargetType = null;
+      } else if (unit.attackTargetType === 'village' && target.hp <= 0) {
+        // Village détruit → redevient neutre (Polytopia style)
+        const prevOwner = target.ownerId;
+        target.ownerId = null;
+        target.level = 1;
+        target.captureProgress = 0;
+        target.capturingPlayerId = null;
+        target.hp = 0; // reste à 0 jusqu'à la reprise
+        attackEntry.killed = true;
+        io.emit('villageDestroyed', { villageId: target.id, byPlayerId: unit.ownerId, prevOwnerId: prevOwner });
         unit.attackTargetId = null; unit.attackTargetType = null;
       }
       attacks.push(attackEntry);
@@ -1093,7 +1179,8 @@ setInterval(() => {
     delete gameState.units[id];
   }
 
-  // 3.5. Villages — capture progressive (10 s) si une seule team présente
+  // 3.5. Villages — capture progressive (10 s) si une seule team présente.
+  // Un village détruit (hp<=0, ownerId=null) se comporte exactement comme un village neutre.
   for (const v of gameState.villages) {
     const r2 = VILLAGE_RADIUS * VILLAGE_RADIUS;
     const ownersInside = new Set();
@@ -1105,11 +1192,10 @@ setInterval(() => {
       const claimer = [...ownersInside][0];
       const player  = gameState.players[claimer];
       if (!player || player.eliminated) continue;
-      if (v.ownerId === claimer) continue; // déjà à eux
-      // Si capturé par quelqu'un d'autre : on revient à 0 d'abord, puis on monte
+      if (v.ownerId === claimer) continue;
       if (v.capturingPlayerId !== claimer) {
         if (v.captureProgress > 0) {
-          v.captureProgress = Math.max(0, v.captureProgress - 2); // reset rapide
+          v.captureProgress = Math.max(0, v.captureProgress - 2);
           if (v.captureProgress === 0) v.capturingPlayerId = claimer;
         } else {
           v.capturingPlayerId = claimer;
@@ -1120,19 +1206,18 @@ setInterval(() => {
           v.ownerId = claimer;
           v.captureProgress = 0;
           v.capturingPlayerId = null;
-          v.techTickCounter = 0;
-          io.emit('villageCaptured', { villageId: v.id, ownerId: claimer, ownerName: player.name, ownerColor: player.color, type: v.type });
-          console.log(`Village ${v.id} (${v.type}) capturé par ${player.name}`);
+          v.hp = VILLAGE_MAX_HP; // restauré à pleine HP à la capture
+          v.level = 1;            // toujours Lv1 au moment de la prise
+          io.emit('villageCaptured', { villageId: v.id, ownerId: claimer, ownerName: player.name, ownerColor: player.color });
+          console.log(`Village ${v.id} capturé par ${player.name}`);
         }
       }
     } else if (ownersInside.size === 0) {
-      // Personne ne capture : la progression décroît lentement
       if (v.captureProgress > 0) {
         v.captureProgress = Math.max(0, v.captureProgress - 1);
         if (v.captureProgress === 0) v.capturingPlayerId = null;
       }
     }
-    // ownersInside.size > 1 : contesté, pas de progression
   }
 
   // 4. Gold once per second (alive players only) — taux modulé par les techs
@@ -1142,18 +1227,6 @@ setInterval(() => {
         const rate = computeGoldRate(p);
         p.gold += rate;
         p.totalGoldEarned += rate;
-      }
-    }
-    // Shrines : tick toutes les 60s → +1 pt tech à l'owner
-    for (const v of gameState.villages) {
-      if (!v.ownerId) continue;
-      const eff = VILLAGE_TYPES[v.type] && VILLAGE_TYPES[v.type].effect;
-      if (!eff || !eff.techTickEvery) continue;
-      v.techTickCounter = (v.techTickCounter || 0) + 1;
-      if (v.techTickCounter >= eff.techTickEvery) {
-        v.techTickCounter = 0;
-        const owner = gameState.players[v.ownerId];
-        if (owner && !owner.eliminated) owner.techPoints = (owner.techPoints || 0) + 1;
       }
     }
   }

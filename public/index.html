@@ -88,6 +88,27 @@
     </div>
   </div>
 
+  <!-- Village Panel (clic sur un village possédé) -->
+  <div id="village-panel" style="display:none;">
+    <div class="hdv-panel-header">
+      <span id="village-panel-title">🏘 Mon village</span>
+      <button class="hdv-panel-close">✕</button>
+    </div>
+    <div class="hdv-panel-section">
+      <div class="hdv-panel-section-title">Base secondaire</div>
+      <div id="village-panel-empire" style="font-size:13px; line-height:1.85; font-weight:500;">
+        <div>Niveau : <strong><span id="village-level">1</span> / 2</strong></div>
+        <div>❤️ HP : <span id="village-hp">300/300</span></div>
+        <div>💰 Production passive : <span id="village-rate">+0.5/s</span></div>
+        <button id="village-upgrade-btn" class="hdv-action-btn">⬆ Améliorer Lv 2 (— gold)</button>
+      </div>
+    </div>
+    <div class="hdv-panel-section">
+      <div class="hdv-panel-section-title">Production</div>
+      <div id="village-panel-production" class="production-grid"></div>
+    </div>
+  </div>
+
   <!-- Partie en cours (match-ended) -->
   <div id="match-ended-overlay" class="fullscreen-overlay" style="display:none;">
     <div class="overlay-box">
@@ -128,6 +149,7 @@
   <script src="/js/network.js"></script>
   <script src="/js/sprite-factory.js"></script>
   <script src="/js/hdv-panel.js"></script>
+  <script src="/js/village-panel.js"></script>
   <script src="/js/minimap.js"></script>
   <script src="/js/scenes/MainScene.js"></script>
   <script src="/js/game.js"></script>
