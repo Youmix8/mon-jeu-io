@@ -374,20 +374,17 @@ class MainScene extends Phaser.Scene {
 
       let sprite = this.villageSprites[v.id];
       if (!sprite) {
-        // Cercle de propriétaire dessous (depth 20, comme HDV) — plus gros & plus opaque
-        const ownerDisc = this.add.circle(v.x, v.y + 30, 38, ownerColorInt, owner ? 0.65 : 0)
-          .setStrokeStyle(3, 0x000000, owner ? 0.55 : 0)
-          .setDepth(20);
-
-        // Sprite principal village
+        // Sprite principal village (plus de cercle séparé — tint sur le sprite)
         let main;
         if (useAsset) {
           main = this.add.sprite(v.x, v.y, 'village')
             .setOrigin(0.5, 0.5)
             .setDisplaySize(VILLAGE_DISPLAY, VILLAGE_DISPLAY)
             .setDepth(30);
+          // Tint d'équipe : neutre = blanc, capturé = couleur du joueur
+          main.setTint(owner ? ownerColorInt : 0xffffff);
         } else {
-          main = this.add.rectangle(v.x, v.y, 50, 50, 0x8b7355)
+          main = this.add.rectangle(v.x, v.y, 50, 50, owner ? ownerColorInt : 0x8b7355)
             .setStrokeStyle(3, 0x000000, 0.7)
             .setDepth(30);
         }
@@ -425,17 +422,16 @@ class MainScene extends Phaser.Scene {
           });
         }
 
-        sprite = { ownerDisc, main, label, hpBarBg, hpBarFill, capBarBg, capBarFill };
+        sprite = { main, label, hpBarBg, hpBarFill, capBarBg, capBarFill };
         this.villageSprites[v.id] = sprite;
       }
 
-      // Update : positions + colors + visibility
-      sprite.ownerDisc.setPosition(v.x, v.y + 30);
-      sprite.ownerDisc.setFillStyle(ownerColorInt, owner ? 0.65 : 0);
-      sprite.ownerDisc.setStrokeStyle(3, 0x000000, owner ? 0.55 : 0);
-
+      // Update : positions + tint + visibility
       sprite.main.setPosition(v.x, v.y);
       sprite.main.setAlpha(destroyed ? 0.35 : 1);
+      if (sprite.main.setTint) {
+        sprite.main.setTint(owner ? ownerColorInt : 0xffffff);
+      }
 
       sprite.label.setPosition(v.x, v.y + 52);
       sprite.label.setText(destroyed ? '💥 Détruit' : `Village Lv ${v.level || 1}`);
@@ -655,11 +651,11 @@ class MainScene extends Phaser.Scene {
   // ── HDVs ──────────────────────────────────────────────────────────
 
   _syncHDVs(players) {
-    // HDV sprite : 80×80 (match HDV_HALF_SIZE * 2). Pas de tint sur le sprite,
-    // mais un cercle de couleur dessous (depth 20) pour identifier le proprio.
-    const HDV_DISPLAY = 130;
-    const BAR_W_HDV = 100, BAR_H_HDV = 10;
-    const BAR_Y_OFF = -HDV_DISPLAY / 2 - 22;
+    // HDV sprite tinté à la couleur de l'équipe (plus de cercle séparé).
+    // Le sprite lui-même est cliquable et plus gros pour englober l'ancienne zone (sprite + cercle).
+    const HDV_DISPLAY = 160;
+    const BAR_W_HDV = 110, BAR_H_HDV = 11;
+    const BAR_Y_OFF = -HDV_DISPLAY / 2 - 18;
     const myId = Network.getMyId();
     const useAsset = this._hasAsset('hdv');
 
@@ -673,18 +669,14 @@ class MainScene extends Phaser.Scene {
       const destroyed = player.hp <= 0;
 
       if (!this.hdvSprites[id]) {
-        // Cercle de propriétaire (depth 20) — sous le HDV
-        const ownerDisc = this.add.circle(player.x, player.y + HDV_DISPLAY / 2 - 8, 42, colorInt, 0.65)
-          .setStrokeStyle(3, 0x000000, 0.5)
-          .setDepth(20);
-
-        // HDV : sprite PNG si dispo, sinon SpriteFactory castle, sinon rectangle
+        // HDV : sprite PNG tinté équipe, sinon fallback procédural
         let hdvObj;
         if (useAsset) {
           hdvObj = this.add.sprite(player.x, player.y, 'hdv')
             .setOrigin(0.5, 0.5)
             .setDisplaySize(HDV_DISPLAY, HDV_DISPLAY)
             .setDepth(30);
+          hdvObj.setTint(destroyed ? 0x888888 : colorInt);
         } else if (this.textures.exists('hdv-castle')) {
           hdvObj = this.add.sprite(player.x, player.y, 'hdv-castle')
             .setOrigin(0.5, 0.85)
@@ -710,31 +702,25 @@ class MainScene extends Phaser.Scene {
         const barFill  = this.add.rectangle(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF, BAR_W_HDV * hpRatio, BAR_H_HDV, 0x22c55e)
           .setOrigin(0, 0.5).setDepth(60);
         const nameLabel = this.add.text(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 8, player.name,
-          { fontSize: '15px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: player.color, stroke: '#000000', strokeThickness: 4 }
+          { fontSize: '16px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: player.color, stroke: '#000000', strokeThickness: 4 }
         ).setOrigin(0.5, 1).setDepth(70);
         const hpLabel = this.add.text(player.x, player.y + HDV_DISPLAY / 2 + 8, `${player.hp}/${player.maxHp}`,
-          { fontSize: '12px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
+          { fontSize: '13px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
         ).setOrigin(0.5, 0).setDepth(70);
 
-        this.hdvSprites[id] = [hdvObj, barBg, barFill, nameLabel, hpLabel, ownerDisc];
+        // [hdvObj, barBg, barFill, nameLabel, hpLabel] — plus d'ownerDisc
+        this.hdvSprites[id] = [hdvObj, barBg, barFill, nameLabel, hpLabel];
 
       } else {
-        const [hdvObj, barBg, barFill, nameLabel, hpLabel, ownerDisc] = this.hdvSprites[id];
+        const [hdvObj, barBg, barFill, nameLabel, hpLabel] = this.hdvSprites[id];
 
         hdvObj.setPosition(player.x, player.y);
-        if (!useAsset && hdvObj.setTint) {
-          hdvObj.setTint(destroyed ? 0x888888 : colorInt);
-        }
+        if (hdvObj.setTint) hdvObj.setTint(destroyed ? 0x888888 : colorInt);
         hdvObj.setAlpha(destroyed ? 0.45 : 1);
 
         // Pulse subtil quand HP < 30%
         if (!destroyed && hpRatio < 0.3) {
           hdvObj.setAlpha(0.9 + 0.1 * Math.sin(Date.now() / 200));
-        }
-
-        if (ownerDisc) {
-          ownerDisc.setPosition(player.x, player.y + HDV_DISPLAY / 2 - 8);
-          ownerDisc.setFillStyle(colorInt, destroyed ? 0.25 : 0.6);
         }
 
         barBg.setPosition(player.x, player.y + BAR_Y_OFF);
@@ -776,17 +762,12 @@ class MainScene extends Phaser.Scene {
       this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp };
 
       if (!this.unitSprites[id]) {
-        // Chaque type d'unité a son propre sprite PNG
+        // Chaque type d'unité a son propre sprite PNG, tinté par la couleur de l'équipe
         const assetKey = unit.type === 'archer'  ? 'archer'
                        : unit.type === 'knight'  ? 'cavalry'
                        : 'soldier';
         const useAsset = this._hasAsset(assetKey);
-        const unitSize = unit.type === 'knight' ? 58 : 50;
-
-        // Cercle d'équipe plus gros et clairement visible (toutes équipes, alliés comme ennemis)
-        const cockade = this.add.circle(unit.x, unit.y + 16, 14, colorInt, 0.75)
-          .setStrokeStyle(2.5, 0x000000, 0.8)
-          .setDepth(40);
+        const unitSize = unit.type === 'knight' ? 48 : 40;
 
         let sprite;
         if (useAsset) {
@@ -794,6 +775,7 @@ class MainScene extends Phaser.Scene {
             .setOrigin(0.5, 0.5)
             .setDisplaySize(unitSize, unitSize)
             .setDepth(50);
+          sprite.setTint(colorInt); // filtre couleur d'équipe direct sur le PNG
         } else {
           const texKey = unit.type === 'archer' ? 'unit-archer'
                       : unit.type === 'knight' ? 'unit-knight'
@@ -801,10 +783,13 @@ class MainScene extends Phaser.Scene {
           sprite = this.add.sprite(unit.x, unit.y, texKey).setTint(colorInt).setDepth(50);
         }
 
+        // Mémorise les scales APRÈS setDisplaySize → le wobble ne casse pas la taille
+        sprite._baseScaleX = sprite.scaleX;
+        sprite._baseScaleY = sprite.scaleY;
         sprite._unitId      = id;
         sprite._unitOwnerId = unit.ownerId;
         sprite._unitType    = unit.type;
-        sprite._idlePhase   = Math.random() * Math.PI * 2; // décalage du wobble
+        sprite._idlePhase   = Math.random() * Math.PI * 2;
 
         if (unit.ownerId === myId) {
           sprite.setInteractive(new Phaser.Geom.Circle(sprite.width / 2, sprite.height / 2, 30), Phaser.Geom.Circle.Contains);
@@ -821,12 +806,13 @@ class MainScene extends Phaser.Scene {
           fontSize: '12px', fontFamily: '"Quicksand", sans-serif',
         }).setOrigin(0.5, 0.5).setDepth(70);
 
-        this.unitSprites[id] = [sprite, barBg, barFill, badge, cockade];
+        // [sprite, barBg, barFill, badge] — plus de cocarde, tint sur le sprite
+        this.unitSprites[id] = [sprite, barBg, barFill, badge];
 
       } else if (posChanged || hpChanged) {
-        const [sprite, , barFill, badge, cockade] = this.unitSprites[id];
+        const [sprite, , barFill, badge] = this.unitSprites[id];
         if (badge) badge.setText(this._modeIcon(unit.mode));
-        if (cockade) cockade.setFillStyle(colorInt, 0.75);
+        if (sprite.setTint) sprite.setTint(colorInt);
 
         if (hpChanged) {
           const ratio = unit.hp / unit.maxHp;
@@ -881,21 +867,23 @@ class MainScene extends Phaser.Scene {
   }
 
   _updateUnitBarPositions() {
-    // Wobble idle léger (oscillation verticale ±2px)
-    const t = Date.now() / 380;
+    // Wobble idle : oscillation verticale TRÈS subtile via le scale,
+    // PRÉSERVE le baseScale du sprite (sinon le PNG natif s'affiche à sa taille brute).
+    const t = Date.now() / 420;
     for (const [, sprites] of Object.entries(this.unitSprites)) {
       if (sprites.length < 3) continue;
-      const [sprite, barBg, barFill, badge, cockade] = sprites;
-      // Wobble : décalage vertical fluide, désynchronisé par sprite
+      const [sprite, barBg, barFill, badge] = sprites;
       const phase = (sprite._idlePhase || 0);
-      const wobble = Math.sin(t + phase) * 1.5;
+      const wobble = Math.sin(t + phase); // [-1, 1]
       barBg.setPosition(sprite.x, sprite.y + BAR_Y - 4);
       barFill.setPosition(sprite.x - BAR_W / 2, sprite.y + BAR_Y - 4);
       if (badge) badge.setPosition(sprite.x + 22, sprite.y - 22);
-      if (cockade) cockade.setPosition(sprite.x, sprite.y + 22);
-      // Applique le wobble à l'origine du sprite (ne touche pas à x/y serveur)
-      sprite.setY(sprite.y); // no-op for safety; the actual wobble is via scaleY pulse
-      sprite.setScale(1, 1 + wobble * 0.012);
+      // Multiplie le baseScale (pas setScale absolu) pour garder la taille définie par setDisplaySize
+      const bx = sprite._baseScaleX || sprite.scaleX;
+      const by = sprite._baseScaleY || sprite.scaleY;
+      if (bx && by) {
+        sprite.setScale(bx, by * (1 + wobble * 0.025));
+      }
     }
   }
 
