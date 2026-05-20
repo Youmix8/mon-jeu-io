@@ -103,6 +103,7 @@ const VillagePanel = (() => {
           <div class="unit-card-name">${b.name}</div>
           <div class="unit-card-stats">${b.desc || ''}</div>
           <div class="unit-card-cost">${b.cost} 💰</div>
+          <div class="locked-note" data-role="lock"></div>
         </div>
       `).join('');
     }
@@ -154,7 +155,7 @@ const VillagePanel = (() => {
       const u = cfg.unitTypes[card.dataset.unitId];
       if (!u) continue;
       const lvlAllowsType = (v.level >= 2)
-        ? (!u.requiresTech || (me.researchedTechs || []).includes(u.requiresTech))
+        ? (!u.requiresTech || (me.unlockedTechs || []).includes(u.requiresTech))
         : (u.id === 'soldier');
       const affordable = me.gold >= u.cost;
       card.classList.toggle('locked', !lvlAllowsType);
@@ -170,13 +171,26 @@ const VillagePanel = (() => {
       }
     }
 
-    // Building cards : affordability
+    // Building cards : lock + affordability
     const buildEl = document.getElementById('village-panel-buildings');
     if (buildEl && cfg.buildingTypes) {
       for (const card of buildEl.querySelectorAll('.unit-card')) {
         const b = cfg.buildingTypes[card.dataset.buildingType];
         if (!b) continue;
-        card.classList.toggle('poor', me.gold < b.cost);
+        const unlocked   = !b.requiresTech || (me.unlockedTechs || []).includes(b.requiresTech);
+        const affordable = me.gold >= b.cost;
+        card.classList.toggle('locked', !unlocked);
+        card.classList.toggle('poor', unlocked && !affordable);
+        const lockNote = card.querySelector('[data-role="lock"]');
+        if (lockNote) {
+          if (!unlocked) {
+            const t = cfg.techTree && cfg.techTree[b.requiresTech];
+            lockNote.textContent = `🔒 ${t ? t.name : b.requiresTech}`;
+            lockNote.style.display = '';
+          } else {
+            lockNote.style.display = 'none';
+          }
+        }
       }
     }
   }

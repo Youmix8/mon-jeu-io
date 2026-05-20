@@ -116,6 +116,48 @@ const BUILDING_TYPES = {
     halfSize: 25,
     desc: 'Mur solide. Bloque le passage, pas d\'attaque.',
   },
+  // ── Magie ──
+  sanctum: {
+    id: 'sanctum', name: 'Sanctum', icon: '🔮',
+    cost: 50, hp: 200,
+    range: 0, damage: 0, cooldownMs: 0,
+    halfSize: 24,
+    requiresTech: 'elements_study',
+    desc: '+0.5 mana/sec. Source magique.',
+  },
+  mage_tower: {
+    id: 'mage_tower', name: 'Tour de mage', icon: '🧙',
+    cost: 90, hp: 250,
+    range: 0, damage: 0, cooldownMs: 0,
+    halfSize: 26,
+    requiresTech: 'mage_tower',
+    desc: '+1 mana/sec. Permet de produire des Sorciers.',
+  },
+  // ── Religion ──
+  altar: {
+    id: 'altar', name: 'Autel', icon: '🕯',
+    cost: 40, hp: 200,
+    range: 0, damage: 0, cooldownMs: 0,
+    halfSize: 22,
+    requiresTech: 'animism',
+    desc: '+0.5 foi/sec.',
+  },
+  temple: {
+    id: 'temple', name: 'Temple', icon: '⛩',
+    cost: 110, hp: 350,
+    range: 0, damage: 0, cooldownMs: 0,
+    halfSize: 28,
+    requiresTech: 'temple',
+    desc: '+1.5 foi/sec. Upgrade de l\'Autel.',
+  },
+  cathedral: {
+    id: 'cathedral', name: 'Cathédrale', icon: '⛪',
+    cost: 220, hp: 500,
+    range: 0, damage: 0, cooldownMs: 0,
+    halfSize: 32,
+    requiresTech: 'cathedral',
+    desc: '+3 foi/sec. Foi doublée.',
+  },
 };
 
 const BUILDING_MIN_DIST     = 60;  // distance min entre 2 bâtiments
@@ -168,8 +210,8 @@ function villageAllowsUnit(village, player, typeId) {
   const def = UNIT_TYPES[typeId];
   if (!def) return false;
   if (village.level === 1) return typeId === 'soldier';
-  // Level 2 : tout ce que le joueur a débloqué
-  return !def.requiresTech || (player.researchedTechs || []).includes(def.requiresTech);
+  // Level 2 : tout ce que le joueur a débloqué via l'arbre tech v2
+  return !def.requiresTech || hasTech(player, def.requiresTech);
 }
 
 // Distance bord-à-bord entre une unité et un village (cercle vs AABB carré)
@@ -1058,6 +1100,10 @@ io.on('connection', (socket) => {
     if (!p || p.eliminated) return;
     const def = BUILDING_TYPES[type];
     if (!def) return;
+    if (def.requiresTech && !hasTech(p, def.requiresTech)) {
+      socket.emit('spawnFailed', { reason: 'building_locked' });
+      return;
+    }
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     // Détermine la base ancre (HDV propre OU village possédé)
     let base, baseObj;

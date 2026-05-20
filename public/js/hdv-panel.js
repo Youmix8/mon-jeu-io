@@ -134,6 +134,7 @@ const HdvPanel = (() => {
           <div class="unit-card-name">${b.name}</div>
           <div class="unit-card-stats">${b.desc || ''}</div>
           <div class="unit-card-cost">${b.cost} 💰</div>
+          <div class="locked-note" data-role="lock"></div>
         </div>
       `).join('');
     }
@@ -221,14 +222,26 @@ const HdvPanel = (() => {
       }
     }
 
-    // ── Building cards : update affordability ─────────────────────────
+    // ── Building cards : update lock + affordability ──────────────────
     const buildEl = document.getElementById('hdv-panel-buildings');
     if (buildEl && cfg.buildingTypes) {
       for (const card of buildEl.querySelectorAll('.unit-card')) {
         const b = cfg.buildingTypes[card.dataset.buildingType];
         if (!b) continue;
+        const unlocked   = !b.requiresTech || (me.unlockedTechs || []).includes(b.requiresTech);
         const affordable = me.gold >= b.cost;
-        card.classList.toggle('poor', !affordable);
+        card.classList.toggle('locked', !unlocked);
+        card.classList.toggle('poor', unlocked && !affordable);
+        const lockNote = card.querySelector('[data-role="lock"]');
+        if (lockNote) {
+          if (!unlocked) {
+            const t = cfg.techTree && cfg.techTree[b.requiresTech];
+            lockNote.textContent = `🔒 ${t ? t.name : b.requiresTech}`;
+            lockNote.style.display = '';
+          } else {
+            lockNote.style.display = 'none';
+          }
+        }
       }
     }
   }
