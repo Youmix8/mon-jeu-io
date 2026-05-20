@@ -24,10 +24,12 @@ const AXES = {
 };
 
 // Helper pour positionner un nœud : tier (1-6), spread (-2..+2 = position latérale dans le tier)
+// Layout aéré : ~115px d'arc constant entre 2 spreads voisins, quel que soit le tier.
 function pos(axis, tier, spread) {
   const baseAngle = AXES[axis].angle;
-  const radius    = 140 + (tier - 1) * 130;
-  const spreadAng = (spread || 0) * 0.13; // ~7.5° de spread par cran
+  const radius    = 240 + (tier - 1) * 200; // tier1=240 ... tier6=1240
+  const ARC_STEP  = 115;
+  const spreadAng = (spread || 0) * (ARC_STEP / radius);
   const a = baseAngle + spreadAng;
   return { x: Math.round(Math.cos(a) * radius), y: Math.round(Math.sin(a) * radius) };
 }

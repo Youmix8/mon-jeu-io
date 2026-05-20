@@ -86,17 +86,26 @@ const TechTreeOverlay = (() => {
       }
     });
 
-    // Pan
+    // Pan (avec coalesce via rAF pour rester fluide)
+    let panRafPending = false;
     svg.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
-      drag = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
+      drag = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, lastX: e.clientX, lastY: e.clientY };
       svg.style.cursor = 'grabbing';
+      _hideTooltip();
     });
     window.addEventListener('mousemove', (e) => {
       if (!drag) return;
-      view.x = drag.vx + (e.clientX - drag.sx);
-      view.y = drag.vy + (e.clientY - drag.sy);
-      _applyTransform();
+      drag.lastX = e.clientX; drag.lastY = e.clientY;
+      if (panRafPending) return;
+      panRafPending = true;
+      requestAnimationFrame(() => {
+        panRafPending = false;
+        if (!drag) return;
+        view.x = drag.vx + (drag.lastX - drag.sx);
+        view.y = drag.vy + (drag.lastY - drag.sy);
+        _applyTransform();
+      });
     });
     window.addEventListener('mouseup', () => {
       if (drag) { drag = null; svg.style.cursor = 'grab'; }
@@ -106,7 +115,7 @@ const TechTreeOverlay = (() => {
     svg.addEventListener('wheel', (e) => {
       e.preventDefault();
       const factor = e.deltaY > 0 ? 0.9 : 1.1;
-      const newScale = Math.max(0.4, Math.min(2.5, view.scale * factor));
+      const newScale = Math.max(0.25, Math.min(2.5, view.scale * factor));
       // Zoom centré sur la souris
       const rect = svg.getBoundingClientRect();
       const mx = e.clientX - rect.left;
@@ -129,10 +138,16 @@ const TechTreeOverlay = (() => {
     ensureDOM();
     isOpen = true;
     root.style.display = 'block';
-    // Centre la vue
+    // Centre la vue ; tree va de y≈-1240 (haut Science) à y≈+1100 (bas axes M/R) → on remonte le centre
     const w = window.innerWidth, h = window.innerHeight;
-    view = { x: w / 2, y: h / 2 + 60, scale: 0.85 };
+    view = { x: w / 2, y: h / 2 + 220, scale: 0.45 };
     _applyTransform();
+    // Pause la scène Phaser pour décharger le rendu de fond
+    try {
+      if (typeof game !== 'undefined' && game.scene && game.scene.isActive('MainScene')) {
+        game.scene.pause('MainScene');
+      }
+    } catch (_) {}
     refresh();
   }
 
@@ -141,6 +156,11 @@ const TechTreeOverlay = (() => {
     isOpen = false;
     root.style.display = 'none';
     info.style.display = 'none';
+    try {
+      if (typeof game !== 'undefined' && game.scene && game.scene.isPaused('MainScene')) {
+        game.scene.resume('MainScene');
+      }
+    } catch (_) {}
   }
 
   function toggle() { isOpen ? close() : open(); }
@@ -370,5 +390,16 @@ const TechTreeOverlay = (() => {
     return t;
   }
 
-  return { open, close, toggle, refresh, isOpen: () => isOpen };
+  // Update léger des seuls compteurs du header (appelé par network.js sur chaque gameState)
+  function updateResources(me) {
+    if (!isOpen || !me) return;
+    const pr   = document.getElementById('tt-pr');
+    const mana = document.getElementById('tt-mana');
+    const fa   = document.getElementById('tt-faith');
+    if (pr)   pr.textContent   = Math.floor(me.researchPoints || 0);
+    if (mana) mana.textContent = Math.floor(me.mana  || 0);
+    if (fa)   fa.textContent   = Math.floor(me.faith || 0);
+  }
+
+  return { open, close, toggle, refresh, updateResources, isOpen: () => isOpen };
 })();

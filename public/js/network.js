@@ -119,6 +119,8 @@ const Network = (() => {
       // Rafraîchit le panneau HDV s'il est ouvert (gold, HP, techs en temps réel)
       if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible()) HdvPanel.refresh();
       if (typeof VillagePanel !== 'undefined' && VillagePanel.isVisible()) VillagePanel.refresh();
+      // Update léger des compteurs PR/Mana/Foi dans l'overlay tech (pas de rebuild SVG)
+      if (typeof TechTreeOverlay !== 'undefined' && TechTreeOverlay.isOpen() && me) TechTreeOverlay.updateResources(me);
     });
 
     socket.on('attacks', (attacks) => {
