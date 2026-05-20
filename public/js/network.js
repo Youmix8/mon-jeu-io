@@ -22,6 +22,7 @@ const Network = (() => {
   let onMatchRestartedCallback   = null;
   let onVillageCapturedCallback  = null;
   let onVillageDestroyedCallback = null;
+  let onTechUnlockedCallback     = null;
   let onInitReceivedCallback     = null;
   let initReceived = false;
 
@@ -49,6 +50,8 @@ const Network = (() => {
       if (data.buildingTypes)       config.buildingTypes       = data.buildingTypes;
       if (data.buildGrid)           config.buildGrid           = data.buildGrid;
       if (data.buildingMinDistHdv)  config.buildingMinDistHdv  = data.buildingMinDistHdv;
+      // Tech tree v2 (remplace l'ancien techTree de Tier 1)
+      if (data.techTree)            config.techTree            = data.techTree;
       initReceived = true;
       if (onInitReceivedCallback) onInitReceivedCallback();
     });
@@ -77,7 +80,13 @@ const Network = (() => {
       if (me) {
         const elGold = document.getElementById('my-gold');
         const elHp   = document.getElementById('my-hp');
-        if (elGold) elGold.textContent = me.gold;
+        const elPr   = document.getElementById('my-pr');
+        const elMana = document.getElementById('my-mana');
+        const elFaith= document.getElementById('my-faith');
+        if (elGold) elGold.textContent = Math.floor(me.gold);
+        if (elPr)   elPr.textContent   = Math.floor(me.researchPoints || 0);
+        if (elMana) elMana.textContent = Math.floor(me.mana  || 0);
+        if (elFaith)elFaith.textContent= Math.floor(me.faith || 0);
         if (elHp) {
           if (me.eliminated) {
             elHp.textContent = 'ÉLIMINÉ';
@@ -136,6 +145,12 @@ const Network = (() => {
 
     socket.on('villageDestroyed', (data) => {
       if (onVillageDestroyedCallback) onVillageDestroyedCallback(data);
+    });
+
+    socket.on('techUnlocked', (data) => {
+      if (onTechUnlockedCallback) onTechUnlockedCallback(data);
+      // Rafraîchit l'arbre s'il est ouvert
+      if (typeof TechTreeOverlay !== 'undefined' && TechTreeOverlay.isOpen()) TechTreeOverlay.refresh();
     });
 
     socket.on('gameOver', (data) => {
@@ -229,6 +244,12 @@ const Network = (() => {
   function defendArea(unitIds, x, y, radius) {
     if (socket) socket.emit('defendArea', { unitIds, x, y, radius: radius || 280 });
   }
+  function unlockTech(techId) {
+    if (socket) socket.emit('unlockTech', { techId });
+  }
+  function proposeTreaty(targetId) {
+    if (socket) socket.emit('proposeTreaty', { targetId });
+  }
   function researchTech(techId) { if (socket) socket.emit('researchTech', { techId }); }
   function addBot()         { if (socket) socket.emit('addBot'); }
   function upgradeVillage(villageId)  { if (socket) socket.emit('upgradeVillage', { villageId }); }
@@ -244,6 +265,7 @@ const Network = (() => {
   function setOnMatchRestarted(cb)   { onMatchRestartedCallback = cb; }
   function setOnVillageCaptured(cb)  { onVillageCapturedCallback = cb; }
   function setOnVillageDestroyed(cb) { onVillageDestroyedCallback = cb; }
+  function setOnTechUnlocked(cb)     { onTechUnlockedCallback = cb; }
   function setOnInitReceived(cb)     { onInitReceivedCallback = cb; if (initReceived && cb) cb(); }
   function isInitReceived()          { return initReceived; }
   function getState()                { return state; }
@@ -254,9 +276,9 @@ const Network = (() => {
   return {
     init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech, addBot,
-    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding,
+    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, unlockTech, proposeTreaty,
     setOnSpawnFailed, setOnAttack,
-    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnInitReceived,
+    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnInitReceived,
     isInitReceived,
   };
 })();

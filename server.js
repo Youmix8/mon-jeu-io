@@ -1,10 +1,13 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const { TECH_TREE: NEW_TECH_TREE, validateTechTree } = require('./server/techTree');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+validateTechTree();
 
 const MAP_WIDTH  = 4500;
 const MAP_HEIGHT = 4500;
@@ -40,20 +43,49 @@ const VISION_UNIT = 240;
 // ────────── Tech tree, types d'unités, niveaux HDV ──────────
 
 const UNIT_TYPES = {
-  soldier: { id: 'soldier', name: 'Soldat',    cost: 10, hp: 50, speed:  80, range:  80, damage: 5, requiresTech: null,
-             icon: '⚔️', desc: 'Polyvalent. Disponible dès le départ.' },
-  archer:  { id: 'archer',  name: 'Archer',    cost: 15, hp: 30, speed:  80, range: 140, damage: 4, requiresTech: 'forging',
-             icon: '🏹', desc: 'Longue portée mais fragile.' },
-  knight:  { id: 'knight',  name: 'Chevalier', cost: 25, hp: 80, speed: 140, range:  55, damage: 8, requiresTech: 'cavalry',
-             icon: '🐎', desc: 'Lourd et rapide, gros dégâts au contact.' },
+  // Unité de base — toujours disponible
+  soldier:       { id: 'soldier',       name: 'Soldat',          cost: 10,  hp: 50,  speed:  80, range:  80, damage:  5,  requiresTech: null,
+                   icon: '⚔️', desc: 'Polyvalent. Disponible dès le départ.' },
+  // Unités Science Tier 2-6
+  archer:        { id: 'archer',        name: 'Archer',          cost: 15,  hp: 30,  speed:  80, range: 250, damage:  4,  requiresTech: 'archery',
+                   icon: '🏹', desc: 'Longue portée mais fragile.' },
+  knight:        { id: 'knight',        name: 'Chevalier',       cost: 25,  hp: 80,  speed: 140, range:  55, damage:  8,  requiresTech: 'riding',
+                   icon: '🐎', desc: 'Lourd et rapide, gros dégâts au contact.' },
+  catapult:      { id: 'catapult',      name: 'Catapulte',       cost: 60,  hp: 70,  speed:  50, range: 220, damage: 25,  requiresTech: 'siege_engineering',
+                   icon: '⚙️', desc: 'Lente, dégâts massifs sur bâtiments.' },
+  settler:       { id: 'settler',       name: 'Colon',           cost: 80,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'colonization',
+                   icon: '🚩', desc: 'Fonde un village au point de destination.' },
+  heavy_knight:  { id: 'heavy_knight',  name: 'Chevalier lourd', cost: 50,  hp: 150, speed: 100, range:  55, damage: 12,  requiresTech: 'steel_forge',
+                   icon: '🛡', desc: 'Tank lourd, gros dégâts au contact.' },
+  crossbowman:   { id: 'crossbowman',   name: 'Arbalétrier',     cost: 25,  hp: 35,  speed:  75, range: 200, damage:  7,  requiresTech: 'crossbows',
+                   icon: '🎯', desc: 'Archer amélioré. Plus de dégâts, moins de portée.' },
+  general:       { id: 'general',       name: 'Général',         cost: 120, hp: 120, speed: 110, range:  80, damage: 10,  requiresTech: 'war_academy',
+                   icon: '🎖', desc: 'Aura +25% dégâts aux unités proches (rayon 200).' },
+  cannon:        { id: 'cannon',        name: 'Canon',           cost: 100, hp: 60,  speed:  40, range: 280, damage: 35,  requiresTech: 'gunpowder',
+                   icon: '💣', desc: 'Très lent, dégâts énormes à longue portée.' },
+  elite_guard:   { id: 'elite_guard',   name: 'Garde d\'élite',  cost: 80,  hp: 200, speed: 110, range:  60, damage: 20,  requiresTech: 'renaissance',
+                   icon: '👑', desc: 'L\'élite militaire. Le meilleur soldat du jeu.' },
+  // Unités Magie
+  wizard:        { id: 'wizard',        name: 'Sorcier',         cost: 50,  hp: 40,  speed:  80, range: 200, damage: 10,  requiresTech: 'mage_tower',
+                   icon: '🧙', desc: 'Dégâts magiques à distance, ignore les armures.' },
+  necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 80,  hp: 50,  speed:  80, range: 150, damage:  6,  requiresTech: 'necromancy',
+                   icon: '💀', desc: 'Ressuscite un Squelette à chaque kill ennemi proche.' },
+  skeleton:      { id: 'skeleton',      name: 'Squelette',       cost: 0,   hp: 30,  speed:  80, range:  60, damage:  5,  requiresTech: null,
+                   icon: '☠️', desc: 'Invoqué par le Nécromancien. Durée 60s.' },
+  lich:          { id: 'lich',          name: 'Liche',           cost: 150, hp: 120, speed:  80, range: 180, damage: 15,  requiresTech: 'lich',
+                   icon: '☠️', desc: 'Nécromancien suprême. Ressuscite des Chevaliers squelettes.' },
+  // Unités Religion
+  pilgrim:       { id: 'pilgrim',       name: 'Pèlerin',         cost: 20,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'pilgrimage',
+                   icon: '🚶', desc: 'Ne combat pas. +0.5 foi/sec à son propriétaire.' },
+  inquisitor:    { id: 'inquisitor',    name: 'Inquisiteur',     cost: 30,  hp: 60,  speed:  90, range:  90, damage:  8,  requiresTech: 'inquisition',
+                   icon: '🗡', desc: 'Double dégâts vs unités magiques/undead.' },
+  holy_knight:   { id: 'holy_knight',   name: 'Chevalier sacré', cost: 70,  hp: 130, speed: 110, range:  60, damage: 14,  requiresTech: 'sacred_order',
+                   icon: '🛡', desc: 'Combattant sacré. +5 HP/sec auto-regen.' },
 };
 
-const TECH_TREE = {
-  forging:       { id: 'forging',       name: 'Forge',         icon: '🗡',  cost: 1, tier: 1, requires: [], desc: 'Débloque l\'Archer.',           effect: { unlockUnit: 'archer'  } },
-  cavalry:       { id: 'cavalry',       name: 'Cavalerie',     icon: '🐎', cost: 1, tier: 1, requires: [], desc: 'Débloque le Chevalier.',       effect: { unlockUnit: 'knight'  } },
-  economy:       { id: 'economy',       name: 'Économie',      icon: '💰', cost: 1, tier: 1, requires: [], desc: '+1 gold/sec passif.',          effect: { goldBonus: 1          } },
-  fortification: { id: 'fortification', name: 'Fortification', icon: '🛡',  cost: 1, tier: 1, requires: [], desc: '+400 HP HDV (heal inclus).',    effect: { hdvHpBonus: 400       } },
-};
+// Compat ancien système : ces 4 clés étaient utilisées dans le code legacy.
+// On les garde vides pour pas tout casser ; la vraie source = NEW_TECH_TREE.
+const TECH_TREE = {};
 
 // hdvLevel 1 = état de départ
 // goldPerSec : taux de gold passif de l'HDV à ce niveau
@@ -167,35 +199,69 @@ function baseBuildRadius(baseType, baseObj) {
   }
 }
 
-// Recalcule maxHp et vision du HDV en fonction du niveau + techs recherchées
+// Helper : un joueur a-t-il débloqué une tech ?
+function hasTech(player, techId) {
+  return player && Array.isArray(player.unlockedTechs) && player.unlockedTechs.includes(techId);
+}
+
+// Citadelle : si la tech 'citadel' est débloquée, le HDV gagne 3× HP
 function recomputeHdvStats(player) {
   const lvl = HDV_LEVELS[player.hdvLevel - 1] || HDV_LEVELS[0];
   let maxHp = lvl.maxHp;
   let vision = lvl.vision;
-  for (const techId of player.researchedTechs) {
-    const eff = TECH_TREE[techId] && TECH_TREE[techId].effect;
-    if (!eff) continue;
-    if (eff.hdvHpBonus)  maxHp  += eff.hdvHpBonus;
-    if (eff.visionBonus) vision += eff.visionBonus;
-  }
+  // Tech 'citadel' (Science T6) : 3× HP
+  if (hasTech(player, 'citadel')) maxHp *= 3;
   player.maxHp  = maxHp;
   player.vision = vision;
 }
 
 function computeGoldRate(player) {
-  // Base : taux de l'HDV selon son niveau
   const hdvLvl = HDV_LEVELS[(player.hdvLevel || 1) - 1] || HDV_LEVELS[0];
   let rate = hdvLvl.goldPerSec || GOLD_PER_SECOND;
-  // Bonus techs
-  for (const techId of player.researchedTechs) {
-    const eff = TECH_TREE[techId] && TECH_TREE[techId].effect;
-    if (eff && eff.goldBonus) rate += eff.goldBonus;
-  }
+  // Tech Agriculture : +1 gold/sec passif
+  if (hasTech(player, 'agriculture')) rate += 1;
   // Bonus villages possédés (selon leur niveau)
   for (const v of gameState.villages) {
     if (v.ownerId !== player.id || v.hp <= 0) continue;
     const vLvl = VILLAGE_LEVELS[(v.level || 1) - 1] || VILLAGE_LEVELS[0];
     rate += vLvl.goldPerSec || VILLAGE_GOLD_PER_SEC;
+  }
+  // Tech Empire : +50% sur tout
+  if (hasTech(player, 'empire')) rate *= 1.5;
+  return rate;
+}
+
+// Génération de Points de Recherche (PR) par seconde
+function computePrRate(player) {
+  let rate = 0.5; // base : HDV génère 0.5 PR/sec
+  if (hasTech(player, 'stargazing')) rate += 0.3;
+  if (hasTech(player, 'printing'))   rate *= 2; // Imprimerie : ×2 PR
+  return rate;
+}
+
+// Génération de Mana par seconde (par bâtiments)
+function computeManaRate(player) {
+  let rate = 0;
+  for (const b of gameState.buildings) {
+    if (b.ownerId !== player.id || b.hp <= 0) continue;
+    if (b.type === 'sanctum')    rate += 0.5;
+    if (b.type === 'mage_tower') rate += 1;
+  }
+  return rate;
+}
+
+// Génération de Foi par seconde (par bâtiments + pèlerins)
+function computeFaithRate(player) {
+  let rate = 0;
+  for (const b of gameState.buildings) {
+    if (b.ownerId !== player.id || b.hp <= 0) continue;
+    if (b.type === 'altar')      rate += 0.5;
+    if (b.type === 'temple')     rate += 1.5;
+    if (b.type === 'cathedral')  rate += 3; // double du temple
+  }
+  // Pèlerins
+  for (const u of Object.values(gameState.units)) {
+    if (u.ownerId === player.id && u.type === 'pilgrim') rate += 0.5;
   }
   return rate;
 }
@@ -224,9 +290,16 @@ function addBot() {
     gold: 0, hp: HDV_LEVELS[0].maxHp, maxHp: HDV_LEVELS[0].maxHp,
     eliminated: false, eliminatedAt: null,
     kills: 0, unitsCreated: 0, totalGoldEarned: 0, joinTime: Date.now(),
-    hdvLevel: 1, techPoints: 0, researchedTechs: [],
+    hdvLevel: 1,
+    // Tech tree v2 : ressources et déblocages
+    researchPoints: 0, mana: 0, faith: 0,
+    unlockedTechs: [],
+    // Legacy compat (encore référencés par du code non migré)
+    techPoints: 0, researchedTechs: [],
+    activeSpells: [],
+    allies: [], // ids des joueurs avec pacte de non-agression
     vision: HDV_LEVELS[0].vision,
-    botCooldown: 0, // tickCount + N → prochaine décision
+    botCooldown: 0,
   };
   gameState.players[botId] = botPlayer;
   initVisibility(botId);
@@ -337,7 +410,7 @@ function unitTypeUnlocked(player, typeId) {
   const def = UNIT_TYPES[typeId];
   if (!def) return false;
   if (!def.requiresTech) return true;
-  return player.researchedTechs.includes(def.requiresTech);
+  return hasTech(player, def.requiresTech);
 }
 
 const FALLBACK_SPAWNS = [
@@ -414,14 +487,18 @@ function computeVisibility(player) {
   if (!vis) return;
   vis.visible.fill(0);
   if (!player.eliminated && player.hp > 0) {
-    markCircle(vis.visible, player.x, player.y, player.vision || HDV_LEVELS[0].vision);
-    for (const unit of Object.values(gameState.units)) {
-      if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, VISION_UNIT);
-    }
-    // Chaque village possédé donne sa propre aura de vision
-    for (const v of gameState.villages) {
-      if (v.ownerId !== player.id || v.destroyed) continue;
-      markCircle(vis.visible, v.x, v.y, VILLAGE_VISION);
+    // Tech 'cartography' : révèle TOUT la map (vision instantanée partout)
+    if (hasTech(player, 'cartography')) {
+      vis.visible.fill(1);
+    } else {
+      markCircle(vis.visible, player.x, player.y, player.vision || HDV_LEVELS[0].vision);
+      for (const unit of Object.values(gameState.units)) {
+        if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, VISION_UNIT);
+      }
+      for (const v of gameState.villages) {
+        if (v.ownerId !== player.id || v.destroyed) continue;
+        markCircle(vis.visible, v.x, v.y, VILLAGE_VISION);
+      }
     }
   }
   // OR dans explored
@@ -670,6 +747,12 @@ function resetMatch() {
     p.hdvLevel        = 1;
     p.techPoints      = 0;
     p.researchedTechs = [];
+    p.researchPoints  = 0;
+    p.mana            = 0;
+    p.faith           = 0;
+    p.unlockedTechs   = [];
+    p.activeSpells    = [];
+    p.allies          = [];
     p.hp              = HDV_LEVELS[0].maxHp;
     p.maxHp           = HDV_LEVELS[0].maxHp;
     p.vision          = HDV_LEVELS[0].vision;
@@ -741,10 +824,13 @@ io.on('connection', (socket) => {
     unitsCreated: 0,
     totalGoldEarned: 0,
     joinTime: Date.now(),
-    // Tech tree state
+    // Tech tree v2
     hdvLevel: 1,
-    techPoints: 0,
-    researchedTechs: [],
+    researchPoints: 0, mana: 0, faith: 0,
+    unlockedTechs: [],
+    techPoints: 0, researchedTechs: [], // legacy compat
+    activeSpells: [],
+    allies: [],
     vision: HDV_LEVELS[0].vision,
   };
 
@@ -773,6 +859,7 @@ io.on('connection', (socket) => {
     villageHalfSize: VILLAGE_HALF_SIZE,
     spawnPositions: currentSpawns,
     buildingTypes: BUILDING_TYPES,
+    techTree: NEW_TECH_TREE, // arbre tech v2 radial
     buildGrid: BUILD_GRID,
     buildingMinDistHdv: BUILDING_MIN_DIST_HDV,
   });
@@ -855,35 +942,74 @@ io.on('connection', (socket) => {
     }
     p.gold -= cost;
     p.hdvLevel += 1;
-    p.techPoints += 1;
+    p.researchPoints = (p.researchPoints || 0) + 50; // bonus PR à l'upgrade HDV
     recomputeHdvStats(p);
     p.hp = p.maxHp; // heal complet à l'upgrade
     console.log(`Player ${p.name} → HDV lv ${p.hdvLevel}`);
   });
 
-  socket.on('researchTech', ({ techId } = {}) => {
+  // ── Tech tree v2 : débloque un nœud via Points de Recherche (PR) ──
+  // ── Diplomatie minimale : pacte de non-agression bilatéral ──
+  // Implémentation simple : les deux joueurs doivent avoir la tech 'diplomacy'.
+  // Premier qui clique = "demande envoyée" (proposalsOut). Si le deuxième envoie
+  // dans l'autre sens, le pacte est conclu (ajout à `allies` des deux côtés).
+  socket.on('proposeTreaty', ({ targetId } = {}) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
-    const tech = TECH_TREE[techId];
-    if (!tech) return;
-    if (p.researchedTechs.includes(techId)) return;
-    if (p.techPoints < tech.cost) return;
-    // Prérequis
-    for (const req of tech.requires) {
-      if (!p.researchedTechs.includes(req)) return;
+    if (!hasTech(p, 'diplomacy')) return;
+    const t = gameState.players[targetId];
+    if (!t || t.eliminated || t.id === p.id) return;
+    if (p.allies.includes(t.id)) return; // déjà alliés
+    p.proposalsOut = p.proposalsOut || [];
+    if (!p.proposalsOut.includes(t.id)) p.proposalsOut.push(t.id);
+    // Si l'autre a déjà proposé : on conclut
+    if ((t.proposalsOut || []).includes(p.id)) {
+      p.allies.push(t.id);
+      t.allies.push(p.id);
+      p.proposalsOut = p.proposalsOut.filter(x => x !== t.id);
+      t.proposalsOut = t.proposalsOut.filter(x => x !== p.id);
+      io.emit('treatySigned', { a: p.id, b: t.id, aName: p.name, bName: t.name });
+      console.log(`Pacte de non-agression : ${p.name} ↔ ${t.name}`);
     }
-    p.techPoints -= tech.cost;
-    p.researchedTechs.push(techId);
-    // Effets
-    const eff = tech.effect || {};
-    if (eff.hdvHpBonus) {
-      recomputeHdvStats(p);
-      p.hp = Math.min(p.maxHp, p.hp + eff.hdvHpBonus); // heal du bonus
-    }
-    if (eff.visionBonus) recomputeHdvStats(p);
-    // unlockUnit + goldBonus : effets calculés à la volée, rien à faire ici
-    console.log(`Player ${p.name} researched ${techId}`);
   });
+  socket.on('breakTreaty', ({ targetId } = {}) => {
+    const p = gameState.players[socket.id];
+    const t = gameState.players[targetId];
+    if (!p || !t) return;
+    p.allies = (p.allies || []).filter(x => x !== t.id);
+    t.allies = (t.allies || []).filter(x => x !== p.id);
+    io.emit('treatyBroken', { a: p.id, b: t.id });
+  });
+
+  socket.on('unlockTech', ({ techId } = {}) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const node = NEW_TECH_TREE[techId];
+    if (!node) return;
+    if ((p.unlockedTechs || []).includes(techId)) return;
+    // Vérifie tous les prérequis
+    for (const req of (node.requires || [])) {
+      if (!(p.unlockedTechs || []).includes(req)) {
+        socket.emit('spawnFailed', { reason: 'missing_requires' });
+        return;
+      }
+    }
+    if ((p.researchPoints || 0) < node.cost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_pr' });
+      return;
+    }
+    p.researchPoints -= node.cost;
+    p.unlockedTechs.push(techId);
+    // Effets passifs immédiats (recompute stats si concerné)
+    if (techId === 'citadel') {
+      recomputeHdvStats(p);
+      p.hp = p.maxHp; // heal full au moment de l'upgrade
+    }
+    console.log(`[${p.name}] tech débloquée : ${techId} (${node.cost} PR)`);
+    io.emit('techUnlocked', { playerId: p.id, techId, name: node.name, icon: node.icon, axis: node.axis });
+  });
+  // Legacy alias (ancien event, plus utilisé mais garde la compat)
+  socket.on('researchTech', () => { /* no-op : remplacé par unlockTech */ });
 
   socket.on('moveUnits', ({ unitIds, targetX, targetY }) => {
     const p = gameState.players[socket.id];
@@ -1007,7 +1133,7 @@ io.on('connection', (socket) => {
     p.gold -= VILLAGE_UPGRADE_COST;
     v.level = 2;
     v.hp = Math.min(v.maxHp, v.hp + 100); // bonus heal
-    p.techPoints = (p.techPoints || 0) + 1; // bonus pt tech à l'upgrade village
+    p.researchPoints = (p.researchPoints || 0) + 40; // bonus PR à l'upgrade village
     console.log(`Village ${v.id} amélioré Lv 2 par ${p.name} (+1 pt tech)`);
   });
 
@@ -1199,6 +1325,10 @@ setInterval(() => {
       if (dist <= step) {
         unit.x = unit.targetX; unit.y = unit.targetY;
         unit.targetX = null;   unit.targetY = null;
+        // Colon arrivé à destination : fonde un village
+        if (unit.type === 'settler') {
+          unit._foundVillage = true;
+        }
         continue;
       }
     } else {
@@ -1208,6 +1338,32 @@ setInterval(() => {
     const [nx, ny] = computeDesiredDir(unit, goalX, goalY, skipPlayerId, skipBuildingId);
     unit.x += nx * step;
     unit.y += ny * step;
+  }
+
+  // 1.5. Colons arrivés : transforme en village
+  for (const uid of Object.keys(gameState.units)) {
+    const u = gameState.units[uid];
+    if (u && u._foundVillage) {
+      // Vérifie distance min des autres villages/HDV
+      const tooClose =
+        Object.values(gameState.players).some(p => Math.hypot(p.x - u.x, p.y - u.y) < 400) ||
+        gameState.villages.some(v => Math.hypot(v.x - u.x, v.y - u.y) < VILLAGE_MIN_DIST_OTHER);
+      if (!tooClose) {
+        gameState.villages.push({
+          id: `v_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          x: u.x, y: u.y,
+          ownerId: u.ownerId,
+          hp: VILLAGE_MAX_HP, maxHp: VILLAGE_MAX_HP,
+          captureProgress: 0, capturingPlayerId: null,
+          level: 1, lastAttackTime: 0,
+        });
+        io.emit('villageCaptured', { villageId: 'colon', ownerId: u.ownerId,
+          ownerName: (gameState.players[u.ownerId] || {}).name || 'Colon',
+          ownerColor: (gameState.players[u.ownerId] || {}).color || '#fff' });
+        console.log(`Village fondé par Colon (${u.ownerId})`);
+      }
+      delete gameState.units[uid]; // le colon disparaît
+    }
   }
 
   // 2. Collisions — soft separation
@@ -1277,11 +1433,30 @@ setInterval(() => {
   const toDelete = new Set();
   const attacks  = [];
 
+  // Pré-calcule la position des Généraux par joueur (pour l'aura)
+  const generalsByOwner = {};
+  for (const u of Object.values(gameState.units)) {
+    if (u.type === 'general') {
+      (generalsByOwner[u.ownerId] = generalsByOwner[u.ownerId] || []).push(u);
+    }
+  }
+  const generalAuraDmgBonus = (unit) => {
+    const list = generalsByOwner[unit.ownerId];
+    if (!list) return 1;
+    for (const g of list) {
+      if (g.id === unit.id) continue;
+      if (Math.hypot(g.x - unit.x, g.y - unit.y) <= 200) return 1.25;
+    }
+    return 1;
+  };
+
   for (const unit of Object.values(gameState.units)) {
     if (toDelete.has(unit.id)) continue;
     if (nowMs - unit.lastAttackTime < ATTACK_COOLDOWN_MS) continue;
     const uRange  = unit.range  || 80;
-    const uDamage = unit.damage || 5;
+    // Aura Général : +25% dégâts pour les unités proches d'un Général allié
+    let uDamage = (unit.damage || 5) * generalAuraDmgBonus(unit);
+    // Inquisiteur : ×2 dmg vs unités magiques/undead
     const effectiveRange = uRange - UNIT_RADIUS;
 
     if (unit.attackTargetId !== null) {
@@ -1289,6 +1464,14 @@ setInterval(() => {
       if (unit.attackTargetType === 'unit') {
         target = gameState.units[unit.attackTargetId];
         if (!target || toDelete.has(target.id)) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
+        // Inquisiteur : double dmg sur magique/undead
+        if (unit.type === 'inquisitor' && ['wizard','necromancer','lich','skeleton'].includes(target.type)) {
+          uDamage *= 2;
+        }
+        // Catapulte/Canon : pénalité contre unités (gros vs bâtiments seulement)
+        if ((unit.type === 'catapult' || unit.type === 'cannon') && target.type) {
+          uDamage *= 0.4;
+        }
         inRange = Math.hypot(target.x - unit.x, target.y - unit.y) <= uRange;
       } else if (unit.attackTargetType === 'village') {
         target = gameState.villages.find(vv => vv.id === unit.attackTargetId);
@@ -1373,16 +1556,18 @@ setInterval(() => {
     // MOVE: skip combat
   }
 
-  // 3.4. Bâtiments combat : Tours tirent automatiquement sur les unités ennemies à portée
+  // 3.4. Bâtiments combat : Tours + Citadelle (HDV avec tech) tirent auto sur ennemis
   for (const b of gameState.buildings) {
     if (b.hp <= 0) continue;
     const def = BUILDING_TYPES[b.type];
-    if (!def || !def.damage || def.damage <= 0) continue; // Wall : pas d'attaque
+    if (!def || !def.damage || def.damage <= 0) continue;
     if (nowMs - b.lastAttackTime < (def.cooldownMs || 1000)) continue;
-    // Cherche l'ennemi le plus proche (unité) à portée
     let bestTarget = null, bestDist = def.range;
     for (const u of Object.values(gameState.units)) {
       if (u.ownerId === b.ownerId || toDelete.has(u.id)) continue;
+      // Skip alliés (pacte de non-agression)
+      const owner = gameState.players[b.ownerId];
+      if (owner && (owner.allies || []).includes(u.ownerId)) continue;
       const d = Math.hypot(u.x - b.x, u.y - b.y);
       if (d < bestDist) { bestDist = d; bestTarget = u; }
     }
@@ -1395,6 +1580,33 @@ setInterval(() => {
         entry.killed = true;
         const owner = gameState.players[b.ownerId];
         if (owner && !owner.eliminated) owner.kills++;
+      }
+      attacks.push(entry);
+    }
+  }
+
+  // 3.5. Citadelle : HDV avec tech 'citadel' tire automatiquement sur les ennemis proches
+  for (const p of Object.values(gameState.players)) {
+    if (p.eliminated || p.hp <= 0) continue;
+    if (!hasTech(p, 'citadel')) continue;
+    p.lastCitadelAttack = p.lastCitadelAttack || 0;
+    if (nowMs - p.lastCitadelAttack < 1200) continue;
+    const CIT_RANGE = 240, CIT_DMG = 8;
+    let best = null, bd = CIT_RANGE;
+    for (const u of Object.values(gameState.units)) {
+      if (u.ownerId === p.id || toDelete.has(u.id)) continue;
+      if ((p.allies || []).includes(u.ownerId)) continue;
+      const d = Math.hypot(u.x - p.x, u.y - p.y);
+      if (d < bd) { bd = d; best = u; }
+    }
+    if (best) {
+      p.lastCitadelAttack = nowMs;
+      best.hp = Math.max(0, best.hp - CIT_DMG);
+      const entry = { attackerId: 'citadel_' + p.id, attackerType: 'building', targetType: 'unit', targetId: best.id, bx: p.x, by: p.y };
+      if (best.hp <= 0) {
+        toDelete.add(best.id);
+        entry.killed = true;
+        p.kills++;
       }
       attacks.push(entry);
     }
@@ -1453,14 +1665,19 @@ setInterval(() => {
     }
   }
 
-  // 4. Gold once per second (alive players only) — taux modulé par les techs
+  // 4. Ressources passives une fois par seconde (alive players only)
   if (tickCount % TICK_RATE === 0) {
     for (const p of Object.values(gameState.players)) {
-      if (!p.eliminated) {
-        const rate = computeGoldRate(p);
-        p.gold += rate;
-        p.totalGoldEarned += rate;
-      }
+      if (p.eliminated) continue;
+      const goldRate  = computeGoldRate(p);
+      const prRate    = computePrRate(p);
+      const manaRate  = computeManaRate(p);
+      const faithRate = computeFaithRate(p);
+      p.gold            += goldRate;
+      p.totalGoldEarned += goldRate;
+      p.researchPoints  = (p.researchPoints || 0) + prRate;
+      p.mana            = Math.min(200, (p.mana  || 0) + manaRate);  // cap mana à 200
+      p.faith           = Math.min(200, (p.faith || 0) + faithRate); // cap foi à 200
     }
   }
 

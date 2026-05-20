@@ -45,7 +45,7 @@ const HdvPanel = (() => {
       });
     }
 
-    techEl.addEventListener('click', (e) => {
+    if (techEl) techEl.addEventListener('click', (e) => {
       const card = e.target.closest('.tech-card');
       if (!card) return;
       const techId = card.dataset.techId;
@@ -116,7 +116,7 @@ const HdvPanel = (() => {
     `).join('');
 
     const techList = Object.values(cfg.techTree).sort((a, b) => a.tier - b.tier || a.id.localeCompare(b.id));
-    techEl.innerHTML = techList.map(t => `
+    if (techEl) techEl.innerHTML = techList.map(t => `
       <div class="tech-card" data-tech-id="${t.id}">
         <div class="tech-card-icon">${t.icon}</div>
         <div class="tech-card-name">${t.name}</div>
@@ -203,7 +203,7 @@ const HdvPanel = (() => {
     }
 
     // ── Tech cards : update classes + status text ─────────────────────
-    for (const card of techEl.querySelectorAll('.tech-card')) {
+    if (techEl) for (const card of techEl.querySelectorAll('.tech-card')) {
       const t = cfg.techTree[card.dataset.techId];
       if (!t) continue;
       const researched  = (me.researchedTechs || []).includes(t.id);
