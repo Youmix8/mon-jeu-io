@@ -50,6 +50,7 @@ const Network = (() => {
       if (data.buildingTypes)       config.buildingTypes       = data.buildingTypes;
       if (data.buildGrid)           config.buildGrid           = data.buildGrid;
       if (data.buildingMinDistHdv)  config.buildingMinDistHdv  = data.buildingMinDistHdv;
+      if (data.spells)              config.spells              = data.spells;
       // Tech tree v2 (remplace l'ancien techTree de Tier 1)
       if (data.techTree)            config.techTree            = data.techTree;
       initReceived = true;
@@ -155,6 +156,10 @@ const Network = (() => {
       if (typeof TechTreeOverlay !== 'undefined' && TechTreeOverlay.isOpen()) TechTreeOverlay.refresh();
     });
 
+    socket.on('spellCast', (data) => {
+      if (typeof SpellCast !== 'undefined') SpellCast.playCastAnim(data);
+    });
+
     socket.on('gameOver', (data) => {
       if (onGameOverCallback) onGameOverCallback(data);
       _showGameOver(data);
@@ -249,6 +254,9 @@ const Network = (() => {
   function unlockTech(techId) {
     if (socket) socket.emit('unlockTech', { techId });
   }
+  function castSpell(spellId, x, y) {
+    if (socket) socket.emit('castSpell', { spellId, x, y });
+  }
   function proposeTreaty(targetId) {
     if (socket) socket.emit('proposeTreaty', { targetId });
   }
@@ -278,7 +286,7 @@ const Network = (() => {
   return {
     init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, researchTech, addBot,
-    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, unlockTech, proposeTreaty,
+    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, unlockTech, castSpell, proposeTreaty,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnInitReceived,
     isInitReceived,

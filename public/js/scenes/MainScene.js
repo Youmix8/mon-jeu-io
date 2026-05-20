@@ -223,6 +223,15 @@ class MainScene extends Phaser.Scene {
         }
         return;
       }
+      // Mode sort actif : clic gauche = cast, clic droit = annule
+      if (typeof SpellCast !== 'undefined' && SpellCast.isActive()) {
+        if (pointer.button === 0) {
+          SpellCast.tryCast(pointer.worldX, pointer.worldY);
+        } else if (pointer.button === 2) {
+          SpellCast.cancel();
+        }
+        return;
+      }
       if (pointer.button === 0) {
         const myId   = Network.getMyId();
         const hitUnit = currentlyOver.find(go => go._unitOwnerId === myId);
@@ -269,6 +278,9 @@ class MainScene extends Phaser.Scene {
       // Mode build : déplace le sprite fantôme à la souris
       if (typeof BuildMode !== 'undefined' && BuildMode.isActive()) {
         BuildMode.update(pointer.worldX, pointer.worldY);
+      }
+      if (typeof SpellCast !== 'undefined' && SpellCast.isActive()) {
+        SpellCast.update(pointer.worldX, pointer.worldY);
       }
     });
 
@@ -650,6 +662,7 @@ class MainScene extends Phaser.Scene {
     if (typeof Minimap !== 'undefined') Minimap.init(this.cameras.main);
     if (typeof RadialMenu !== 'undefined') RadialMenu.init(this);
     if (typeof BuildMode !== 'undefined') BuildMode.init(this);
+    if (typeof SpellCast !== 'undefined') SpellCast.init(this);
     this.buildingSprites = {};
 
     this.mapBuilt = true;

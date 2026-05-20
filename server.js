@@ -163,6 +163,28 @@ const BUILDING_TYPES = {
 const BUILDING_MIN_DIST     = 60;  // distance min entre 2 bâtiments
 const BUILDING_MIN_DIST_HDV = 70;  // distance min HDV / village ↔ bâtiment
 
+// ────────── Sorts actifs (axe Magie) ──────────
+const SPELLS = {
+  fireball: {
+    id: 'fireball', name: 'Boule de feu', icon: '🔥',
+    type: 'aoe_damage',
+    cost: 30, // mana
+    radius: 80, damage: 30,
+    requiresTech: 'pyromancy',
+    hotkey: 'F',
+    desc: 'AoE 80, 30 dmg, 30 mana.',
+  },
+  freeze: {
+    id: 'freeze', name: 'Gel', icon: '❄️',
+    type: 'aoe_slow',
+    cost: 25, // mana
+    radius: 90, durationMs: 5000, slowFactor: 0.3,
+    requiresTech: 'cryomancy',
+    hotkey: 'G',
+    desc: 'AoE 90, ralentit 70% pendant 5s, 25 mana.',
+  },
+};
+
 // ────────── Villages neutres (modèle Polytopia : base secondaire conquérable) ──────────
 const VILLAGE_RADIUS         = 70;              // rayon de capture
 const VILLAGE_CAPTURE_TICKS  = 10 * TICK_RATE;  // 10 s à 20 Hz = 200 ticks
@@ -902,6 +924,7 @@ io.on('connection', (socket) => {
     spawnPositions: currentSpawns,
     buildingTypes: BUILDING_TYPES,
     techTree: NEW_TECH_TREE, // arbre tech v2 radial
+    spells: SPELLS,
     buildGrid: BUILD_GRID,
     buildingMinDistHdv: BUILDING_MIN_DIST_HDV,
   });
@@ -1226,6 +1249,45 @@ io.on('connection', (socket) => {
     broadcastFilteredState();
   });
 
+  // ── Sorts actifs (axe Magie) ─────────────────────────────────
+  socket.on('castSpell', ({ spellId, x, y } = {}) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const spell = SPELLS[spellId];
+    if (!spell) return;
+    if (spell.requiresTech && !hasTech(p, spell.requiresTech)) {
+      socket.emit('spawnFailed', { reason: 'spell_locked' });
+      return;
+    }
+    if ((p.mana || 0) < spell.cost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_mana' });
+      return;
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    p.mana -= spell.cost;
+
+    if (spell.type === 'aoe_damage') {
+      for (const u of Object.values(gameState.units)) {
+        if (u.ownerId === p.id) continue;
+        if (p.allies && p.allies.includes(u.ownerId)) continue;
+        if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
+          u.hp -= spell.damage; // kills résolus dans le step cleanup habituel
+        }
+      }
+    } else if (spell.type === 'aoe_slow') {
+      const until = Date.now() + spell.durationMs;
+      for (const u of Object.values(gameState.units)) {
+        if (u.ownerId === p.id) continue;
+        if (p.allies && p.allies.includes(u.ownerId)) continue;
+        if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
+          u.frozenUntil = until;
+        }
+      }
+    }
+    // Broadcast pour l'animation côté client
+    io.emit('spellCast', { spellId, x, y, casterId: p.id, color: p.color, radius: spell.radius });
+  });
+
   socket.on('requestRestart', () => {
     if (gameState.matchState !== 'ended') return;
     resetMatch();
@@ -1335,7 +1397,9 @@ setInterval(() => {
 
   // 1. Move (ATTACK_MOVE / MOVE / IDLE) — stats par unité
   for (const unit of Object.values(gameState.units)) {
-    const uSpeed = unit.speed || 80;
+    const baseSpeed = unit.speed || 80;
+    const isFrozen  = unit.frozenUntil && unit.frozenUntil > nowMs;
+    const uSpeed    = isFrozen ? baseSpeed * 0.3 : baseSpeed;
     const uRange = unit.range || 80;
     const step = uSpeed / TICK_RATE;
     const effectiveRange = uRange - UNIT_RADIUS;
