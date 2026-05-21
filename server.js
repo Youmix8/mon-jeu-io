@@ -165,10 +165,11 @@ const BUILDING_MIN_DIST_HDV = 70;  // distance min HDV / village ↔ bâtiment
 
 // ────────── Sorts actifs (axe Magie) ──────────
 const SPELLS = {
+  // ── Magie (mana) ──
   fireball: {
     id: 'fireball', name: 'Boule de feu', icon: '🔥',
-    type: 'aoe_damage',
-    cost: 30, // mana
+    type: 'aoe_damage', costType: 'mana',
+    cost: 30,
     radius: 80, damage: 30,
     requiresTech: 'pyromancy',
     hotkey: 'F',
@@ -176,14 +177,36 @@ const SPELLS = {
   },
   freeze: {
     id: 'freeze', name: 'Gel', icon: '❄️',
-    type: 'aoe_slow',
-    cost: 25, // mana
+    type: 'aoe_slow', costType: 'mana',
+    cost: 25,
     radius: 90, durationMs: 5000, slowFactor: 0.3,
     requiresTech: 'cryomancy',
     hotkey: 'G',
     desc: 'AoE 90, ralentit 70% pendant 5s, 25 mana.',
   },
+  // ── Religion (foi) ──
+  blessing: {
+    id: 'blessing', name: 'Bénédiction', icon: '✝️',
+    type: 'aoe_heal', costType: 'faith',
+    cost: 30,
+    radius: 140, heal: 50,
+    requiresTech: 'blessing',
+    hotkey: 'H',
+    desc: 'AoE 140, +50 HP instantanés à tes unités, 30 foi.',
+  },
+  purifying_light: {
+    id: 'purifying_light', name: 'Lumière purificatrice', icon: '🌟',
+    type: 'aoe_purify', costType: 'faith',
+    cost: 25,
+    radius: 110, damage: 15, magicMult: 3, // ×3 dmg vs magie/undead
+    requiresTech: 'purifying_light',
+    hotkey: 'J',
+    desc: 'AoE 110, 15 dmg (×3 vs magie/undead), 25 foi.',
+  },
 };
+
+// Unités "magie/undead" (cibles bonus de Lumière purificatrice + Inquisiteur)
+const MAGIC_UNDEAD = new Set(['wizard', 'necromancer', 'lich', 'skeleton']);
 
 // ────────── Villages neutres (modèle Polytopia : base secondaire conquérable) ──────────
 const VILLAGE_RADIUS         = 70;              // rayon de capture
@@ -1259,28 +1282,44 @@ io.on('connection', (socket) => {
       socket.emit('spawnFailed', { reason: 'spell_locked' });
       return;
     }
-    if ((p.mana || 0) < spell.cost) {
-      socket.emit('spawnFailed', { reason: 'not_enough_mana' });
+    const costType = spell.costType || 'mana';
+    if ((p[costType] || 0) < spell.cost) {
+      socket.emit('spawnFailed', { reason: costType === 'faith' ? 'not_enough_faith' : 'not_enough_mana' });
       return;
     }
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    p.mana -= spell.cost;
+    p[costType] -= spell.cost;
+
+    const isAlly = (u) => u.ownerId === p.id || (p.allies && p.allies.includes(u.ownerId));
 
     if (spell.type === 'aoe_damage') {
       for (const u of Object.values(gameState.units)) {
-        if (u.ownerId === p.id) continue;
-        if (p.allies && p.allies.includes(u.ownerId)) continue;
+        if (isAlly(u)) continue;
         if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
-          u.hp -= spell.damage; // kills résolus dans le step cleanup habituel
+          u.hp -= spell.damage;
         }
       }
     } else if (spell.type === 'aoe_slow') {
       const until = Date.now() + spell.durationMs;
       for (const u of Object.values(gameState.units)) {
-        if (u.ownerId === p.id) continue;
-        if (p.allies && p.allies.includes(u.ownerId)) continue;
+        if (isAlly(u)) continue;
         if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
           u.frozenUntil = until;
+        }
+      }
+    } else if (spell.type === 'aoe_heal') {
+      for (const u of Object.values(gameState.units)) {
+        if (!isAlly(u)) continue;
+        if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
+          u.hp = Math.min(u.maxHp || u.hp, u.hp + spell.heal);
+        }
+      }
+    } else if (spell.type === 'aoe_purify') {
+      for (const u of Object.values(gameState.units)) {
+        if (isAlly(u)) continue;
+        if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
+          const dmg = spell.damage * (MAGIC_UNDEAD.has(u.type) ? (spell.magicMult || 1) : 1);
+          u.hp -= dmg;
         }
       }
     }
@@ -1788,6 +1827,25 @@ setInterval(() => {
       p.researchPoints  = (p.researchPoints || 0) + prRate;
       p.mana            = Math.min(200, (p.mana  || 0) + manaRate);  // cap mana à 200
       p.faith           = Math.min(200, (p.faith || 0) + faithRate); // cap foi à 200
+    }
+
+    // Aura HDV "Prière" : +1 HP/s à chaque unité du joueur à <200 d'un HDV propre
+    // + Auto-regen Chevalier sacré (+5 HP/s)
+    for (const u of Object.values(gameState.units)) {
+      if (u.hp <= 0 || u.hp >= u.maxHp) {
+        // Holy knight auto-regen même hors aura
+        if (u.type === 'holy_knight' && u.hp > 0 && u.hp < u.maxHp) {
+          u.hp = Math.min(u.maxHp, u.hp + 5);
+        }
+        continue;
+      }
+      let heal = 0;
+      if (u.type === 'holy_knight') heal += 5;
+      const owner = gameState.players[u.ownerId];
+      if (owner && !owner.eliminated && hasTech(owner, 'prayer')) {
+        if (Math.hypot(u.x - owner.x, u.y - owner.y) <= 200) heal += 1;
+      }
+      if (heal > 0) u.hp = Math.min(u.maxHp, u.hp + heal);
     }
   }
 

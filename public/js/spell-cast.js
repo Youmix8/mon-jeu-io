@@ -34,8 +34,11 @@ const SpellCast = (() => {
           _flashHud(`🔒 ${sp.name} verrouillé — recherche ${sp.requiresTech}`);
           return;
         }
-        if ((me.mana || 0) < sp.cost) {
-          _flashHud(`Pas assez de mana (${sp.cost} requis)`);
+        const costType = sp.costType || 'mana';
+        const current  = (costType === 'faith') ? (me.faith || 0) : (me.mana || 0);
+        const label    = (costType === 'faith') ? '🙏 foi' : '🔮 mana';
+        if (current < sp.cost) {
+          _flashHud(`Pas assez de ${label} (${sp.cost} requis)`);
           return;
         }
         activate(sp.id);
@@ -50,11 +53,12 @@ const SpellCast = (() => {
     const sp = (cfg.spells || {})[spellId];
     if (!sp || !scene) return;
     active = spellId;
-    const color = sp.type === 'aoe_damage' ? 0xef4444 : 0x60a5fa;
+    const color = _colorFor(sp);
     ghost = scene.add.graphics().setDepth(95);
     ghost.lineStyle(2, color, 0.85);
     ghost.fillStyle(color, 0.12);
-    label = scene.add.text(0, 0, `${sp.icon} ${sp.name} (${sp.cost} 🔮) — clic gauche pour lancer, Échap pour annuler`, {
+    const costIcon = (sp.costType === 'faith') ? '🙏' : '🔮';
+    label = scene.add.text(0, 0, `${sp.icon} ${sp.name} (${sp.cost} ${costIcon}) — clic gauche pour lancer, Échap pour annuler`, {
       fontSize: '13px', fontFamily: 'Quicksand', color: '#fff', backgroundColor: 'rgba(15,23,42,0.85)', padding: { x: 8, y: 5 },
     }).setDepth(96).setOrigin(0.5, 1).setScrollFactor(0);
     label.setPosition(scene.scale.width / 2, scene.scale.height - 12);
@@ -65,11 +69,20 @@ const SpellCast = (() => {
     const sp = (Network.getConfig().spells || {})[active];
     if (!sp) return;
     ghost.clear();
-    const color = sp.type === 'aoe_damage' ? 0xef4444 : 0x60a5fa;
+    const color = _colorFor(sp);
     ghost.lineStyle(2, color, 0.85);
     ghost.fillStyle(color, 0.12);
     ghost.fillCircle(wx, wy, sp.radius);
     ghost.strokeCircle(wx, wy, sp.radius);
+  }
+
+  function _colorFor(sp) {
+    if (!sp) return 0xffffff;
+    if (sp.type === 'aoe_damage')  return 0xef4444; // rouge
+    if (sp.type === 'aoe_slow')    return 0x60a5fa; // bleu
+    if (sp.type === 'aoe_heal')    return 0x22c55e; // vert
+    if (sp.type === 'aoe_purify')  return 0xfbbf24; // doré
+    return 0xffffff;
   }
 
   function tryCast(wx, wy) {
@@ -102,19 +115,19 @@ const SpellCast = (() => {
     if (!scene || !data) return;
     const sp = (Network.getConfig().spells || {})[data.spellId];
     if (!sp) return;
-    const isFire = sp.type === 'aoe_damage';
-    const color  = isFire ? 0xef4444 : 0x60a5fa;
+    const color    = _colorFor(sp);
+    const isExpl   = (sp.type === 'aoe_damage' || sp.type === 'aoe_purify');
     const ring = scene.add.graphics().setDepth(94);
     ring.lineStyle(3, color, 1);
-    ring.fillStyle(color, isFire ? 0.45 : 0.30);
+    ring.fillStyle(color, isExpl ? 0.45 : 0.30);
     ring.fillCircle(data.x, data.y, data.radius || sp.radius);
     ring.strokeCircle(data.x, data.y, data.radius || sp.radius);
     scene.tweens.add({
       targets: ring,
       alpha:  { from: 1, to: 0 },
-      scaleX: { from: 1, to: isFire ? 1.4 : 1.1 },
-      scaleY: { from: 1, to: isFire ? 1.4 : 1.1 },
-      duration: isFire ? 600 : 900, ease: 'Quad.easeOut',
+      scaleX: { from: 1, to: isExpl ? 1.4 : 1.15 },
+      scaleY: { from: 1, to: isExpl ? 1.4 : 1.15 },
+      duration: isExpl ? 600 : 900, ease: 'Quad.easeOut',
       onComplete: () => ring.destroy(),
     });
     // Icône centrale flash
