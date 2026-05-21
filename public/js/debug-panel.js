@@ -15,15 +15,22 @@
 const DebugPanel = (() => {
   let panel = null, popup = null;
   let mode  = 'spawn';      // 'spawn' | 'tuning'
-  let visible = true;
+  // Caché par défaut depuis le branchement arbre tech.
+  // Réactivable via Ctrl+Shift+D ou en ajoutant ?debug=1 à l'URL.
+  let visible = false;
   let pendingSpawn = null;  // { entityType } — clic sur la map = spawn
   let currentTunedType = null;
   // Overrides scale appliqués via tuning (entityType → scale)
   const scaleOverrides = {};
 
   function init() {
+    // Active si ?debug=1 dans l'URL
+    if (typeof location !== 'undefined' && /[?&]debug=1\b/.test(location.search)) {
+      visible = true;
+    }
     panel = document.createElement('div');
     panel.id = 'debug-panel';
+    if (!visible) panel.classList.add('hidden');
     document.body.appendChild(panel);
 
     popup = document.createElement('div');
@@ -35,12 +42,11 @@ const DebugPanel = (() => {
   }
 
   function _bindKeys() {
+    // Toggle DEBUG : Ctrl+Shift+D (n'entre pas en conflit avec sorts H/F/G/J)
     window.addEventListener('keydown', (e) => {
-      // Ignore si tape dans un input
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-      if (e.key === 'h' || e.key === 'H') {
-        // Évite collision avec le sort Bénédiction (3) qui utilise aussi H via Phaser
-        // → on autorise H ssi pas d'unités sélectionnées
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
         visible = !visible;
         panel.classList.toggle('hidden', !visible);
       }

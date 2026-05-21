@@ -145,6 +145,14 @@ const BUILDING_TYPES = {
     requiresTech: 'gunpowder',
     desc: 'Tour lourde longue portée. Dégâts massifs, cadence lente.',
   },
+  port: {
+    id: 'port', name: 'Port', icon: '⚓',
+    cost: 150, hp: 300,
+    range: 0, damage: 0, cooldownMs: 0,
+    halfSize: 28,
+    requiresTech: 'marine',
+    desc: 'Permet de produire des bateaux. Nécessaire pour la voie maritime.',
+  },
   // ── Magie ──
   sanctum: {
     id: 'sanctum', name: 'Sanctum', icon: '🔮',
@@ -232,6 +240,37 @@ const SPELLS = {
     requiresTech: 'purifying_light',
     hotkey: 'J',
     desc: 'AoE 110, 15 dmg (×3 vs magie/undead), 25 foi.',
+  },
+  // ── Sorts d'invocation (étape branchement arbre tech) ──
+  summon_elemental: {
+    id: 'summon_elemental', name: 'Convocation élémentaire', icon: '🌋',
+    type: 'summon_unit', costType: 'mana',
+    cost: 80, unitType: 'fire_elemental',
+    requiresTech: 'elemental_summon',
+    desc: 'Invoque un Élémentaire de feu (60s, 250 HP).',
+  },
+  summon_angel: {
+    id: 'summon_angel', name: 'Ange gardien', icon: '👼',
+    type: 'summon_unit', costType: 'faith',
+    cost: 100, unitType: 'angel',
+    requiresTech: 'guardian_angel',
+    desc: 'Invoque un Ange (90s, 300 HP, aura soin alliés).',
+  },
+  arcane_dragon: {
+    id: 'arcane_dragon', name: 'Avatar des Arcanes', icon: '🐲',
+    type: 'summon_unit', costType: 'mana',
+    cost: 150, unitType: 'arcane_dragon',
+    requiresTech: 'arcane_avatar',
+    oncePerMatch: true,
+    desc: 'Invoque le Dragon arcanique (1× par partie, 60s, 800 HP).',
+  },
+  divine_avatar: {
+    id: 'divine_avatar', name: 'Avatar divin', icon: '🌟',
+    type: 'summon_unit', costType: 'faith',
+    cost: 200, unitType: 'god_avatar',
+    requiresTech: 'divine_invocation',
+    oncePerMatch: true,
+    desc: 'Invoque l\'Avatar du Dieu (1× par partie, 1500 HP, aura peur).',
   },
 };
 
@@ -1426,9 +1465,37 @@ io.on('connection', (socket) => {
           u.hp -= dmg;
         }
       }
+    } else if (spell.type === 'summon_unit') {
+      // Invocation : crée une unité du type spécifié, propriétaire du caster
+      const udef = UNIT_TYPES[spell.unitType];
+      if (!udef) return;
+      // 1×/partie : refuse si déjà cast
+      if (spell.oncePerMatch) {
+        p.spellsUsedOnce = p.spellsUsedOnce || {};
+        if (p.spellsUsedOnce[spellId]) {
+          // Rembourse la ressource (déjà débitée plus haut)
+          p[costType] += spell.cost;
+          socket.emit('spawnFailed', { reason: 'spell_once_per_match' });
+          return;
+        }
+        p.spellsUsedOnce[spellId] = true;
+      }
+      const unitId = `unit_${nextUnitId++}`;
+      gameState.units[unitId] = {
+        id: unitId, ownerId: p.id,
+        x, y, type: spell.unitType,
+        hp: udef.hp, maxHp: udef.hp,
+        speed: udef.speed, range: udef.range, damage: udef.damage, cost: 0,
+        targetX: null, targetY: null,
+        attackTargetId: null, attackTargetType: null,
+        lastAttackTime: 0,
+        mode: 'defend', defendX: x, defendY: y, defendRadius: 320,
+        spawnTime: Date.now(),
+      };
+      io.emit('unitSummoned', { unitId, type: spell.unitType, x, y, ownerId: p.id });
     }
     // Broadcast pour l'animation côté client
-    io.emit('spellCast', { spellId, x, y, casterId: p.id, color: p.color, radius: spell.radius });
+    io.emit('spellCast', { spellId, x, y, casterId: p.id, color: p.color, radius: spell.radius || 80 });
   });
 
   socket.on('requestRestart', () => {
