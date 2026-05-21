@@ -3,6 +3,97 @@ const BAR_W       = 30;
 const BAR_H       = 4;
 const BAR_Y       = -(UNIT_RADIUS + 8);
 
+// ════════════════════════════════════════════════════════════════════
+// CATALOGUE DES ASSETS — source de vérité pour le préchargement
+// Chaque entrée : { key, path, category }
+// category → couleur du placeholder si le fichier PNG est absent
+// ════════════════════════════════════════════════════════════════════
+const ASSET_CATALOG = {
+  UNITS_NEW: [
+    { key: 'crossbowman',     path: 'assets/crossbowman.png',     category: 'science'  },
+    { key: 'heavy_knight',    path: 'assets/heavy_knight.png',    category: 'science'  },
+    { key: 'catapult',        path: 'assets/catapult.png',        category: 'science'  },
+    { key: 'cannon',          path: 'assets/cannon.png',          category: 'science'  },
+    { key: 'general',         path: 'assets/general.png',         category: 'science'  },
+    { key: 'elite_guard',     path: 'assets/elite_guard.png',     category: 'science'  },
+    { key: 'mage',            path: 'assets/mage.png',            category: 'magic'    },
+    { key: 'necromancer',     path: 'assets/necromancer.png',     category: 'magic'    },
+    { key: 'skeleton',        path: 'assets/skeleton.png',        category: 'magic'    },
+    { key: 'lich',            path: 'assets/lich.png',            category: 'magic'    },
+    { key: 'skeleton_knight', path: 'assets/skeleton_knight.png', category: 'magic'    },
+    { key: 'fire_elemental',  path: 'assets/fire_elemental.png',  category: 'magic'    },
+    { key: 'arcane_dragon',   path: 'assets/arcane_dragon.png',   category: 'magic'    },
+    { key: 'pilgrim',         path: 'assets/pilgrim.png',         category: 'religion' },
+    { key: 'inquisitor',      path: 'assets/inquisitor.png',      category: 'religion' },
+    { key: 'paladin',         path: 'assets/paladin.png',         category: 'religion' },
+    { key: 'angel',           path: 'assets/angel.png',           category: 'religion' },
+    { key: 'god_avatar',      path: 'assets/god_avatar.png',      category: 'religion' },
+  ],
+  BUILDINGS_NEW: [
+    { key: 'boat',            path: 'assets/boat.png',            category: 'science'  },
+    { key: 'port',            path: 'assets/port.png',            category: 'science'  },
+    { key: 'tower_archer',    path: 'assets/tower_archer.png',    category: 'science'  },
+    { key: 'bombard_tower',   path: 'assets/bombard_tower.png',   category: 'science'  },
+    { key: 'citadel',         path: 'assets/citadel.png',         category: 'science'  },
+    { key: 'tower_mage',      path: 'assets/tower_mage.png',      category: 'magic'    },
+    { key: 'sanctum',         path: 'assets/sanctum.png',         category: 'magic'    },
+    { key: 'altar',           path: 'assets/altar.png',           category: 'religion' },
+    { key: 'temple',          path: 'assets/temple.png',          category: 'religion' },
+    { key: 'cathedral',       path: 'assets/cathedral.png',       category: 'religion' },
+    { key: 'path_tile',       path: 'assets/path_tile.png',       category: 'science', isTile: true },
+  ],
+  SPELLS_FX: [
+    { key: 'spell_portal',      path: 'assets/spell_portal.png',      category: 'magic'    },
+    { key: 'spell_fireball',    path: 'assets/spell_fireball.png',     category: 'magic'    },
+    { key: 'spell_freeze',      path: 'assets/spell_freeze.png',       category: 'magic'    },
+    { key: 'spell_blessing',    path: 'assets/spell_blessing.png',     category: 'religion' },
+    { key: 'spell_holy_light',  path: 'assets/spell_holy_light.png',   category: 'religion' },
+  ],
+  PROJECTILES: [
+    { key: 'proj_arrow',             path: 'assets/proj_arrow.png',             category: 'projectile' },
+    { key: 'proj_crossbow_bolt',     path: 'assets/proj_crossbow_bolt.png',     category: 'projectile' },
+    { key: 'proj_catapult_rock',     path: 'assets/proj_catapult_rock.png',     category: 'projectile' },
+    { key: 'proj_cannonball',        path: 'assets/proj_cannonball.png',        category: 'projectile' },
+    { key: 'proj_throwing_spear',    path: 'assets/proj_throwing_spear.png',    category: 'projectile' },
+    { key: 'proj_magic_bolt',        path: 'assets/proj_magic_bolt.png',        category: 'projectile' },
+    { key: 'proj_fireball_small',    path: 'assets/proj_fireball_small.png',    category: 'projectile' },
+    { key: 'proj_lightning',         path: 'assets/proj_lightning.png',         category: 'projectile' },
+    { key: 'proj_ice_shard',         path: 'assets/proj_ice_shard.png',         category: 'projectile' },
+    { key: 'proj_dark_orb',          path: 'assets/proj_dark_orb.png',          category: 'projectile' },
+    { key: 'proj_dragon_breath',     path: 'assets/proj_dragon_breath.png',     category: 'projectile' },
+    { key: 'proj_holy_bolt',         path: 'assets/proj_holy_bolt.png',         category: 'projectile' },
+    { key: 'proj_inquisitor_hammer', path: 'assets/proj_inquisitor_hammer.png', category: 'projectile' },
+    { key: 'proj_divine_beam',       path: 'assets/proj_divine_beam.png',       category: 'projectile' },
+  ],
+  UI_ICONS: [
+    { key: 'icon_research', path: 'assets/icon_research.png', category: 'ui' },
+    { key: 'icon_mana',     path: 'assets/icon_mana.png',     category: 'ui' },
+    { key: 'icon_faith',    path: 'assets/icon_faith.png',    category: 'ui' },
+    { key: 'icon_favor',    path: 'assets/icon_favor.png',    category: 'ui' },
+    { key: 'axis_science',  path: 'assets/axis_science.png',  category: 'ui' },
+    { key: 'axis_magic',    path: 'assets/axis_magic.png',    category: 'ui' },
+    { key: 'axis_religion', path: 'assets/axis_religion.png', category: 'ui' },
+  ],
+};
+
+// Couleur du rectangle placeholder généré pour chaque catégorie (0xRRGGBB)
+const PLACEHOLDER_COLORS = {
+  science:    0x6b7280,  // gris ardoise
+  magic:      0x9333ea,  // violet
+  religion:   0xf59e0b,  // doré
+  projectile: 0xf97316,  // orange
+  ui:         0x3b82f6,  // bleu
+};
+
+// Dimensions du placeholder par catalogue
+const PLACEHOLDER_SIZES = {
+  UNITS_NEW:     { w: 32, h: 32 },
+  BUILDINGS_NEW: { w: 44, h: 44 },
+  SPELLS_FX:     { w: 48, h: 48 },
+  PROJECTILES:   { w: 14, h:  6 },
+  UI_ICONS:      { w: 22, h: 22 },
+};
+
 class MainScene extends Phaser.Scene {
   constructor() {
     super({ key: 'MainScene' });
@@ -27,12 +118,14 @@ class MainScene extends Phaser.Scene {
 
   preload() {
     // Charge les assets PNG. Si un asset est manquant ou échoue, on log un
-    // warning et on bascule sur le placeholder (rectangle/cercle/SpriteFactory).
+    // warning et génère un placeholder coloré dans create() via _generateMissingPlaceholders().
     this.assetMissing = {};
     this.load.on('loaderror', (file) => {
-      console.warn(`[Assets] "${file.key}" non trouvé (${file.src}) — fallback sur placeholder`);
+      console.warn(`[ASSET MISSING] "${file.key}" (${file.src})`);
       this.assetMissing[file.key] = true;
     });
+
+    // ── Assets existants ──────────────────────────────────────────
     this.load.image('soldier', 'assets/soldier.png');
     this.load.image('archer',  'assets/archer.png');
     this.load.image('cavalry', 'assets/cavalry.png');
@@ -43,13 +136,76 @@ class MainScene extends Phaser.Scene {
     this.load.image('rock',    'assets/rock.png');
     this.load.image('bush',    'assets/bush.png');
     this.load.image('flowers', 'assets/flowers.png');
+
+    // ── Nouveaux assets — chargés depuis ASSET_CATALOG ───────────
+    for (const [group, entries] of Object.entries(ASSET_CATALOG)) {
+      for (const entry of entries) {
+        // On enregistre la catégorie avant de tenter le load
+        // (utile dans _generateMissingPlaceholders pour choisir la couleur)
+        if (!this._assetMeta) this._assetMeta = {};
+        this._assetMeta[entry.key] = { category: entry.category, group, isTile: !!entry.isTile };
+
+        this.load.image(entry.key, entry.path);
+        // path_tile est chargé une 2e fois sous un alias pour l'usage tileSprite
+        if (entry.isTile) {
+          this._assetMeta[entry.key + '_tile'] = { category: entry.category, group, isTile: true };
+          this.load.image(entry.key + '_tile', entry.path);
+        }
+      }
+    }
   }
 
   _hasAsset(key) {
     return !(this.assetMissing && this.assetMissing[key]) && this.textures.exists(key);
   }
 
+  // Génère une texture Phaser colorée pour chaque asset manquant, puis retire
+  // la clé de this.assetMissing afin que _hasAsset() retourne true.
+  // Appelé au début de create(), avant toute création de sprite.
+  _generateMissingPlaceholders() {
+    const missingKeys = Object.keys(this.assetMissing || {});
+    if (missingKeys.length === 0) {
+      console.log('[ASSETS] Tous les assets chargés avec succès.');
+      return;
+    }
+
+    const meta    = this._assetMeta || {};
+
+    for (const key of missingKeys) {
+      const info  = meta[key] || { category: 'science', group: 'UNITS_NEW' };
+      const color = PLACEHOLDER_COLORS[info.category] || 0x888888;
+      const size  = PLACEHOLDER_SIZES[info.group]     || { w: 32, h: 32 };
+
+      const g = this.make.graphics({ add: false });
+      g.fillStyle(color, 0.92);
+      g.fillRect(0, 0, size.w, size.h);
+      // Bordure blanche fine pour les distinguer du fond
+      g.lineStyle(1.5, 0xffffff, 0.65);
+      g.strokeRect(1, 1, size.w - 2, size.h - 2);
+      // Croix centrale pour que le placeholder soit visuellement identifiable
+      const cx = size.w / 2, cy = size.h / 2, r = Math.min(cx, cy) * 0.45;
+      g.lineStyle(1.5, 0xffffff, 0.55);
+      g.lineBetween(cx - r, cy, cx + r, cy);
+      g.lineBetween(cx, cy - r, cx, cy + r);
+      g.generateTexture(key, size.w, size.h);
+      g.destroy();
+
+      // Retire de assetMissing → _hasAsset() retournera true pour ce placeholder
+      delete this.assetMissing[key];
+    }
+
+    console.warn(
+      `[ASSETS MANQUANTS — ${missingKeys.length}] Placeholders colorés générés :\n` +
+      `  ${missingKeys.join(', ')}\n` +
+      `  → Copiez les PNG dans public/assets/ pour les remplacer sans rechargement du code.`
+    );
+  }
+
   create() {
+    // Génère des textures placeholder pour tous les assets qui ont échoué au chargement.
+    // Doit être appelé en PREMIER dans create() avant toute création de sprite.
+    this._generateMissingPlaceholders();
+
     // IMPORTANT : ne pas construire la map ici car Network.init() n'a pas
     // encore reçu la taille réelle du serveur. On construit la map UNIQUEMENT
     // après réception de l'event 'init'. Voir _buildMap() plus bas.
