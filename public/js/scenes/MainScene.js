@@ -264,6 +264,23 @@ class MainScene extends Phaser.Scene {
       cam.centerOn(this.MAP_W / 2, this.MAP_H / 2);
     });
 
+    // ── DEBUG : raccourcis 1-5 pour sorts (gratuits, cast direct au curseur) ──
+    // 1=fireball, 2=freeze, 3=blessing, 4=purifying_light, 5=portal sur unités sélectionnées
+    const debugSpellMap = { ONE: 'fireball', TWO: 'freeze', THREE: 'blessing', FOUR: 'purifying_light' };
+    Object.keys(debugSpellMap).forEach((k) => {
+      this.input.keyboard.on('keydown-' + k, () => {
+        if (!this.mapBuilt) return;
+        const ptr = this.input.activePointer;
+        Network.castSpell(debugSpellMap[k], ptr.worldX, ptr.worldY);
+      });
+    });
+    this.input.keyboard.on('keydown-FIVE', () => {
+      if (!this.mapBuilt) return;
+      if (this.selectedUnitIds.size === 0) return;
+      const ptr = this.input.activePointer;
+      Network.debugCastPortal(Array.from(this.selectedUnitIds), ptr.worldX, ptr.worldY);
+    });
+
     // ── Ctrl+A — select all own units ────────────────────────────
     this.input.keyboard.on('keydown-A', (event) => {
       if (!event.ctrlKey && !event.metaKey) return;
@@ -387,6 +404,22 @@ class MainScene extends Phaser.Scene {
           SpellCast.cancel();
         }
         return;
+      }
+      // DEBUG : panneau debug intercepte le clic en mode TUNING ou SPAWN-pending
+      if (pointer.button === 0 && typeof DebugPanel !== 'undefined') {
+        // Mode SPAWN avec spawn en attente → place sur la map
+        if (DebugPanel.getMode && DebugPanel.getMode() === 'spawn' && DebugPanel.hasPendingSpawn && DebugPanel.hasPendingSpawn()) {
+          DebugPanel.tryHandleMapClick(pointer.worldX, pointer.worldY);
+          return;
+        }
+        // Mode TUNING : si clic sur un sprite avec _unitType, ouvre le slider
+        if (DebugPanel.getMode && DebugPanel.getMode() === 'tuning') {
+          const hit = currentlyOver.find(go => go._unitType);
+          if (hit) {
+            DebugPanel.tryHandleSpriteClick(hit._unitType, pointer.x, pointer.y);
+            return;
+          }
+        }
       }
       if (pointer.button === 0) {
         const myId   = Network.getMyId();
@@ -1042,7 +1075,16 @@ class MainScene extends Phaser.Scene {
 
     for (const id of Object.keys(this.unitSprites)) {
       if (!units[id]) {
-        this.unitSprites[id].forEach(o => { if (o) o.destroy(); });
+        // Animation de mort sur le sprite principal (fade + scale → destroy)
+        const arr = this.unitSprites[id];
+        const sprite = arr && arr[0];
+        if (sprite && typeof Animations !== 'undefined') {
+          Animations.animateUnitDeath(this, sprite);
+          // Détruire les autres éléments immédiatement (barres, badge)
+          for (let i = 1; i < arr.length; i++) if (arr[i]) arr[i].destroy();
+        } else if (arr) {
+          arr.forEach(o => { if (o) o.destroy(); });
+        }
         delete this.unitSprites[id];
         if (this.unitTweens[id])    { this.unitTweens[id].stop(); delete this.unitTweens[id]; }
         delete this.unitServerPos[id];
@@ -1060,27 +1102,30 @@ class MainScene extends Phaser.Scene {
       this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp };
 
       if (!this.unitSprites[id]) {
-        // Chaque type d'unité a son propre sprite PNG, tinté par la couleur de l'équipe
-        const assetKey = unit.type === 'archer'  ? 'archer'
-                       : unit.type === 'knight'  ? 'cavalry'
-                       : 'soldier';
-        const useAsset = this._hasAsset(assetKey);
-        const unitSize = unit.type === 'knight' ? 48 : 40;
+        // Lecture de la config centralisée pour l'asset, la taille et le scale
+        const cfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[unit.type] : null;
+        const assetKey  = (cfg && cfg.assetKey)    || unit.type;
+        const unitSize  = (cfg && cfg.displaySize) || 40;
+        const scaleMult = (cfg && cfg.scale)       || 1.0;
+        const useAsset  = this._hasAsset(assetKey);
 
         let sprite;
         if (useAsset) {
           sprite = this.add.sprite(unit.x, unit.y, assetKey)
             .setOrigin(0.5, 0.5)
-            .setDisplaySize(unitSize, unitSize)
+            .setDisplaySize(unitSize * scaleMult, unitSize * scaleMult)
             .setDepth(50);
-          sprite.setTint(colorInt); // filtre couleur d'équipe direct sur le PNG
+          sprite.setTint(colorInt);
         } else {
+          // Fallback SpriteFactory pour les 3 unités historiques
           const texKey = unit.type === 'archer' ? 'unit-archer'
                       : unit.type === 'knight' ? 'unit-knight'
                       : 'unit-soldier';
           sprite = this.add.sprite(unit.x, unit.y, texKey).setTint(colorInt).setDepth(50);
+          if (scaleMult !== 1.0) sprite.setScale(sprite.scaleX * scaleMult, sprite.scaleY * scaleMult);
         }
 
+        sprite._scaleMult = scaleMult;
         // Mémorise les scales APRÈS setDisplaySize → le wobble ne casse pas la taille
         sprite._baseScaleX = sprite.scaleX;
         sprite._baseScaleY = sprite.scaleY;
@@ -1103,6 +1148,13 @@ class MainScene extends Phaser.Scene {
         const badge = this.add.text(unit.x + 18, unit.y - 18, this._modeIcon(unit.mode), {
           fontSize: '12px', fontFamily: '"Quicksand", sans-serif',
         }).setOrigin(0.5, 0.5).setDepth(70);
+
+        // Animations de spawn (invoqués) et idle ambient (boss / volants)
+        if (typeof Animations !== 'undefined') {
+          if (cfg && cfg.summoned) Animations.animateUnitSpawn(this, sprite, unit.type);
+          if (cfg && (cfg.boss || cfg.flying)) Animations.animateIdleAmbient(this, sprite, unit.type);
+          if (unit.type === 'fire_elemental') Animations.animateIdleAmbient(this, sprite, unit.type);
+        }
 
         // [sprite, barBg, barFill, badge] — plus de cocarde, tint sur le sprite
         this.unitSprites[id] = [sprite, barBg, barFill, badge];
@@ -1364,6 +1416,14 @@ class MainScene extends Phaser.Scene {
   _playAttackAnimation(attacker, tx, ty) {
     const dx = tx - attacker.x, dy = ty - attacker.y;
     const angle = Math.atan2(dy, dx);
+
+    // Lecture config : si projectile défini → spawn sprite projectile qui vole
+    const cfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[attacker.type] : null;
+    if (cfg && cfg.projectile && this._hasAsset(cfg.projectile) && attacker.type !== 'archer') {
+      this._playProjectileAnim(attacker.x, attacker.y, tx, ty, cfg.projectile);
+      return;
+    }
+
     if (attacker.type === 'archer') {
       // Flèche qui vole de l'archer à la cible
       const arrow = this.add.sprite(attacker.x, attacker.y, 'arrow')
@@ -1402,6 +1462,34 @@ class MainScene extends Phaser.Scene {
         });
       }
     }
+  }
+
+  // ── Projectile générique : sprite tourné vers la cible + anim arrivée ──
+  _playProjectileAnim(sx, sy, tx, ty, projKey) {
+    const angle = Math.atan2(ty - sy, tx - sx);
+    const dist  = Math.hypot(tx - sx, ty - sy);
+    // Projectiles lourds = plus lents
+    const HEAVY = new Set(['proj_catapult_rock', 'proj_cannonball', 'proj_dragon_breath']);
+    const speed = HEAVY.has(projKey) ? 200 : 300; // px/s
+    const duration = Math.max(80, Math.min(1200, (dist / speed) * 1000));
+
+    const proj = this.add.sprite(sx, sy, projKey).setRotation(angle).setDepth(56);
+    if (typeof Animations !== 'undefined' && Animations.animateProjectile) {
+      Animations.animateProjectile(this, proj, projKey);
+    }
+    this.tweens.add({
+      targets: proj, x: tx, y: ty,
+      duration, ease: 'Quad.easeOut',
+      onComplete: () => {
+        // Petit flash d'impact
+        const flash = this.add.circle(tx, ty, 14, 0xffffff, 0.7).setDepth(54);
+        this.tweens.add({
+          targets: flash, scale: { from: 0.5, to: 1.6 }, alpha: { from: 0.7, to: 0 },
+          duration: 200, onComplete: () => flash.destroy(),
+        });
+        proj.destroy();
+      },
+    });
   }
 
   _showMoveIndicator(x, y, isAttack = false) {

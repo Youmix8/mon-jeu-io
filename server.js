@@ -81,6 +81,27 @@ const UNIT_TYPES = {
                    icon: '🗡', desc: 'Double dégâts vs unités magiques/undead.' },
   holy_knight:   { id: 'holy_knight',   name: 'Chevalier sacré', cost: 70,  hp: 130, speed: 110, range:  60, damage: 14,  requiresTech: 'sacred_order',
                    icon: '🛡', desc: 'Combattant sacré. +5 HP/sec auto-regen.' },
+  // ── Nouvelles unités étape 3 (summoned/boss) ──
+  skeleton_knight: { id: 'skeleton_knight', name: 'Cavalier squelette', cost: 0, hp: 60, speed: 80, range: 35, damage: 8, requiresTech: null,
+                     icon: '☠️', desc: 'Invoqué par la Liche au kill. Durée 60s.' },
+  fire_elemental:  { id: 'fire_elemental',  name: 'Élémentaire de feu', cost: 0, hp: 250, speed: 80, range: 50, damage: 25, requiresTech: null,
+                     icon: '🔥', desc: 'Invocation. AoE rayon 40. Durée 60s.' },
+  arcane_dragon:   { id: 'arcane_dragon',   name: 'Dragon arcanique',   cost: 0, hp: 800, speed: 120, range: 250, damage: 40, requiresTech: null,
+                     icon: '🐲', desc: 'Boss invoqué. Vole. Durée 60s.' },
+  angel:           { id: 'angel',           name: 'Ange',               cost: 0, hp: 300, speed: 100, range: 200, damage: 20, requiresTech: null,
+                     icon: '👼', desc: 'Vole. Aura soin +3 HP/s rayon 120. Durée 90s.' },
+  god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 0, hp: 1500, speed: 50, range: 80, damage: 60, requiresTech: null,
+                     icon: '🌟', desc: 'Boss. Aura peur (ennemis ralentis 50% rayon 400). AoE 60.' },
+};
+
+// Unités invoquées : durée de vie ms (mortes après expiration)
+const SUMMONED_LIFETIMES = {
+  skeleton: 60000,
+  skeleton_knight: 60000,
+  fire_elemental: 60000,
+  arcane_dragon: 60000,
+  angel: 90000,
+  god_avatar: 999999,
 };
 
 // Compat ancien système : ces 4 clés étaient utilisées dans le code legacy.
@@ -115,6 +136,14 @@ const BUILDING_TYPES = {
     range: 0, damage: 0, cooldownMs: 0,
     halfSize: 25,
     desc: 'Mur solide. Bloque le passage, pas d\'attaque.',
+  },
+  bombard_tower: {
+    id: 'bombard_tower', name: 'Tour à bombarde', icon: '💣',
+    cost: 120, hp: 350,
+    range: 280, damage: 18, cooldownMs: 3000,
+    halfSize: 26,
+    requiresTech: 'gunpowder',
+    desc: 'Tour lourde longue portée. Dégâts massifs, cadence lente.',
   },
   // ── Magie ──
   sanctum: {
@@ -207,7 +236,7 @@ const SPELLS = {
 };
 
 // Unités "magie/undead" (cibles bonus de Lumière purificatrice + Inquisiteur)
-const MAGIC_UNDEAD = new Set(['wizard', 'necromancer', 'lich', 'skeleton']);
+const MAGIC_UNDEAD = new Set(['wizard', 'necromancer', 'lich', 'skeleton', 'skeleton_knight', 'fire_elemental', 'arcane_dragon']);
 
 // ────────── Villages neutres (modèle Polytopia : base secondaire conquérable) ──────────
 const VILLAGE_RADIUS         = 70;              // rayon de capture
@@ -1277,6 +1306,61 @@ io.on('connection', (socket) => {
     };
   });
 
+  // ── DEBUG : spawn instantané gratuit (à retirer après branchement arbre tech) ──
+  socket.on('debugSpawn', ({ entityType, x, y } = {}) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const cx = Math.max(0, Math.min(MAP_WIDTH,  x));
+    const cy = Math.max(0, Math.min(MAP_HEIGHT, y));
+
+    // Bâtiments : insère dans gameState.buildings
+    const bdef = BUILDING_TYPES[entityType];
+    if (bdef) {
+      const bid = `b_${nextBuildingId++}`;
+      gameState.buildings.push({
+        id: bid, ownerId: p.id, type: entityType,
+        x: cx, y: cy, hp: bdef.hp, maxHp: bdef.hp, lastAttackTime: 0,
+      });
+      return;
+    }
+    // Unités : insère dans gameState.units
+    const udef = UNIT_TYPES[entityType];
+    if (udef) {
+      const unitId = `unit_${nextUnitId++}`;
+      gameState.units[unitId] = {
+        id: unitId, ownerId: p.id,
+        x: cx, y: cy, type: entityType,
+        hp: udef.hp, maxHp: udef.hp,
+        speed: udef.speed, range: udef.range, damage: udef.damage, cost: 0,
+        targetX: null, targetY: null,
+        attackTargetId: null, attackTargetType: null,
+        lastAttackTime: 0,
+        mode: 'defend', defendX: cx, defendY: cy, defendRadius: 320,
+        spawnTime: Date.now(),
+      };
+    }
+  });
+
+  // ── DEBUG : portail de téléportation (cast direct, gratuit) ──
+  socket.on('debugCastPortal', ({ unitIds, destX, destY } = {}) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    if (!Number.isFinite(destX) || !Number.isFinite(destY)) return;
+    if (!Array.isArray(unitIds)) return;
+    const tx = Math.max(0, Math.min(MAP_WIDTH,  destX));
+    const ty = Math.max(0, Math.min(MAP_HEIGHT, destY));
+    for (const uid of unitIds) {
+      const u = gameState.units[uid];
+      if (!u || u.ownerId !== socket.id) continue;
+      u.x = tx + (Math.random() - 0.5) * 60;
+      u.y = ty + (Math.random() - 0.5) * 60;
+      u.targetX = null; u.targetY = null;
+      u.attackTargetId = null; u.attackTargetType = null;
+    }
+    io.emit('spellCast', { spellId: 'portal', x: tx, y: ty, casterId: p.id, color: p.color, radius: 80 });
+  });
+
   socket.on('addBot', () => {
     if (Object.keys(gameState.players).length >= MAX_PLAYERS) return;
     addBot();
@@ -1402,6 +1486,7 @@ io.on('connection', (socket) => {
 // Game loop — order: behavior → move → collisions → combat → gold → broadcast
 setInterval(() => {
   tickCount++;
+  const nowMs = Date.now();
 
   // 0. Behavior IA — auto-cible selon le mode (defend / move opportuniste)
   for (const unit of Object.values(gameState.units)) {
@@ -1463,8 +1548,11 @@ setInterval(() => {
   // 1. Move (ATTACK_MOVE / MOVE / IDLE) — stats par unité
   for (const unit of Object.values(gameState.units)) {
     const baseSpeed = unit.speed || 80;
-    const isFrozen  = unit.frozenUntil && unit.frozenUntil > nowMs;
-    const uSpeed    = isFrozen ? baseSpeed * 0.3 : baseSpeed;
+    const isFrozen  = unit.frozenUntil  && unit.frozenUntil  > nowMs;
+    const isFeared  = unit.fearedUntil  && unit.fearedUntil  > nowMs;
+    // Frozen : 0.3× (gel magique) — Feared : 0.5× (aura god_avatar)
+    const speedMult = isFrozen ? 0.3 : (isFeared ? 0.5 : 1.0);
+    const uSpeed    = baseSpeed * speedMult;
     const uRange = unit.range || 80;
     const step = uSpeed / TICK_RATE;
     const effectiveRange = uRange - UNIT_RADIUS;
@@ -1604,7 +1692,6 @@ setInterval(() => {
   }
 
   // 3. Combat (ATTACK_MOVE: specific target | IDLE: nearest enemy | MOVE: skip)
-  const nowMs    = Date.now();
   const toDelete = new Set();
   const attacks  = [];
 
@@ -1665,9 +1752,16 @@ setInterval(() => {
 
       unit.lastAttackTime = nowMs;
       target.hp = Math.max(0, target.hp - uDamage);
+      // Fire elemental : tag pour AoE splash (traité en section 3.6)
+      if (unit.type === 'fire_elemental' && unit.attackTargetType === 'unit') {
+        unit._aoeAroundTarget = { x: target.x, y: target.y };
+      }
       const attackEntry = { attackerId: unit.id, targetType: unit.attackTargetType, targetId: target.id };
 
       if (unit.attackTargetType === 'unit' && target.hp <= 0) {
+        // Tag pour résurrection au kill (necro/lich) — voir section 3.6
+        target._killedByType  = unit.type;
+        target._killedByOwner = unit.ownerId;
         toDelete.add(target.id);
         attackEntry.killed = true;
         const killer = gameState.players[unit.ownerId];
@@ -1716,9 +1810,14 @@ setInterval(() => {
 
       unit.lastAttackTime = nowMs;
       best.hp = Math.max(0, best.hp - uDamage);
+      if (unit.type === 'fire_elemental' && bestType === 'unit') {
+        unit._aoeAroundTarget = { x: best.x, y: best.y };
+      }
       const attackEntry = { attackerId: unit.id, targetType: bestType, targetId: best.id };
 
       if (bestType === 'unit' && best.hp <= 0) {
+        best._killedByType  = unit.type;
+        best._killedByOwner = unit.ownerId;
         toDelete.add(best.id);
         attackEntry.killed = true;
         const killer = gameState.players[unit.ownerId];
@@ -1785,6 +1884,99 @@ setInterval(() => {
       }
       attacks.push(entry);
     }
+  }
+
+  // ── 3.6 Behaviors spéciaux ────────────────────────────────────────
+  // a) god_avatar fear aura : marque ennemis dans rayon 400 comme "feared" (slow 50%)
+  // b) fire_elemental : dégâts AoE rayon 40 autour de sa cible (au moment du tick d'attaque)
+  // c) Pilgrim mort : explosion de soin AoE 200 HP rayon 100 alliés
+  // d) Necromancer/Lich : résurrection au kill (skeleton / skeleton_knight, 60s)
+  // e) Lifetime decay : summoned units meurent après leur durée de vie
+  // f) Angel heal aura : appliquée dans la section 1/s plus bas
+
+  // a) Fear aura (god_avatar)
+  for (const u of Object.values(gameState.units)) {
+    if (u.type !== 'god_avatar') continue;
+    for (const other of Object.values(gameState.units)) {
+      if (other.ownerId === u.ownerId || toDelete.has(other.id)) continue;
+      if (Math.hypot(other.x - u.x, other.y - u.y) <= 400) {
+        other.fearedUntil = nowMs + 200; // refresh chaque tick (~50ms)
+      }
+    }
+  }
+
+  // b) AoE damage du fire_elemental autour de sa cible
+  // (réapplique à chaque tick d'attaque réussie — on tag dans la boucle combat ci-dessus
+  //  via _aoeAroundTarget — fallback : pass)
+  for (const u of Object.values(gameState.units)) {
+    if (u.type !== 'fire_elemental' || !u._aoeAroundTarget) continue;
+    const center = u._aoeAroundTarget;
+    u._aoeAroundTarget = null;
+    for (const other of Object.values(gameState.units)) {
+      if (other.ownerId === u.ownerId || toDelete.has(other.id)) continue;
+      const d = Math.hypot(other.x - center.x, other.y - center.y);
+      if (d > 0 && d <= 40) {
+        other.hp = Math.max(0, other.hp - 15); // 15 dmg splash
+        if (other.hp <= 0) toDelete.add(other.id);
+      }
+    }
+  }
+
+  // c) Pilgrim death → soin AoE allies (et d) Necro/Lich resurrect
+  // toDelete contient les unités tuées ce tick (par attaque/AoE)
+  const newSummons = [];
+  for (const deadId of toDelete) {
+    const dead = gameState.units[deadId];
+    if (!dead) continue;
+    // c) Pilgrim explosion
+    if (dead.type === 'pilgrim') {
+      for (const ally of Object.values(gameState.units)) {
+        if (ally.ownerId !== dead.ownerId || toDelete.has(ally.id)) continue;
+        if (Math.hypot(ally.x - dead.x, ally.y - dead.y) <= 100) {
+          ally.hp = Math.min(ally.maxHp || ally.hp, ally.hp + 200);
+        }
+      }
+      io.emit('pilgrimExplosion', { x: dead.x, y: dead.y, ownerId: dead.ownerId });
+    }
+    // d) Si tué par necro/lich → résurrection alliée du killer
+    if (dead._killedByType === 'necromancer' || dead._killedByType === 'lich') {
+      const summonedType = dead._killedByType === 'lich' ? 'skeleton_knight' : 'skeleton';
+      const def = UNIT_TYPES[summonedType];
+      if (def && dead._killedByOwner) {
+        newSummons.push({
+          ownerId: dead._killedByOwner,
+          x: dead.x, y: dead.y,
+          type: summonedType,
+          def,
+        });
+      }
+    }
+  }
+  for (const s of newSummons) {
+    const unitId = `unit_${nextUnitId++}`;
+    gameState.units[unitId] = {
+      id: unitId, ownerId: s.ownerId,
+      x: s.x, y: s.y,
+      type: s.type,
+      hp: s.def.hp, maxHp: s.def.hp,
+      speed: s.def.speed, range: s.def.range, damage: s.def.damage, cost: 0,
+      targetX: null, targetY: null,
+      attackTargetId: null, attackTargetType: null,
+      lastAttackTime: 0,
+      mode: 'defend', defendX: s.x, defendY: s.y, defendRadius: 320,
+      spawnTime: nowMs,
+    };
+    io.emit('unitSummoned', { unitId, type: s.type, x: s.x, y: s.y, ownerId: s.ownerId });
+  }
+
+  // e) Lifetime decay (summoned units)
+  for (const uid of Object.keys(gameState.units)) {
+    const u = gameState.units[uid];
+    if (toDelete.has(uid)) continue;
+    const lifetime = SUMMONED_LIFETIMES[u.type];
+    if (!lifetime) continue;
+    u.spawnTime = u.spawnTime || nowMs;
+    if (nowMs - u.spawnTime >= lifetime) toDelete.add(uid);
   }
 
   if (attacks.length > 0) io.emit('attacks', attacks);
@@ -1856,10 +2048,15 @@ setInterval(() => {
     }
 
     // Aura HDV "Prière" : +1 HP/s à chaque unité du joueur à <200 d'un HDV propre
-    // + Auto-regen Chevalier sacré (+5 HP/s)
+    // + Auto-regen Chevalier sacré (+5 HP/s) + Ange (+3 HP/s aux alliés rayon 120)
+    // Pré-calcule les anges par propriétaire pour l'aura
+    const angelsByOwner = {};
+    for (const u of Object.values(gameState.units)) {
+      if (u.type === 'angel') (angelsByOwner[u.ownerId] = angelsByOwner[u.ownerId] || []).push(u);
+    }
+
     for (const u of Object.values(gameState.units)) {
       if (u.hp <= 0 || u.hp >= u.maxHp) {
-        // Holy knight auto-regen même hors aura
         if (u.type === 'holy_knight' && u.hp > 0 && u.hp < u.maxHp) {
           u.hp = Math.min(u.maxHp, u.hp + 5);
         }
@@ -1870,6 +2067,14 @@ setInterval(() => {
       const owner = gameState.players[u.ownerId];
       if (owner && !owner.eliminated && hasTech(owner, 'prayer')) {
         if (Math.hypot(u.x - owner.x, u.y - owner.y) <= 200) heal += 1;
+      }
+      // Aura ange : +3 HP/s aux alliés dans rayon 120
+      const angels = angelsByOwner[u.ownerId];
+      if (angels) {
+        for (const a of angels) {
+          if (a.id === u.id) continue;
+          if (Math.hypot(a.x - u.x, a.y - u.y) <= 120) { heal += 3; break; }
+        }
       }
       if (heal > 0) u.hp = Math.min(u.maxHp, u.hp + heal);
     }

@@ -33,9 +33,9 @@
     <div id="spectator-label" style="display:none;">👻 Mode spectateur</div>
     <div id="my-stats">
       <span id="my-gold-row">💰 Gold : <span id="my-gold">0</span></span><br />
-      🔬 PR : <span id="my-pr">0</span> &nbsp;
-      🔮 <span id="my-mana">0</span> &nbsp;
-      🙏 <span id="my-faith">0</span><br />
+      <span id="my-pr-row"><img id="icon-pr" src="assets/icon_research.png" alt="" class="hud-icon" onerror="this.style.display='none'" />🔬 PR : <span id="my-pr">0</span></span> &nbsp;
+      <span id="my-mana-row" style="display:none"><img id="icon-mana" src="assets/icon_mana.png" alt="" class="hud-icon" onerror="this.style.display='none'" />🔮 <span id="my-mana">0</span></span> &nbsp;
+      <span id="my-faith-row" style="display:none"><img id="icon-faith" src="assets/icon_faith.png" alt="" class="hud-icon" onerror="this.style.display='none'" />🙏 <span id="my-faith">0</span></span><br />
       ❤️ HDV : <span id="my-hp">1000/1000</span><br />
       👥 Mes unités : <span id="my-unit-count">0</span><br />
       📍 Sélectionnées : <span id="selected-count">0</span>
@@ -162,6 +162,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
   <script src="/js/config/entitiesConfig.js"></script>
+  <script src="/js/utils/animations.js"></script>
   <script src="/js/network.js"></script>
   <script src="/js/sprite-factory.js"></script>
   <script src="/js/hdv-panel.js"></script>
@@ -172,6 +173,7 @@
   <script src="/js/tech-tree-overlay.js"></script>
   <script src="/js/minimap.js"></script>
   <script src="/js/scenes/MainScene.js"></script>
+  <script src="/js/debug-panel.js"></script>
   <script src="/js/game.js"></script>
 </body>
 </html>

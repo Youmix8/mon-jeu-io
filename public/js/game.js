@@ -11,6 +11,7 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
+window.game = game;
 
 window.addEventListener('resize', () => {
   game.scale.resize(window.innerWidth, window.innerHeight);
@@ -25,6 +26,7 @@ function startGame() {
   const name = nameInput.value.trim().slice(0, 20);
   lobbyOverlay.style.display = 'none';
   Network.init(name);
+  if (typeof DebugPanel !== 'undefined') DebugPanel.init();
 }
 
 playBtn.addEventListener('click', startGame);

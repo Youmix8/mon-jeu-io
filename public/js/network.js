@@ -86,6 +86,18 @@ const Network = (() => {
         if (elPr)   elPr.textContent   = Math.floor(me.researchPoints || 0);
         if (elMana) elMana.textContent = Math.floor(me.mana  || 0);
         if (elFaith)elFaith.textContent= Math.floor(me.faith || 0);
+
+        // Affichage conditionnel mana/faith selon bâtiments possédés
+        const MAGIC_BLDGS = new Set(['sanctum', 'mage_tower']);
+        const RELIG_BLDGS = new Set(['altar', 'temple', 'cathedral']);
+        const myBuildings = (state.buildings || []).filter(b => b.ownerId === myId);
+        const hasMagic = myBuildings.some(b => MAGIC_BLDGS.has(b.type));
+        const hasFaith = myBuildings.some(b => RELIG_BLDGS.has(b.type))
+                       || Object.values(state.units || {}).some(u => u.ownerId === myId && u.type === 'pilgrim');
+        const elManaRow  = document.getElementById('my-mana-row');
+        const elFaithRow = document.getElementById('my-faith-row');
+        if (elManaRow)  elManaRow.style.display  = hasMagic ? 'inline' : 'none';
+        if (elFaithRow) elFaithRow.style.display = hasFaith ? 'inline' : 'none';
         if (elHp) {
           if (me.eliminated) {
             elHp.textContent = 'ÉLIMINÉ';
@@ -156,7 +168,19 @@ const Network = (() => {
 
     socket.on('spellCast', (data) => {
       if (typeof SpellCast !== 'undefined') SpellCast.playCastAnim(data);
+      // Anim visuelle (sprite spell_*) via Animations helper si scène disponible
+      if (typeof Animations !== 'undefined' && window.game && window.game.scene && window.game.scene.scenes) {
+        const main = window.game.scene.scenes.find(s => s.scene && s.scene.key === 'MainScene');
+        if (main && main.add) Animations.animateSpellCast(main, data.spellId, data.x, data.y);
+      }
     });
+    socket.on('pilgrimExplosion', (data) => {
+      if (typeof Animations !== 'undefined' && window.game && window.game.scene && window.game.scene.scenes) {
+        const main = window.game.scene.scenes.find(s => s.scene && s.scene.key === 'MainScene');
+        if (main && main.add) Animations.animateSpellCast(main, 'purifying_light', data.x, data.y);
+      }
+    });
+    socket.on('unitSummoned', () => { /* visuel via _syncUnits */ });
 
     socket.on('gameOver', (data) => {
       if (onGameOverCallback) onGameOverCallback(data);
@@ -264,6 +288,12 @@ const Network = (() => {
   function buildBuilding(type, x, y, baseType, baseId) {
     if (socket) socket.emit('buildBuilding', { type, x, y, baseType, baseId });
   }
+  function debugSpawn(entityType, x, y) {
+    if (socket) socket.emit('debugSpawn', { entityType, x, y });
+  }
+  function debugCastPortal(unitIds, destX, destY) {
+    if (socket) socket.emit('debugCastPortal', { unitIds, destX, destY });
+  }
 
   function setOnSpawnFailed(cb)      { onSpawnFailedCallback = cb; }
   function setOnAttack(cb)           { onAttackCallback = cb; }
@@ -284,6 +314,7 @@ const Network = (() => {
     init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
     upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, unlockTech, castSpell, proposeTreaty,
+    debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnInitReceived,
     isInitReceived,
