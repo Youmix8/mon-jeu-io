@@ -69,11 +69,11 @@ const UNIT_TYPES = {
   wizard:        { id: 'wizard',        name: 'Sorcier',         cost: 50,  hp: 40,  speed:  80, range: 200, damage: 10,  requiresTech: 'mage_tower',
                    icon: '🧙', desc: 'Dégâts magiques à distance, ignore les armures.' },
   necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 80,  hp: 50,  speed:  80, range: 150, damage:  6,  requiresTech: 'necromancy',
-                   icon: '💀', desc: 'Ressuscite un Squelette à chaque kill ennemi proche.' },
+                   icon: '💀', desc: 'Attaque magique à distance. (Résurrection : à venir.)' },
   skeleton:      { id: 'skeleton',      name: 'Squelette',       cost: 0,   hp: 30,  speed:  80, range:  60, damage:  5,  requiresTech: null,
                    icon: '☠️', desc: 'Invoqué par le Nécromancien. Durée 60s.' },
   lich:          { id: 'lich',          name: 'Liche',           cost: 150, hp: 120, speed:  80, range: 180, damage: 15,  requiresTech: 'lich',
-                   icon: '☠️', desc: 'Nécromancien suprême. Ressuscite des Chevaliers squelettes.' },
+                   icon: '☠️', desc: 'Nécromancien suprême : longue portée + dégâts massifs.' },
   // Unités Religion
   pilgrim:       { id: 'pilgrim',       name: 'Pèlerin',         cost: 20,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'pilgrimage',
                    icon: '🚶', desc: 'Ne combat pas. +0.5 foi/sec à son propriétaire.' },
@@ -162,6 +162,7 @@ const BUILDING_TYPES = {
 
 const BUILDING_MIN_DIST     = 60;  // distance min entre 2 bâtiments
 const BUILDING_MIN_DIST_HDV = 70;  // distance min HDV / village ↔ bâtiment
+const MAX_UNIT_BATCH        = 500; // cap d'unités par appel moveUnits/attackTarget/defendArea (anti-cheat)
 
 // ────────── Sorts actifs (axe Magie) ──────────
 const SPELLS = {
@@ -404,20 +405,30 @@ function addBot() {
 function botTick(bot) {
   if (bot.eliminated) return;
 
-  // Recherche tech (priorité : forging > cavalry > economy > fortification)
-  if ((bot.techPoints || 0) > 0) {
-    const priority = ['forging', 'cavalry', 'economy', 'fortification'];
-    for (const tid of priority) {
-      if (!bot.researchedTechs.includes(tid)) {
-        bot.techPoints--;
-        bot.researchedTechs.push(tid);
-        const eff = TECH_TREE[tid].effect || {};
-        if (eff.hdvHpBonus) { recomputeHdvStats(bot); bot.hp = Math.min(bot.maxHp, bot.hp + eff.hdvHpBonus); }
-        if (eff.visionBonus) recomputeHdvStats(bot);
-        console.log(`[Bot ${bot.name}] researched ${tid}`);
-        break;
-      }
-    }
+  // Recherche tech v2 : priorité Science militaire → économie → magie/religion
+  // (le bot dépense ses PR dès qu'il atteint le coût d'un nœud prioritaire)
+  const BOT_TECH_PRIORITY = [
+    'agriculture',          // +1 gold/s — premier pick
+    'archery', 'riding',    // Archer + Chevalier
+    'siege_engineering',    // Catapulte
+    'crossbows', 'steel_forge',
+    'military_architecture', // Tour d'archer
+    'empire', 'war_academy',
+    'citadel',
+  ];
+  for (const tid of BOT_TECH_PRIORITY) {
+    if ((bot.unlockedTechs || []).includes(tid)) continue;
+    const node = NEW_TECH_TREE[tid];
+    if (!node) continue;
+    if ((bot.researchPoints || 0) < node.cost) continue;
+    // Vérifie les prérequis
+    const allPrereqs = (node.requires || []).every(r => (bot.unlockedTechs || []).includes(r));
+    if (!allPrereqs) continue;
+    bot.researchPoints -= node.cost;
+    bot.unlockedTechs.push(tid);
+    recomputeHdvStats(bot);
+    console.log(`[Bot ${bot.name}] researched ${tid}`);
+    break; // un seul unlock par tick
   }
 
   // Upgrade HDV
@@ -426,15 +437,15 @@ function botTick(bot) {
     if (bot.gold >= cost + 50) { // garder un peu de gold pour spawner
       bot.gold -= cost;
       bot.hdvLevel++;
-      bot.techPoints++;
+      bot.researchPoints = (bot.researchPoints || 0) + 50; // bonus PR comme un joueur
       recomputeHdvStats(bot);
       bot.hp = bot.maxHp;
       console.log(`[Bot ${bot.name}] → HDV lv ${bot.hdvLevel}`);
     }
   }
 
-  // Spawn unit — préfère le meilleur dispo
-  const preferOrder = ['knight', 'archer', 'soldier'];
+  // Spawn unit — préfère les unités tier élevé d'abord
+  const preferOrder = ['heavy_knight', 'crossbowman', 'catapult', 'knight', 'archer', 'soldier'];
   for (const typeId of preferOrder) {
     const def = UNIT_TYPES[typeId];
     if (!unitTypeUnlocked(bot, typeId)) continue;
@@ -1004,7 +1015,7 @@ io.on('connection', (socket) => {
   socket.on('defendArea', ({ unitIds, x, y, radius }) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
-    if (!Array.isArray(unitIds)) return;
+    if (!Array.isArray(unitIds) || unitIds.length > MAX_UNIT_BATCH) return;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     const cx = Math.max(0, Math.min(MAP_WIDTH,  x));
     const cy = Math.max(0, Math.min(MAP_HEIGHT, y));
@@ -1102,7 +1113,7 @@ io.on('connection', (socket) => {
   socket.on('moveUnits', ({ unitIds, targetX, targetY }) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
-    if (!Array.isArray(unitIds)) return;
+    if (!Array.isArray(unitIds) || unitIds.length > MAX_UNIT_BATCH) return;
     if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return;
 
     const cx = Math.max(0, Math.min(MAP_WIDTH,  targetX));
@@ -1124,7 +1135,7 @@ io.on('connection', (socket) => {
   socket.on('attackTarget', ({ unitIds, targetId, targetType }) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
-    if (!Array.isArray(unitIds)) return;
+    if (!Array.isArray(unitIds) || unitIds.length > MAX_UNIT_BATCH) return;
     if (!targetId || (targetType !== 'unit' && targetType !== 'hdv' && targetType !== 'village')) return;
 
     const valid = unitIds.filter(id => gameState.units[id] && gameState.units[id].ownerId === socket.id);
@@ -1272,7 +1283,8 @@ io.on('connection', (socket) => {
     broadcastFilteredState();
   });
 
-  // ── Sorts actifs (axe Magie) ─────────────────────────────────
+  // ── Sorts actifs (axe Magie/Religion) ────────────────────────
+  // Anti-cheat : cooldown 400ms par sort par joueur ; coords clampées à la map.
   socket.on('castSpell', ({ spellId, x, y } = {}) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
@@ -1282,13 +1294,21 @@ io.on('connection', (socket) => {
       socket.emit('spawnFailed', { reason: 'spell_locked' });
       return;
     }
+    // Cooldown serveur (anti-spam)
+    p.spellCooldowns = p.spellCooldowns || {};
+    const lastCast = p.spellCooldowns[spellId] || 0;
+    if (Date.now() - lastCast < 400) return;
     const costType = spell.costType || 'mana';
     if ((p[costType] || 0) < spell.cost) {
       socket.emit('spawnFailed', { reason: costType === 'faith' ? 'not_enough_faith' : 'not_enough_mana' });
       return;
     }
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    // Clamp aux bornes de la map (anti-cheat)
+    x = Math.max(0, Math.min(MAP_WIDTH,  x));
+    y = Math.max(0, Math.min(MAP_HEIGHT, y));
     p[costType] -= spell.cost;
+    p.spellCooldowns[spellId] = Date.now();
 
     const isAlly = (u) => u.ownerId === p.id || (p.allies && p.allies.includes(u.ownerId));
 
@@ -1341,6 +1361,12 @@ io.on('connection', (socket) => {
 
     for (const [unitId, unit] of Object.entries(gameState.units)) {
       if (unit.ownerId === socket.id) delete gameState.units[unitId];
+    }
+    // Nettoyage diplomatie : retire le joueur de toutes les alliances et propositions
+    for (const pl of Object.values(gameState.players)) {
+      if (pl.id === socket.id) continue;
+      if (Array.isArray(pl.allies))        pl.allies        = pl.allies.filter(id => id !== socket.id);
+      if (Array.isArray(pl.proposalsOut))  pl.proposalsOut  = pl.proposalsOut.filter(id => id !== socket.id);
     }
     delete gameState.players[socket.id];
     delete playerVisibility[socket.id];
@@ -1614,7 +1640,7 @@ setInterval(() => {
         target = gameState.units[unit.attackTargetId];
         if (!target || toDelete.has(target.id)) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
         // Inquisiteur : double dmg sur magique/undead
-        if (unit.type === 'inquisitor' && ['wizard','necromancer','lich','skeleton'].includes(target.type)) {
+        if (unit.type === 'inquisitor' && MAGIC_UNDEAD.has(target.type)) {
           uDamage *= 2;
         }
         // Catapulte/Canon : pénalité contre unités (gros vs bâtiments seulement)

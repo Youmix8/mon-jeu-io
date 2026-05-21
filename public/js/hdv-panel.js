@@ -45,16 +45,6 @@ const HdvPanel = (() => {
       });
     }
 
-    if (techEl) techEl.addEventListener('click', (e) => {
-      const card = e.target.closest('.tech-card');
-      if (!card) return;
-      const techId = card.dataset.techId;
-      if (!techId) return;
-      if (!card.classList.contains('available')) return;
-      _animateClick(card);
-      Network.researchTech(techId);
-    });
-
     upgradeBtn.addEventListener('click', upgrade);
 
     const closeBtn = panelEl.querySelector('.hdv-panel-close');
@@ -91,7 +81,6 @@ const HdvPanel = (() => {
   function isVisible() { return isOpen; }
   function spawn(t)    { Network.spawnUnit(t); }
   function upgrade()   { Network.upgradeHdv(); }
-  function research(t) { Network.researchTech(t); }
 
   function onSpawnFailed(reason, lastUnitType) {
     if (!isOpen || !prodEl) return;
@@ -160,15 +149,17 @@ const HdvPanel = (() => {
     // ── Empire (texte seulement, pas de remplacement DOM) ──────────────
     document.getElementById('hdv-level').textContent   = me.hdvLevel || 1;
     document.getElementById('hdv-hp').textContent      = `${me.hp}/${me.maxHp}`;
-    document.getElementById('hdv-gold').textContent    = me.gold;
-    document.getElementById('hdv-techpts').textContent = me.techPoints || 0;
+    document.getElementById('hdv-gold').textContent    = Math.floor(me.gold);
+    const techpts = document.getElementById('hdv-techpts');
+    if (techpts) techpts.textContent = Math.floor(me.researchPoints || 0);
 
-    let rate = 1;
-    for (const tid of (me.researchedTechs || [])) {
-      const t = cfg.techTree && cfg.techTree[tid];
-      if (t && t.effect && t.effect.goldBonus) rate += t.effect.goldBonus;
-    }
-    document.getElementById('hdv-rate').textContent = `+${rate}`;
+    // Taux gold = baseline HDV + agriculture (+1) puis × empire (×1.5) — mirror du calc serveur
+    const unlocked = me.unlockedTechs || [];
+    const hdvLvl   = (cfg.hdvLevels || [])[(me.hdvLevel || 1) - 1] || { goldPerSec: 1 };
+    let rate = hdvLvl.goldPerSec || 1;
+    if (unlocked.includes('agriculture')) rate += 1;
+    if (unlocked.includes('empire'))      rate *= 1.5;
+    document.getElementById('hdv-rate').textContent = `+${(Math.round(rate * 10) / 10)}`;
 
     // ── Upgrade button ────────────────────────────────────────────────
     const lvlIdx = (me.hdvLevel || 1) - 1;
@@ -188,7 +179,7 @@ const HdvPanel = (() => {
     for (const card of prodEl.querySelectorAll('.unit-card')) {
       const u = cfg.unitTypes[card.dataset.unitId];
       if (!u) continue;
-      const unlocked   = !u.requiresTech || (me.researchedTechs || []).includes(u.requiresTech);
+      const unlocked   = !u.requiresTech || (me.unlockedTechs || []).includes(u.requiresTech);
       const affordable = me.gold >= u.cost;
       card.classList.toggle('locked', !unlocked);
       card.classList.toggle('poor', unlocked && !affordable);
@@ -200,25 +191,6 @@ const HdvPanel = (() => {
         } else {
           lockNote.style.display = 'none';
         }
-      }
-    }
-
-    // ── Tech cards : update classes + status text ─────────────────────
-    if (techEl) for (const card of techEl.querySelectorAll('.tech-card')) {
-      const t = cfg.techTree[card.dataset.techId];
-      if (!t) continue;
-      const researched  = (me.researchedTechs || []).includes(t.id);
-      const prereqsOk   = t.requires.every(r => (me.researchedTechs || []).includes(r));
-      const canResearch = !researched && prereqsOk && (me.techPoints || 0) >= t.cost;
-      card.classList.toggle('researched', researched);
-      card.classList.toggle('locked',     !researched && !prereqsOk);
-      card.classList.toggle('available',  canResearch);
-      card.classList.toggle('poor',       !researched && prereqsOk && !canResearch);
-      const statusEl = card.querySelector('[data-role="status"]');
-      if (statusEl) {
-        statusEl.textContent = researched ? '✓ Recherchée'
-          : !prereqsOk ? `🔒 ${t.requires.map(r => techNameOf(r)).join(', ')}`
-          : `🔬 ${t.cost} pt`;
       }
     }
 
@@ -252,5 +224,5 @@ const HdvPanel = (() => {
     return t ? t.name : id;
   }
 
-  return { open, close, toggle, refresh, isVisible, spawn, upgrade, research, onSpawnFailed };
+  return { open, close, toggle, refresh, isVisible, spawn, upgrade, onSpawnFailed };
 })();

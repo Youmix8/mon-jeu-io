@@ -112,7 +112,7 @@ const SpellCast = (() => {
 
   // Animation à jouer quand un sort est lancé (par n'importe qui)
   function playCastAnim(data) {
-    if (!scene || !data) return;
+    if (!scene || !scene.sys || !scene.sys.isActive() || !data) return;
     const sp = (Network.getConfig().spells || {})[data.spellId];
     if (!sp) return;
     const color    = _colorFor(sp);
