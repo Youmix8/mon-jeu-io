@@ -9,8 +9,21 @@ const io = new Server(server);
 
 validateTechTree();
 
-const MAP_WIDTH  = 4500;
-const MAP_HEIGHT = 4500;
+// Tailles de map disponibles (configurable depuis le lobby)
+const MAP_SIZES = {
+  small:  { width: 3000, height: 3000, villageMin: 6,  villageMax: 10 },
+  medium: { width: 4500, height: 4500, villageMin: 10, villageMax: 16 },
+  large:  { width: 6000, height: 6000, villageMin: 16, villageMax: 24 },
+};
+const DEFAULT_MAP_TYPE = 'continental'; // 'no_water' | 'lakes' | 'continental' | 'island'
+const DEFAULT_MAP_SIZE = 'medium';
+
+// Variables courantes (initialisées dans regenerateMap, peuvent changer entre parties)
+let MAP_WIDTH  = MAP_SIZES[DEFAULT_MAP_SIZE].width;
+let MAP_HEIGHT = MAP_SIZES[DEFAULT_MAP_SIZE].height;
+let currentMapType = DEFAULT_MAP_TYPE;
+let currentMapSize = DEFAULT_MAP_SIZE;
+
 const MAX_PLAYERS = 4;
 const GOLD_PER_SECOND = 1;
 const UNIT_RADIUS = 15;
@@ -36,8 +49,8 @@ function snapToGrid(x, y) {
     y: Math.floor(y / BUILD_GRID) * BUILD_GRID + BUILD_GRID / 2,
   };
 }
-const GRID_W      = MAP_WIDTH  / TILE_SIZE;   // 90
-const GRID_H      = MAP_HEIGHT / TILE_SIZE;   // 90
+let   GRID_W      = MAP_WIDTH  / TILE_SIZE;   // recalculé dans applyMapConfig()
+let   GRID_H      = MAP_HEIGHT / TILE_SIZE;
 const VISION_UNIT = 240;
 
 // ────────── Tech tree, types d'unités, niveaux HDV ──────────
@@ -92,6 +105,9 @@ const UNIT_TYPES = {
                      icon: '👼', desc: 'Vole. Aura soin +3 HP/s rayon 120. Durée 90s.' },
   god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 0, hp: 1500, speed: 50, range: 80, damage: 60, requiresTech: null,
                      icon: '🌟', desc: 'Boss. Aura peur (ennemis ralentis 50% rayon 400). AoE 60.' },
+  // Bateau : se déplace UNIQUEMENT sur l'eau, produit depuis un Port
+  boat:            { id: 'boat',            name: 'Bateau',             cost: 80, hp: 100, speed: 100, range: 0,  damage: 0, requiresTech: 'marine',
+                     icon: '⛵', desc: 'Va sur l\'eau uniquement. Produit depuis un Port.' },
 };
 
 // Unités invoquées : durée de vie ms (mortes après expiration)
@@ -282,27 +298,152 @@ const VILLAGE_RADIUS         = 70;              // rayon de capture
 const VILLAGE_CAPTURE_TICKS  = 10 * TICK_RATE;  // 10 s à 20 Hz = 200 ticks
 const VILLAGE_MIN_DIST_HDV   = 700;
 const VILLAGE_MIN_DIST_OTHER = 600;
-const VILLAGE_COUNT_MIN      = 5;
-const VILLAGE_COUNT_MAX      = 9;
+const VILLAGE_COUNT_MIN      = 10;
+const VILLAGE_COUNT_MAX      = 16;
 const VILLAGE_MAX_HP         = 300;             // PV du village (peut être détruit)
 const VILLAGE_GOLD_PER_SEC   = 0.5;             // gold passif au propriétaire
 const VILLAGE_HALF_SIZE      = 50;              // pour collisions / hitbox attaque
 const VILLAGE_VISION         = 220;             // vision donnée au propriétaire
-const VILLAGE_UPGRADE_COST   = 150;             // coût Lv1 → Lv2
+const VILLAGE_UPGRADE_COST   = 150;             // coût Lv1 → Lv2 (multiplié par niveau)
 
+// 5 niveaux de village. Chaque niveau : +rayon de construction, +HP max, +gold/s,
+// vision augmentée. Le upgradeCost croît : Lv1→2=150, Lv2→3=300, Lv3→4=500, Lv4→5=800
 const VILLAGE_LEVELS = [
-  { level: 1, allowedUnits: ['soldier'], goldPerSec: 0.5, buildRadius: 160 },
-  { level: 2, allowedUnits: 'all',        goldPerSec: 1.0, buildRadius: 220 },
+  { level: 1, allowedUnits: ['soldier'],        goldPerSec: 0.5, buildRadius: 160, maxHp: 300, vision: 220, upgradeCost: 150,  name: 'Hameau' },
+  { level: 2, allowedUnits: 'all',              goldPerSec: 1.0, buildRadius: 220, maxHp: 400, vision: 260, upgradeCost: 300,  name: 'Village' },
+  { level: 3, allowedUnits: 'all',              goldPerSec: 1.5, buildRadius: 280, maxHp: 550, vision: 300, upgradeCost: 500,  name: 'Bourg' },
+  { level: 4, allowedUnits: 'all',              goldPerSec: 2.0, buildRadius: 340, maxHp: 750, vision: 340, upgradeCost: 800,  name: 'Cité' },
+  { level: 5, allowedUnits: 'all',              goldPerSec: 3.0, buildRadius: 400, maxHp: 1000, vision: 380, upgradeCost: null, name: 'Métropole' },
 ];
+const MAX_VILLAGE_LEVEL = VILLAGE_LEVELS.length;
+
+// ────────── Eau & génération de map ──────────────────────────────
+// gameState.waterTiles : Uint8Array de longueur GRID_W*GRID_H, 1 = eau, 0 = terre.
+// Types de map : 'no_water' | 'lakes' | 'continental' | 'island'.
+
+function _fillCircle(arr, gw, gh, cx, cy, r) {
+  const yMin = Math.max(0, Math.floor(cy - r));
+  const yMax = Math.min(gh - 1, Math.ceil(cy + r));
+  const xMin = Math.max(0, Math.floor(cx - r));
+  const xMax = Math.min(gw - 1, Math.ceil(cx + r));
+  const r2 = r * r;
+  for (let ty = yMin; ty <= yMax; ty++) {
+    for (let tx = xMin; tx <= xMax; tx++) {
+      const dx = tx - cx, dy = ty - cy;
+      if (dx*dx + dy*dy <= r2) arr[ty * gw + tx] = 1;
+    }
+  }
+}
+
+function generateWaterTiles(type, gw, gh) {
+  const arr = new Uint8Array(gw * gh);
+  if (type === 'no_water') return arr;
+
+  if (type === 'lakes') {
+    // 4 à 8 lacs aléatoires
+    const lakeCount = 4 + Math.floor(Math.random() * 5);
+    for (let l = 0; l < lakeCount; l++) {
+      const cx = 6 + Math.random() * (gw - 12);
+      const cy = 6 + Math.random() * (gh - 12);
+      const r  = 3 + Math.random() * 5;
+      _fillCircle(arr, gw, gh, cx, cy, r);
+    }
+  } else if (type === 'continental') {
+    // Une rivière/détroit sinusoïdal qui traverse la map (verticalement ou horizontalement)
+    const vertical = Math.random() < 0.5;
+    const halfWidth = 2.5 + Math.random() * 2;
+    const amplitude = Math.min(gw, gh) * 0.18;
+    const freq = 0.08 + Math.random() * 0.06;
+    if (vertical) {
+      const baseX = gw * (0.4 + Math.random() * 0.2);
+      for (let ty = 0; ty < gh; ty++) {
+        const off = Math.sin(ty * freq) * amplitude;
+        for (let tx = Math.floor(baseX + off - halfWidth); tx <= Math.ceil(baseX + off + halfWidth); tx++) {
+          if (tx >= 0 && tx < gw) arr[ty * gw + tx] = 1;
+        }
+      }
+    } else {
+      const baseY = gh * (0.4 + Math.random() * 0.2);
+      for (let tx = 0; tx < gw; tx++) {
+        const off = Math.sin(tx * freq) * amplitude;
+        for (let ty = Math.floor(baseY + off - halfWidth); ty <= Math.ceil(baseY + off + halfWidth); ty++) {
+          if (ty >= 0 && ty < gh) arr[ty * gw + tx] = 1;
+        }
+      }
+    }
+  } else if (type === 'island') {
+    // Disque grass au centre, océan tout autour. Bord irrégulier pour réalisme.
+    const cx = gw / 2, cy = gh / 2;
+    const baseR = Math.min(gw, gh) * 0.36;
+    for (let ty = 0; ty < gh; ty++) {
+      for (let tx = 0; tx < gw; tx++) {
+        const dx = tx - cx, dy = ty - cy;
+        const angle = Math.atan2(dy, dx);
+        // Bord irrégulier : variation ±10% en fonction de l'angle
+        const localR = baseR * (1 + Math.sin(angle * 3) * 0.08 + Math.sin(angle * 7) * 0.05);
+        if (dx*dx + dy*dy > localR * localR) arr[ty * gw + tx] = 1;
+      }
+    }
+  }
+  return arr;
+}
+
+// waterTiles : Uint8Array global, recréé à chaque applyMapConfig
+let waterTiles = new Uint8Array(0);
+
+// Tile (tx, ty) → est-ce une tile d'eau ?
+function isWaterTile(tx, ty) {
+  if (!waterTiles || waterTiles.length === 0) return false;
+  if (tx < 0 || tx >= GRID_W || ty < 0 || ty >= GRID_H) return false;
+  return waterTiles[ty * GRID_W + tx] === 1;
+}
+// (x, y) coordonnées monde → est-ce de l'eau ?
+function isWaterAt(x, y) {
+  return isWaterTile(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
+}
+// Au moins une tile d'eau dans les 8 voisines (utilisé pour port)
+function hasWaterNeighbor(x, y) {
+  const tx = Math.floor(x / TILE_SIZE);
+  const ty = Math.floor(y / TILE_SIZE);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      if (isWaterTile(tx + dx, ty + dy)) return true;
+    }
+  }
+  return false;
+}
+
+// Recalcule TOUT en fonction du type/size de map. Appelé au démarrage et
+// quand le 1er joueur (ou un reset) déclenche une nouvelle config.
+function applyMapConfig(type, size) {
+  if (size && MAP_SIZES[size]) {
+    const sz = MAP_SIZES[size];
+    MAP_WIDTH  = sz.width;
+    MAP_HEIGHT = sz.height;
+    currentMapSize = size;
+  }
+  if (type) currentMapType = type;
+  GRID_W = Math.floor(MAP_WIDTH  / TILE_SIZE);
+  GRID_H = Math.floor(MAP_HEIGHT / TILE_SIZE);
+  waterTiles = generateWaterTiles(currentMapType, GRID_W, GRID_H);
+  console.log(`[map] config: type=${currentMapType} size=${currentMapSize} (${MAP_WIDTH}x${MAP_HEIGHT}, grid ${GRID_W}x${GRID_H}, water tiles ${waterTiles.reduce((s,v)=>s+v,0)}/${GRID_W*GRID_H})`);
+}
 
 function generateVillages(spawns) {
-  const count = VILLAGE_COUNT_MIN + Math.floor(Math.random() * (VILLAGE_COUNT_MAX - VILLAGE_COUNT_MIN + 1));
+  // Adapte count à la taille de map effective
+  const sz = MAP_SIZES[currentMapSize] || MAP_SIZES.medium;
+  const minC = sz.villageMin || VILLAGE_COUNT_MIN;
+  const maxC = sz.villageMax || VILLAGE_COUNT_MAX;
+  const count = minC + Math.floor(Math.random() * (maxC - minC + 1));
   const villages = [];
   let attempts = 0, idCounter = 1;
-  while (villages.length < count && attempts < 800) {
+  while (villages.length < count && attempts < 1500) {
     attempts++;
     const x = 200 + Math.random() * (MAP_WIDTH  - 400);
     const y = 200 + Math.random() * (MAP_HEIGHT - 400);
+    // Refuse les positions sur l'eau (les villages sont terrestres)
+    if (isWaterAt(x, y)) continue;
     if (spawns.some(s => Math.hypot(s.x - x, s.y - y) < VILLAGE_MIN_DIST_HDV)) continue;
     if (villages.some(v => Math.hypot(v.x - x, v.y - y) < VILLAGE_MIN_DIST_OTHER)) continue;
     villages.push({
@@ -597,17 +738,33 @@ function generateSpawns() {
     attempts++;
     const x = SPAWN_MARGIN + Math.random() * (MAP_WIDTH  - 2 * SPAWN_MARGIN);
     const y = SPAWN_MARGIN + Math.random() * (MAP_HEIGHT - 2 * SPAWN_MARGIN);
+    // Refuse les spawns sur l'eau ou avec une water tile dans les 3 tiles autour
+    if (isWaterAt(x, y)) continue;
+    let nearWater = false;
+    for (let dy = -2; dy <= 2 && !nearWater; dy++) {
+      for (let dx = -2; dx <= 2 && !nearWater; dx++) {
+        if (isWaterAt(x + dx * TILE_SIZE, y + dy * TILE_SIZE)) nearWater = true;
+      }
+    }
+    if (nearWater) continue;
     const ok = spawns.every(s => Math.hypot(s.x - x, s.y - y) >= MIN_SPAWN_DIST);
     if (ok) spawns.push({ x: Math.round(x), y: Math.round(y) });
   }
   if (spawns.length < MAX_PLAYERS) {
     console.warn(`generateSpawns: only placed ${spawns.length}/${MAX_PLAYERS} after ${attempts} tries, using fallback corners`);
-    return FALLBACK_SPAWNS.map(s => ({ ...s }));
+    // Fallback : utilise les coins mais vérifie qu'ils sont sur terre, sinon les pousse vers le centre
+    return FALLBACK_SPAWNS.map(s => {
+      let x = s.x, y = s.y;
+      while (isWaterAt(x, y)) { x += (MAP_WIDTH/2 - x) * 0.2; y += (MAP_HEIGHT/2 - y) * 0.2; }
+      return { x: Math.round(x), y: Math.round(y) };
+    });
   }
   console.log('Random spawns:', spawns.map(s => `(${s.x},${s.y})`).join(' '));
   return spawns;
 }
 
+// Initialisation map (waterTiles, dimensions, grid)
+applyMapConfig(DEFAULT_MAP_TYPE, DEFAULT_MAP_SIZE);
 let currentSpawns = generateSpawns();
 let initialVillages = generateVillages(currentSpawns);
 
@@ -973,6 +1130,19 @@ io.on('connection', (socket) => {
   const rawName    = (socket.handshake.auth && socket.handshake.auth.name) || '';
   const playerName = rawName.trim().slice(0, 20) || `Joueur ${slot + 1}`;
 
+  // Config map envoyée par le 1er joueur : appliquée si on est encore en waiting
+  // et qu'aucun autre joueur n'est dans la partie (premier arrivé = premier servi)
+  const reqMapType = (socket.handshake.auth && socket.handshake.auth.mapType) || null;
+  const reqMapSize = (socket.handshake.auth && socket.handshake.auth.mapSize) || null;
+  if ((reqMapType || reqMapSize)
+      && gameState.matchState === 'waiting'
+      && Object.keys(gameState.players).length === 0) {
+    applyMapConfig(reqMapType, reqMapSize);
+    currentSpawns       = generateSpawns();
+    gameState.villages  = generateVillages(currentSpawns);
+    gameState.buildings = [];
+  }
+
   const spawn  = currentSpawns[slot];
   const player = {
     id: socket.id,
@@ -1013,6 +1183,9 @@ io.on('connection', (socket) => {
     tileSize: TILE_SIZE,
     gridW: GRID_W,
     gridH: GRID_H,
+    mapType: currentMapType,
+    mapSize: currentMapSize,
+    waterTiles: Buffer.from(waterTiles.buffer, waterTiles.byteOffset, waterTiles.byteLength),
     unitTypes: UNIT_TYPES,
     techTree: TECH_TREE,
     hdvLevels: HDV_LEVELS,
@@ -1046,19 +1219,57 @@ io.on('connection', (socket) => {
       socket.emit('spawnFailed', { reason: 'not_enough_gold' });
       return;
     }
+
+    // Bateau : doit spawner depuis un port (et dans l'eau adjacente)
+    let spawnX, spawnY;
+    if (typeId === 'boat') {
+      const ports = gameState.buildings.filter(b => b.type === 'port' && b.ownerId === socket.id && b.hp > 0);
+      if (ports.length === 0) {
+        socket.emit('spawnFailed', { reason: 'no_port' });
+        return;
+      }
+      // Cherche la water tile la plus proche d'un port quelconque
+      let found = null;
+      for (const port of ports) {
+        const tx0 = Math.floor(port.x / TILE_SIZE);
+        const ty0 = Math.floor(port.y / TILE_SIZE);
+        for (let r = 1; r <= 3 && !found; r++) {
+          for (let dy = -r; dy <= r && !found; dy++) {
+            for (let dx = -r; dx <= r && !found; dx++) {
+              if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; // anneau de rayon r
+              if (isWaterTile(tx0 + dx, ty0 + dy)) {
+                found = {
+                  x: (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2,
+                  y: (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2,
+                };
+              }
+            }
+          }
+        }
+        if (found) break;
+      }
+      if (!found) {
+        socket.emit('spawnFailed', { reason: 'no_water_near_port' });
+        return;
+      }
+      spawnX = found.x; spawnY = found.y;
+    } else {
+      const angle = Math.random() * Math.PI * 2;
+      const dist  = 60 + Math.random() * 40;
+      spawnX = Math.round(p.x + Math.cos(angle) * dist);
+      spawnY = Math.round(p.y + Math.sin(angle) * dist);
+    }
+
     p.gold -= def.cost;
     p.unitsCreated++;
-
-    const angle  = Math.random() * Math.PI * 2;
-    const dist   = 60 + Math.random() * 40;
     const unitId = `unit_${nextUnitId++}`;
 
     const hpBonus = unitHpBonusFromVillages(p);
     gameState.units[unitId] = {
       id: unitId,
       ownerId: socket.id,
-      x: Math.round(p.x + Math.cos(angle) * dist),
-      y: Math.round(p.y + Math.sin(angle) * dist),
+      x: spawnX,
+      y: spawnY,
       type: typeId,
       hp: def.hp + hpBonus,
       maxHp: def.hp + hpBonus,
@@ -1272,6 +1483,11 @@ io.on('connection', (socket) => {
         return;
       }
     }
+    // Port : doit avoir au moins une tile d'eau adjacente
+    if (type === 'port' && !hasWaterNeighbor(x, y)) {
+      socket.emit('spawnFailed', { reason: 'port_needs_water' });
+      return;
+    }
     // Coût
     if (p.gold < def.cost) {
       socket.emit('spawnFailed', { reason: 'not_enough_gold' });
@@ -1296,16 +1512,21 @@ io.on('connection', (socket) => {
     if (!p || p.eliminated) return;
     const v = gameState.villages.find(vv => vv.id === villageId);
     if (!v || v.ownerId !== socket.id) return;
-    if (v.level >= 2) return;
-    if (p.gold < VILLAGE_UPGRADE_COST) {
+    if (v.level >= MAX_VILLAGE_LEVEL) return;
+    const curLvl = VILLAGE_LEVELS[v.level - 1] || VILLAGE_LEVELS[0];
+    const cost = curLvl.upgradeCost;
+    if (!cost) return; // niveau max
+    if (p.gold < cost) {
       socket.emit('spawnFailed', { reason: 'not_enough_gold' });
       return;
     }
-    p.gold -= VILLAGE_UPGRADE_COST;
-    v.level = 2;
-    v.hp = Math.min(v.maxHp, v.hp + 100); // bonus heal
-    p.researchPoints = (p.researchPoints || 0) + 40; // bonus PR à l'upgrade village
-    console.log(`Village ${v.id} amélioré Lv 2 par ${p.name} (+1 pt tech)`);
+    p.gold -= cost;
+    v.level += 1;
+    const newLvl = VILLAGE_LEVELS[v.level - 1];
+    v.maxHp = newLvl.maxHp;
+    v.hp = Math.min(v.maxHp, v.hp + 150); // bonus heal à l'upgrade
+    p.researchPoints = (p.researchPoints || 0) + 40 * v.level; // bonus PR croissant
+    console.log(`Village ${v.id} amélioré Lv ${v.level} (${newLvl.name}) par ${p.name}`);
   });
 
   // ── Village : produire une unité (similaire à spawnUnit mais depuis un village) ──
@@ -1666,8 +1887,22 @@ setInterval(() => {
     }
 
     const [nx, ny] = computeDesiredDir(unit, goalX, goalY, skipPlayerId, skipBuildingId);
-    unit.x += nx * step;
-    unit.y += ny * step;
+    const newX = unit.x + nx * step;
+    const newY = unit.y + ny * step;
+    // Blocage eau/terre : seul le boat va dans l'eau, les autres restent sur terre
+    const isBoat = unit.type === 'boat';
+    if (!isBoat && isWaterAt(newX, newY)) {
+      // Unité terrestre essaie d'entrer dans l'eau → essaie axe par axe (slide le long du bord)
+      if (!isWaterAt(newX, unit.y)) unit.x = newX;
+      else if (!isWaterAt(unit.x, newY)) unit.y = newY;
+      // sinon bloqué (reste sur place)
+    } else if (isBoat && !isWaterAt(newX, newY)) {
+      if (isWaterAt(newX, unit.y)) unit.x = newX;
+      else if (isWaterAt(unit.x, newY)) unit.y = newY;
+    } else {
+      unit.x = newX;
+      unit.y = newY;
+    }
   }
 
   // 1.5. Colons arrivés : transforme en village

@@ -819,6 +819,9 @@ class MainScene extends Phaser.Scene {
       patches.setDepth(0);
     }
 
+    // ── EAU (depth 1) : water tiles dessinées par-dessus le sol ──
+    this._renderWaterTiles();
+
     // Bordure de la map
     const border = this.add.graphics().setDepth(0);
     border.lineStyle(8, 0x4d6b3e, 0.95);
@@ -865,6 +868,42 @@ class MainScene extends Phaser.Scene {
   // Place ~40-60 éléments de décor (arbres, rochers, buissons, fleurs)
   // de manière déterministe (seedé par position). Évite la zone autour
   // des spawns HDV pour ne pas cacher les bases au démarrage.
+  // Dessine la carte d'eau (water tiles) par-dessus le sol grass.
+  // Couleurs : bleu plus foncé pour l'eau profonde (intérieur), bleu clair en bord.
+  _renderWaterTiles() {
+    const waterTiles = Network.getWaterTiles && Network.getWaterTiles();
+    if (!waterTiles || waterTiles.length === 0) return;
+    const info = Network.getMapInfo();
+    const ts = info.tileSize || 50;
+    const gw = info.gridW, gh = info.gridH;
+    if (!gw || !gh) return;
+
+    const g = this.add.graphics().setDepth(1);
+    // Couleur "eau profonde" et "eau bord" (couleur plus claire si pas d'eau adjacente)
+    const COL_DEEP = 0x1e4a72;
+    const COL_SHALLOW = 0x2e6e9c;
+    for (let ty = 0; ty < gh; ty++) {
+      for (let tx = 0; tx < gw; tx++) {
+        if (waterTiles[ty * gw + tx] !== 1) continue;
+        // Compte voisins d'eau pour déterminer profonde/peu profonde
+        let waterNeighbors = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = tx + dx, ny = ty + dy;
+            if (nx >= 0 && nx < gw && ny >= 0 && ny < gh && waterTiles[ny * gw + nx] === 1) waterNeighbors++;
+          }
+        }
+        const col = waterNeighbors >= 7 ? COL_DEEP : COL_SHALLOW;
+        g.fillStyle(col, 1);
+        g.fillRect(tx * ts, ty * ts, ts, ts);
+      }
+    }
+    // Subtile animation : un léger shimmer via tween global (oscillation alpha sur le bord)
+    // Pour l'instant simple : pas d'anim. À ajouter ultérieurement.
+    this._waterGraphics = g;
+  }
+
   _placeDecor() {
     const cfg = Network.getConfig();
     const spawns = (cfg.spawnPositions || []);
@@ -900,6 +939,15 @@ class MainScene extends Phaser.Scene {
           if (Math.hypot(s.x - x, s.y - y) < SAFE_RADIUS) { nearSpawn = true; break; }
         }
         if (nearSpawn) continue;
+
+        // Évite les water tiles (pas d'arbres sur l'eau)
+        const wt = Network.getWaterTiles && Network.getWaterTiles();
+        if (wt) {
+          const info = Network.getMapInfo();
+          const ts = info.tileSize || 50, gw = info.gridW;
+          const tx = Math.floor(x / ts), ty = Math.floor(y / ts);
+          if (tx >= 0 && ty >= 0 && tx < info.gridW && ty < info.gridH && wt[ty * gw + tx] === 1) continue;
+        }
 
         // Choix du type pondéré
         const r = seedRand(gx, gy, 3);

@@ -19,6 +19,36 @@
       <h1 class="lobby-title">Mon Jeu .io</h1>
       <p class="lobby-sub">RTS multijoueur — détruisez les HDV adverses !</p>
       <input id="name-input" class="name-input" type="text" maxlength="20" placeholder="Ton pseudo..." autocomplete="off" />
+
+      <div class="lobby-config">
+        <div class="lobby-config-title">🗺 Configuration de la carte</div>
+        <div class="lobby-config-row">
+          <div class="lobby-config-label">Type de carte</div>
+          <div class="lobby-map-types">
+            <button type="button" class="map-type-btn" data-type="no_water">
+              <div class="mt-emoji">🌾</div><div class="mt-label">Plaines</div><div class="mt-desc">Sans eau</div>
+            </button>
+            <button type="button" class="map-type-btn selected" data-type="lakes">
+              <div class="mt-emoji">💧</div><div class="mt-label">Lacs</div><div class="mt-desc">Petits plans d'eau</div>
+            </button>
+            <button type="button" class="map-type-btn" data-type="continental">
+              <div class="mt-emoji">🌊</div><div class="mt-label">Continental</div><div class="mt-desc">Rivière qui divise</div>
+            </button>
+            <button type="button" class="map-type-btn" data-type="island">
+              <div class="mt-emoji">🏝</div><div class="mt-label">Île</div><div class="mt-desc">Continent entouré</div>
+            </button>
+          </div>
+        </div>
+        <div class="lobby-config-row">
+          <div class="lobby-config-label">Taille</div>
+          <div class="lobby-map-sizes">
+            <button type="button" class="map-size-btn" data-size="small">Petite (3000)</button>
+            <button type="button" class="map-size-btn selected" data-size="medium">Moyenne (4500)</button>
+            <button type="button" class="map-size-btn" data-size="large">Grande (6000)</button>
+          </div>
+        </div>
+      </div>
+
       <button id="play-btn" class="primary-btn">Jouer ▶</button>
       <div class="lobby-hint">
         🏛 Clic HDV : production & recherche &nbsp;|&nbsp; Drag : sélectionner &nbsp;|&nbsp; Clic droit : déplacer/attaquer<br/>

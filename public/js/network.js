@@ -2,7 +2,8 @@ const Network = (() => {
   let socket = null;
   let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, playerSummary: [], fog: null };
   let myId   = null;
-  let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50 };
+  let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50, mapType: 'continental', mapSize: 'medium' };
+  let waterTiles = null;  // Uint8Array, set par init
   let config  = {
     unitTypes: {}, techTree: {}, hdvLevels: [],
     villageRadius: 70, villageCaptureTicks: 200, villageMaxHp: 300,
@@ -26,8 +27,11 @@ const Network = (() => {
   let onInitReceivedCallback     = null;
   let initReceived = false;
 
-  function init(playerName) {
-    socket = io({ auth: { name: playerName || '' } });
+  function init(playerName, mapOptions) {
+    const auth = { name: playerName || '' };
+    if (mapOptions && mapOptions.mapType) auth.mapType = mapOptions.mapType;
+    if (mapOptions && mapOptions.mapSize) auth.mapSize = mapOptions.mapSize;
+    socket = io({ auth });
 
     socket.on('init', (data) => {
       myId = data.playerId;
@@ -36,6 +40,14 @@ const Network = (() => {
       if (data.tileSize)  mapInfo.tileSize  = data.tileSize;
       if (data.gridW)     mapInfo.gridW     = data.gridW;
       if (data.gridH)     mapInfo.gridH     = data.gridH;
+      if (data.mapType)   mapInfo.mapType   = data.mapType;
+      if (data.mapSize)   mapInfo.mapSize   = data.mapSize;
+      // waterTiles : ArrayBuffer venant du serveur → Uint8Array
+      if (data.waterTiles) {
+        waterTiles = data.waterTiles instanceof ArrayBuffer
+          ? new Uint8Array(data.waterTiles)
+          : new Uint8Array(data.waterTiles);
+      }
       if (data.unitTypes)   config.unitTypes   = data.unitTypes;
       if (data.techTree)    config.techTree    = data.techTree;
       if (data.hdvLevels)   config.hdvLevels   = data.hdvLevels;
@@ -309,9 +321,10 @@ const Network = (() => {
   function getMyId()                 { return myId; }
   function getMapInfo()              { return mapInfo; }
   function getConfig()               { return config; }
+  function getWaterTiles()           { return waterTiles; }
 
   return {
-    init, getState, getMyId, getMapInfo, getConfig,
+    init, getState, getMyId, getMapInfo, getConfig, getWaterTiles,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
     upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, unlockTech, castSpell, proposeTreaty,
     debugSpawn, debugCastPortal,
