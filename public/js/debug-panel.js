@@ -193,25 +193,34 @@ const DebugPanel = (() => {
     document.getElementById('dbg-scale-close').addEventListener('click', () => { popup.style.display = 'none'; });
   }
 
-  // Applique le scale en direct sur toutes les instances en jeu
+  // Applique le scale en direct sur toutes les instances en jeu.
+  // ATTENTION : MainScene._updateUnitBarPositions() applique un wobble Y permanent qui
+  // pollue sprite.scaleY chaque frame. Il faut donc :
+  //   - Lire/écrire UNIQUEMENT _baseScaleX / _baseScaleY (référence stable)
+  //   - Ne JAMAIS multiplier par sprite.scaleY (qui contient le wobble)
   function _applyScaleLive(type, scale) {
     const main = _getMainScene();
     if (!main || !main.unitSprites) return;
-    // Met à jour ENTITIES_CONFIG pour que les futurs spawn utilisent ce scale
     if (typeof ENTITIES_CONFIG !== 'undefined' && ENTITIES_CONFIG[type]) {
       ENTITIES_CONFIG[type].scale = scale;
     }
-    // Update visuel sur toutes les instances visibles
     for (const arr of Object.values(main.unitSprites)) {
       const s = arr && arr[0];
       if (!s || s._unitType !== type) continue;
-      // ratio = nouveau / ancien
       const oldMult = s._scaleMult || 1.0;
       const ratio = scale / oldMult;
-      s.setScale(s.scaleX * ratio, s.scaleY * ratio);
-      s._baseScaleX = s.scaleX;
-      s._baseScaleY = s.scaleY;
+      // Multiplie _baseScale (référence stable) — le wobble s'appliquera dessus à la frame suivante
+      const newBaseX = (s._baseScaleX || s.scaleX) * ratio;
+      const newBaseY = (s._baseScaleY || s.scaleY) * ratio;
+      s._baseScaleX = newBaseX;
+      s._baseScaleY = newBaseY;
+      s.setScale(newBaseX, newBaseY);
       s._scaleMult = scale;
+      // L'emoji overlay (placeholder) suit le scale du sprite
+      const overlay = arr[4];
+      if (overlay && overlay.setScale) {
+        overlay.setScale(overlay.scaleX * ratio, overlay.scaleY * ratio);
+      }
     }
   }
 

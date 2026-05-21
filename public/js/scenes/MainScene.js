@@ -163,6 +163,7 @@ class MainScene extends Phaser.Scene {
   // la clé de this.assetMissing afin que _hasAsset() retourne true.
   // Appelé au début de create(), avant toute création de sprite.
   _generateMissingPlaceholders() {
+    this._placeholderKeys = this._placeholderKeys || new Set();
     const missingKeys = Object.keys(this.assetMissing || {});
     if (missingKeys.length === 0) {
       console.log('[ASSETS] Tous les assets chargés avec succès.');
@@ -190,6 +191,8 @@ class MainScene extends Phaser.Scene {
       g.generateTexture(key, size.w, size.h);
       g.destroy();
 
+      // Mémorise que cette clé est un placeholder (utilisé pour superposer l'emoji)
+      this._placeholderKeys.add(key);
       // Retire de assetMissing → _hasAsset() retournera true pour ce placeholder
       delete this.assetMissing[key];
     }
@@ -1156,8 +1159,22 @@ class MainScene extends Phaser.Scene {
           if (unit.type === 'fire_elemental') Animations.animateIdleAmbient(this, sprite, unit.type);
         }
 
-        // [sprite, barBg, barFill, badge] — plus de cocarde, tint sur le sprite
-        this.unitSprites[id] = [sprite, barBg, barFill, badge];
+        // Si l'asset est un placeholder coloré → superpose l'emoji du type d'unité
+        // pour rendre chaque type visuellement distinguable (à virer quand les vrais PNG arriveront)
+        let iconOverlay = null;
+        const isPlaceholder = this._placeholderKeys && this._placeholderKeys.has(assetKey);
+        if (isPlaceholder) {
+          const ut = (Network.getConfig().unitTypes || {})[unit.type] || {};
+          const icon = ut.icon || '❓';
+          iconOverlay = this.add.text(unit.x, unit.y, icon, {
+            fontSize: Math.floor(unitSize * 0.55 * scaleMult) + 'px',
+          }).setOrigin(0.5, 0.5).setDepth(51);
+        }
+
+        // [sprite, barBg, barFill, badge, iconOverlay?] — l'overlay est optionnel
+        this.unitSprites[id] = iconOverlay
+          ? [sprite, barBg, barFill, badge, iconOverlay]
+          : [sprite, barBg, barFill, badge];
 
       } else if (posChanged || hpChanged) {
         const [sprite, , barFill, badge] = this.unitSprites[id];
@@ -1222,12 +1239,13 @@ class MainScene extends Phaser.Scene {
     const t = Date.now() / 420;
     for (const [, sprites] of Object.entries(this.unitSprites)) {
       if (sprites.length < 3) continue;
-      const [sprite, barBg, barFill, badge] = sprites;
+      const [sprite, barBg, barFill, badge, iconOverlay] = sprites;
       const phase = (sprite._idlePhase || 0);
       const wobble = Math.sin(t + phase); // [-1, 1]
       barBg.setPosition(sprite.x, sprite.y + BAR_Y - 4);
       barFill.setPosition(sprite.x - BAR_W / 2, sprite.y + BAR_Y - 4);
       if (badge) badge.setPosition(sprite.x + 22, sprite.y - 22);
+      if (iconOverlay) iconOverlay.setPosition(sprite.x, sprite.y);
       // Multiplie le baseScale (pas setScale absolu) pour garder la taille définie par setDisplaySize
       const bx = sprite._baseScaleX || sprite.scaleX;
       const by = sprite._baseScaleY || sprite.scaleY;
