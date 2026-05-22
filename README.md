@@ -28,4 +28,7 @@ Puis ouvre `http://localhost:3000` dans plusieurs onglets pour tester le multi (
 
 ## Déployé sur
 
-_URL Render à compléter_
+🎮 **[https://mon-jeu-io-17dn.onrender.com](https://mon-jeu-io-17dn.onrender.com)**
+
+Auto-déploiement depuis `main` via [render.yaml](./render.yaml) (Render.com, free tier,
+region Frankfurt). Cold start ~30s après 15 min d'inactivité.
