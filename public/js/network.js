@@ -304,6 +304,19 @@ const Network = (() => {
   function sellBuilding(buildingId) {
     if (socket) socket.emit('sellBuilding', { buildingId });
   }
+  function embarkBoat(boatId, unitIds) {
+    if (socket) socket.emit('embarkBoat', { boatId, unitIds });
+  }
+  function disembarkBoat(boatId, destX, destY) {
+    if (socket) socket.emit('disembarkBoat', { boatId, destX, destY });
+  }
+  function isWaterAt(wx, wy) {
+    if (!waterTiles || !mapInfo.gridW || !mapInfo.tileSize) return false;
+    const tx = Math.floor(wx / mapInfo.tileSize);
+    const ty = Math.floor(wy / mapInfo.tileSize);
+    if (tx < 0 || tx >= mapInfo.gridW || ty < 0 || ty >= mapInfo.gridH) return false;
+    return waterTiles[ty * mapInfo.gridW + tx] === 1;
+  }
   function debugSpawn(entityType, x, y) {
     if (socket) socket.emit('debugSpawn', { entityType, x, y });
   }
@@ -331,6 +344,7 @@ const Network = (() => {
     init, getState, getMyId, getMapInfo, getConfig, getWaterTiles,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
     upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty,
+    embarkBoat, disembarkBoat, isWaterAt,
     debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnInitReceived,

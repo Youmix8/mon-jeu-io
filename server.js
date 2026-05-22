@@ -57,33 +57,33 @@ const VISION_UNIT = 240;
 
 const UNIT_TYPES = {
   // Unité de base — toujours disponible
-  soldier:       { id: 'soldier',       name: 'Soldat',          cost: 10,  hp: 50,  speed:  80, range:  80, damage:  5,  requiresTech: null,
+  soldier:       { id: 'soldier',       name: 'Soldat',          cost: 10,  hp: 50,  speed:  80, range:  35, damage:  5,  requiresTech: null,
                    icon: '⚔️', desc: 'Polyvalent. Disponible dès le départ.' },
   // Unités Science Tier 2-6
   archer:        { id: 'archer',        name: 'Archer',          cost: 15,  hp: 30,  speed:  80, range: 250, damage:  4,  requiresTech: 'archery',
                    icon: '🏹', desc: 'Longue portée mais fragile.' },
-  knight:        { id: 'knight',        name: 'Chevalier',       cost: 25,  hp: 80,  speed: 140, range:  55, damage:  8,  requiresTech: 'riding',
+  knight:        { id: 'knight',        name: 'Chevalier',       cost: 25,  hp: 80,  speed: 140, range:  35, damage:  8,  requiresTech: 'riding',
                    icon: '🐎', desc: 'Lourd et rapide, gros dégâts au contact.' },
   catapult:      { id: 'catapult',      name: 'Catapulte',       cost: 60,  hp: 70,  speed:  50, range: 220, damage: 25,  requiresTech: 'siege_engineering',
                    icon: '⚙️', desc: 'Lente, dégâts massifs sur bâtiments.' },
   settler:       { id: 'settler',       name: 'Colon',           cost: 80,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'colonization',
                    icon: '🚩', desc: 'Fonde un village au point de destination.' },
-  heavy_knight:  { id: 'heavy_knight',  name: 'Chevalier lourd', cost: 50,  hp: 150, speed: 100, range:  55, damage: 12,  requiresTech: 'steel_forge',
+  heavy_knight:  { id: 'heavy_knight',  name: 'Chevalier lourd', cost: 50,  hp: 150, speed: 100, range:  35, damage: 12,  requiresTech: 'steel_forge',
                    icon: '🛡', desc: 'Tank lourd, gros dégâts au contact.' },
   crossbowman:   { id: 'crossbowman',   name: 'Arbalétrier',     cost: 25,  hp: 35,  speed:  75, range: 200, damage:  7,  requiresTech: 'crossbows',
                    icon: '🎯', desc: 'Archer amélioré. Plus de dégâts, moins de portée.' },
-  general:       { id: 'general',       name: 'Général',         cost: 120, hp: 120, speed: 110, range:  80, damage: 10,  requiresTech: 'war_academy',
+  general:       { id: 'general',       name: 'Général',         cost: 120, hp: 120, speed: 110, range:  40, damage: 10,  requiresTech: 'war_academy',
                    icon: '🎖', desc: 'Aura +25% dégâts aux unités proches (rayon 200).' },
   cannon:        { id: 'cannon',        name: 'Canon',           cost: 100, hp: 60,  speed:  40, range: 280, damage: 35,  requiresTech: 'gunpowder',
                    icon: '💣', desc: 'Très lent, dégâts énormes à longue portée.' },
-  elite_guard:   { id: 'elite_guard',   name: 'Garde d\'élite',  cost: 80,  hp: 200, speed: 110, range:  60, damage: 20,  requiresTech: 'renaissance',
+  elite_guard:   { id: 'elite_guard',   name: 'Garde d\'élite',  cost: 80,  hp: 200, speed: 110, range:  35, damage: 20,  requiresTech: 'renaissance',
                    icon: '👑', desc: 'L\'élite militaire. Le meilleur soldat du jeu.' },
   // Unités Magie
   wizard:        { id: 'wizard',        name: 'Sorcier',         cost: 50,  hp: 40,  speed:  80, range: 200, damage: 10,  requiresTech: 'mage_tower',
                    icon: '🧙', desc: 'Dégâts magiques à distance, ignore les armures.' },
   necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 80,  hp: 50,  speed:  80, range: 150, damage:  6,  requiresTech: 'necromancy',
                    icon: '💀', desc: 'Attaque magique à distance. (Résurrection : à venir.)' },
-  skeleton:      { id: 'skeleton',      name: 'Squelette',       cost: 0,   hp: 30,  speed:  80, range:  60, damage:  5,  requiresTech: null,
+  skeleton:      { id: 'skeleton',      name: 'Squelette',       cost: 0,   hp: 30,  speed:  80, range:  30, damage:  5,  requiresTech: null,
                    icon: '☠️', desc: 'Invoqué par le Nécromancien. Durée 60s.' },
   lich:          { id: 'lich',          name: 'Liche',           cost: 150, hp: 120, speed:  80, range: 180, damage: 15,  requiresTech: 'lich',
                    icon: '☠️', desc: 'Nécromancien suprême : longue portée + dégâts massifs.' },
@@ -92,18 +92,18 @@ const UNIT_TYPES = {
                    icon: '🚶', desc: 'Ne combat pas. +0.5 foi/sec à son propriétaire.' },
   inquisitor:    { id: 'inquisitor',    name: 'Inquisiteur',     cost: 30,  hp: 60,  speed:  90, range:  90, damage:  8,  requiresTech: 'inquisition',
                    icon: '🗡', desc: 'Double dégâts vs unités magiques/undead.' },
-  holy_knight:   { id: 'holy_knight',   name: 'Chevalier sacré', cost: 70,  hp: 130, speed: 110, range:  60, damage: 14,  requiresTech: 'sacred_order',
+  holy_knight:   { id: 'holy_knight',   name: 'Chevalier sacré', cost: 70,  hp: 130, speed: 110, range:  35, damage: 14,  requiresTech: 'sacred_order',
                    icon: '🛡', desc: 'Combattant sacré. +5 HP/sec auto-regen.' },
   // ── Nouvelles unités étape 3 (summoned/boss) ──
   skeleton_knight: { id: 'skeleton_knight', name: 'Cavalier squelette', cost: 0, hp: 60, speed: 80, range: 35, damage: 8, requiresTech: null,
                      icon: '☠️', desc: 'Invoqué par la Liche au kill. Durée 60s.' },
-  fire_elemental:  { id: 'fire_elemental',  name: 'Élémentaire de feu', cost: 0, hp: 250, speed: 80, range: 50, damage: 25, requiresTech: null,
+  fire_elemental:  { id: 'fire_elemental',  name: 'Élémentaire de feu', cost: 0, hp: 250, speed: 80, range: 40, damage: 25, requiresTech: null,
                      icon: '🔥', desc: 'Invocation. AoE rayon 40. Durée 60s.' },
   arcane_dragon:   { id: 'arcane_dragon',   name: 'Dragon arcanique',   cost: 0, hp: 800, speed: 120, range: 250, damage: 40, requiresTech: null,
                      icon: '🐲', desc: 'Boss invoqué. Vole. Durée 60s.' },
   angel:           { id: 'angel',           name: 'Ange',               cost: 0, hp: 300, speed: 100, range: 200, damage: 20, requiresTech: null,
                      icon: '👼', desc: 'Vole. Aura soin +3 HP/s rayon 120. Durée 90s.' },
-  god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 0, hp: 1500, speed: 50, range: 80, damage: 60, requiresTech: null,
+  god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 0, hp: 1500, speed: 50, range: 60, damage: 60, requiresTech: null,
                      icon: '🌟', desc: 'Boss. Aura peur (ennemis ralentis 50% rayon 400). AoE 60.' },
   // Bateau : se déplace UNIQUEMENT sur l'eau, produit depuis un Port
   boat:            { id: 'boat',            name: 'Bateau',             cost: 80, hp: 100, speed: 100, range: 0,  damage: 0, requiresTech: 'marine',
@@ -401,6 +401,23 @@ function isWaterTile(tx, ty) {
 function isWaterAt(x, y) {
   return isWaterTile(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
 }
+// Cherche une position de spawn libre (non-eau) autour de (cx, cy).
+// Pour unités terrestres : essaie 16 angles, retourne la 1ère position grass.
+// Pour bateaux (preferWater=true) : retourne la 1ère position water.
+// Fallback : centre exact si rien trouvé.
+function findFreeSpawnPos(cx, cy, baseRadius = 80, preferWater = false) {
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const angle = (attempt / 16) * Math.PI * 2 + Math.random() * 0.2;
+    const dist  = baseRadius + (attempt > 7 ? 40 : 0); // si proches échouent, élargit
+    const x = cx + Math.cos(angle) * dist;
+    const y = cy + Math.sin(angle) * dist;
+    if (x < 30 || x > MAP_WIDTH - 30 || y < 30 || y > MAP_HEIGHT - 30) continue;
+    const isW = isWaterAt(x, y);
+    if (preferWater ? isW : !isW) return { x: Math.round(x), y: Math.round(y) };
+  }
+  return { x: Math.round(cx), y: Math.round(cy) };
+}
+
 // Au moins une tile d'eau dans les 8 voisines (utilisé pour port)
 function hasWaterNeighbor(x, y) {
   const tx = Math.floor(x / TILE_SIZE);
@@ -458,7 +475,64 @@ function generateVillages(spawns) {
     });
   }
   console.log(`Villages générés: ${villages.length} (${count} demandés)`);
+  // Garantit qu'au moins 2 villages sont côtiers (water-adjacent) si la map a de l'eau
+  // → permet la stratégie navale (port → bateau) sans avoir de chance de spawn
+  ensureCoastalVillages(villages, spawns, 2);
   return villages;
+}
+
+// Force au moins `minCoastal` villages à avoir une tile d'eau adjacente.
+// Cherche une water tile, trouve une tile terre adjacente, y place un village.
+// No-op si pas d'eau sur la map ou si déjà assez de villages côtiers.
+function ensureCoastalVillages(villages, spawns, minCoastal) {
+  const totalWater = waterTiles.reduce((s, v) => s + v, 0);
+  if (totalWater === 0) return; // map sans eau
+  const coastalCount = villages.filter(v => hasWaterNeighbor(v.x, v.y)).length;
+  let toAdd = Math.max(0, minCoastal - coastalCount);
+  if (toAdd === 0) return;
+
+  // Collecte les water tiles qui ont au moins un voisin terre (= les côtes)
+  const coastWaterTiles = [];
+  for (let ty = 0; ty < GRID_H; ty++) {
+    for (let tx = 0; tx < GRID_W; tx++) {
+      if (waterTiles[ty * GRID_W + tx] !== 1) continue;
+      // Voisin terre ?
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const ntx = tx + dx, nty = ty + dy;
+          if (ntx >= 0 && ntx < GRID_W && nty >= 0 && nty < GRID_H && !isWaterTile(ntx, nty)) {
+            coastWaterTiles.push({ tx: ntx, ty: nty }); // la tile TERRE adjacente
+            dx = dy = 2; // break double
+          }
+        }
+      }
+    }
+  }
+  if (coastWaterTiles.length === 0) return;
+  // Mélange (Fisher-Yates)
+  for (let i = coastWaterTiles.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [coastWaterTiles[i], coastWaterTiles[j]] = [coastWaterTiles[j], coastWaterTiles[i]];
+  }
+  let idCounter = villages.length + 100;
+  for (const t of coastWaterTiles) {
+    if (toAdd <= 0) break;
+    const wx = t.tx * TILE_SIZE + TILE_SIZE / 2;
+    const wy = t.ty * TILE_SIZE + TILE_SIZE / 2;
+    if (spawns.some(s => Math.hypot(s.x - wx, s.y - wy) < VILLAGE_MIN_DIST_HDV)) continue;
+    if (villages.some(v => Math.hypot(v.x - wx, v.y - wy) < VILLAGE_MIN_DIST_OTHER)) continue;
+    villages.push({
+      id: `v_coast_${idCounter++}`,
+      x: Math.round(wx), y: Math.round(wy),
+      ownerId: null,
+      hp: VILLAGE_MAX_HP, maxHp: VILLAGE_MAX_HP,
+      captureProgress: 0, capturingPlayerId: null,
+      level: 1, lastAttackTime: 0,
+    });
+    toAdd--;
+  }
+  console.log(`[Map] ${minCoastal - toAdd} village(s) côtier(s) garantis (eau navigable)`);
 }
 
 function villageAllowsUnit(village, player, typeId) {
@@ -718,13 +792,11 @@ function botTick(bot) {
       if (bot.gold < def.cost) continue;
       bot.gold -= def.cost;
       bot.unitsCreated++;
-      const angle = Math.random() * Math.PI * 2;
-      const dist  = 60 + Math.random() * 40;
+      const pos = findFreeSpawnPos(bot.x, bot.y, 70 + Math.random() * 30, false);
       const unitId = `unit_${nextUnitId++}`;
       gameState.units[unitId] = {
         id: unitId, ownerId: bot.id,
-        x: Math.round(bot.x + Math.cos(angle) * dist),
-        y: Math.round(bot.y + Math.sin(angle) * dist),
+        x: pos.x, y: pos.y,
         type: typeId,
         hp: def.hp, maxHp: def.hp,
         speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
@@ -1341,10 +1413,9 @@ io.on('connection', (socket) => {
       }
       spawnX = found.x; spawnY = found.y;
     } else {
-      const angle = Math.random() * Math.PI * 2;
-      const dist  = 60 + Math.random() * 40;
-      spawnX = Math.round(p.x + Math.cos(angle) * dist);
-      spawnY = Math.round(p.y + Math.sin(angle) * dist);
+      // Cherche une position grass libre autour du HDV (évite spawn dans l'eau)
+      const pos = findFreeSpawnPos(p.x, p.y, 70 + Math.random() * 30, false);
+      spawnX = pos.x; spawnY = pos.y;
     }
 
     p.gold -= def.cost;
@@ -1518,6 +1589,70 @@ io.on('connection', (socket) => {
   });
 
   // ── Construction d'un bâtiment dans la zone d'une base (HDV/village) ──
+  // ── Transport de troupes par bateau ────────────────────────────────
+  // Capacité 4 passagers max par bateau. Embarquement nécessite proximité (≤ 100px).
+  // Débarquement nécessite une tile terre (pas de l'eau).
+  const BOAT_CAPACITY = 4;
+  socket.on('embarkBoat', ({ boatId, unitIds } = {}) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const boat = gameState.units[boatId];
+    if (!boat || boat.ownerId !== socket.id || boat.type !== 'boat') return;
+    if (!Array.isArray(unitIds)) return;
+    boat.passengers = boat.passengers || [];
+    let embarkedCount = 0;
+    for (const uid of unitIds) {
+      if (boat.passengers.length >= BOAT_CAPACITY) break;
+      const u = gameState.units[uid];
+      if (!u || u.ownerId !== socket.id) continue;
+      if (u.type === 'boat') continue;
+      if (Math.hypot(u.x - boat.x, u.y - boat.y) > 100) continue;
+      // Mémorise l'état de l'unité (recréée à débarquement)
+      boat.passengers.push({
+        type: u.type, hp: u.hp, maxHp: u.maxHp,
+        speed: u.speed, range: u.range, damage: u.damage, cost: u.cost,
+      });
+      delete gameState.units[uid];
+      embarkedCount++;
+    }
+    if (embarkedCount > 0) {
+      io.emit('boatEmbarked', { boatId, passengerCount: boat.passengers.length, embarked: embarkedCount });
+      console.log(`Bateau ${boatId} : ${embarkedCount} unité(s) embarquée(s) (total ${boat.passengers.length}/${BOAT_CAPACITY})`);
+    }
+  });
+  socket.on('disembarkBoat', ({ boatId, destX, destY } = {}) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const boat = gameState.units[boatId];
+    if (!boat || boat.ownerId !== socket.id || boat.type !== 'boat') return;
+    if (!boat.passengers || boat.passengers.length === 0) return;
+    if (!Number.isFinite(destX) || !Number.isFinite(destY)) return;
+    // La destination doit être une tile terre (sinon le débarquement n'a pas de sens)
+    if (isWaterAt(destX, destY)) {
+      socket.emit('spawnFailed', { reason: 'must_disembark_on_land' });
+      return;
+    }
+    // Pour chaque passager, recrée à proximité de destX/destY (tile terre)
+    for (const pInfo of boat.passengers) {
+      const pos = findFreeSpawnPos(destX, destY, 40 + Math.random() * 30, false);
+      const unitId = `unit_${nextUnitId++}`;
+      gameState.units[unitId] = {
+        id: unitId, ownerId: socket.id,
+        x: pos.x, y: pos.y, type: pInfo.type,
+        hp: pInfo.hp, maxHp: pInfo.maxHp,
+        speed: pInfo.speed, range: pInfo.range, damage: pInfo.damage, cost: pInfo.cost,
+        targetX: null, targetY: null,
+        attackTargetId: null, attackTargetType: null,
+        lastAttackTime: 0,
+        mode: 'defend', defendX: pos.x, defendY: pos.y, defendRadius: 280,
+      };
+    }
+    const count = boat.passengers.length;
+    boat.passengers = [];
+    io.emit('boatDisembarked', { boatId, count, x: destX, y: destY });
+    console.log(`Bateau ${boatId} : ${count} unité(s) débarquée(s) en (${destX}, ${destY})`);
+  });
+
   // Vendre un bâtiment : rembourse 50% du coût initial, détruit le bâtiment.
   socket.on('sellBuilding', ({ buildingId } = {}) => {
     const p = gameState.players[socket.id];
@@ -1652,13 +1787,11 @@ io.on('connection', (socket) => {
     }
     p.gold -= def.cost;
     p.unitsCreated++;
-    const angle = Math.random() * Math.PI * 2;
-    const dist  = 50 + Math.random() * 30;
+    const pos = findFreeSpawnPos(v.x, v.y, 55 + Math.random() * 25, false);
     const unitId = `unit_${nextUnitId++}`;
     gameState.units[unitId] = {
       id: unitId, ownerId: socket.id,
-      x: Math.round(v.x + Math.cos(angle) * dist),
-      y: Math.round(v.y + Math.sin(angle) * dist),
+      x: pos.x, y: pos.y,
       type: typeId,
       hp: def.hp, maxHp: def.hp,
       speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
@@ -2097,6 +2230,31 @@ setInterval(() => {
     unit.y = Math.max(UNIT_RADIUS, Math.min(MAP_HEIGHT - UNIT_RADIUS, unit.y));
   }
 
+  // Push-out défensif : unités terrestres coincées dans l'eau → tile terre proche.
+  // Couvre le cas hérité (spawn pre-fix) + collision avec push-out hors map.
+  for (const unit of unitArr) {
+    if (unit.type === 'boat') continue;
+    if (!isWaterAt(unit.x, unit.y)) continue;
+    const tx0 = Math.floor(unit.x / TILE_SIZE);
+    const ty0 = Math.floor(unit.y / TILE_SIZE);
+    for (let r = 1; r <= 6; r++) {
+      let escaped = false;
+      for (let dy = -r; dy <= r && !escaped; dy++) {
+        for (let dx = -r; dx <= r && !escaped; dx++) {
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+          const ntx = tx0 + dx, nty = ty0 + dy;
+          if (ntx < 0 || ntx >= GRID_W || nty < 0 || nty >= GRID_H) continue;
+          if (!isWaterTile(ntx, nty)) {
+            unit.x = ntx * TILE_SIZE + TILE_SIZE / 2;
+            unit.y = nty * TILE_SIZE + TILE_SIZE / 2;
+            escaped = true;
+          }
+        }
+      }
+      if (escaped) break;
+    }
+  }
+
   // 3. Combat (ATTACK_MOVE: specific target | IDLE: nearest enemy | MOVE: skip)
   const toDelete = new Set();
   const attacks  = [];
@@ -2162,7 +2320,9 @@ setInterval(() => {
       if (unit.type === 'fire_elemental' && unit.attackTargetType === 'unit') {
         unit._aoeAroundTarget = { x: target.x, y: target.y };
       }
-      const attackEntry = { attackerId: unit.id, targetType: unit.attackTargetType, targetId: target.id };
+      // Inclut attackerX/Y pour que le client puisse afficher le projectile même
+      // si l'attaquant est filtré par fog of war (sinon attacker introuvable client)
+      const attackEntry = { attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type, targetType: unit.attackTargetType, targetId: target.id };
 
       if (unit.attackTargetType === 'unit' && target.hp <= 0) {
         // Tag pour résurrection au kill (necro/lich) — voir section 3.6
@@ -2219,7 +2379,7 @@ setInterval(() => {
       if (unit.type === 'fire_elemental' && bestType === 'unit') {
         unit._aoeAroundTarget = { x: best.x, y: best.y };
       }
-      const attackEntry = { attackerId: unit.id, targetType: bestType, targetId: best.id };
+      const attackEntry = { attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type, targetType: bestType, targetId: best.id };
 
       if (bestType === 'unit' && best.hp <= 0) {
         best._killedByType  = unit.type;

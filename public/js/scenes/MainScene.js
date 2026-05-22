@@ -414,7 +414,11 @@ class MainScene extends Phaser.Scene {
         const ay = (data.by != null) ? data.by : ty;
         this._playArrowAnimation(ax, ay, tx, ty);
       } else {
-        const attacker = state.units && state.units[data.attackerId];
+        // L'attaquant peut être filtré par fog → fallback sur attackerX/Y serveur
+        let attacker = state.units && state.units[data.attackerId];
+        if (!attacker && data.attackerX != null) {
+          attacker = { x: data.attackerX, y: data.attackerY, type: data.attackerType || 'soldier' };
+        }
         if (!attacker) return;
         this._playAttackAnimation(attacker, tx, ty);
         // Kill feed unit→unit
@@ -1243,9 +1247,11 @@ class MainScene extends Phaser.Scene {
       const owner    = players[unit.ownerId];
       const colorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0xffffff;
       const prev     = this.unitServerPos[id];
+      const paxCount = (unit.passengers && unit.passengers.length) || 0;
       const posChanged = !prev || prev.x !== unit.x || prev.y !== unit.y;
       const hpChanged  = !prev || prev.hp !== unit.hp;
-      this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp };
+      const paxChanged = unit.type === 'boat' && (!prev || prev.pax !== paxCount);
+      this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp, pax: paxCount };
 
       if (!this.unitSprites[id]) {
         // Lecture de la config centralisée pour l'asset, la taille et le scale
@@ -1302,7 +1308,9 @@ class MainScene extends Phaser.Scene {
         const barFill = this.add.rectangle(unit.x - BAR_W / 2, unit.y + BAR_Y, BAR_W * (unit.hp / unit.maxHp), BAR_H, 0x22c55e)
           .setOrigin(0, 0.5).setDepth(60);
 
-        const badge = this.add.text(unit.x + 18, unit.y - 18, this._modeIcon(unit.mode), {
+        const initBadgeTxt = (unit.type === 'boat' && paxCount > 0)
+          ? `🧍${paxCount}/4` : this._modeIcon(unit.mode);
+        const badge = this.add.text(unit.x + 18, unit.y - 18, initBadgeTxt, {
           fontSize: '12px', fontFamily: '"Quicksand", sans-serif',
         }).setOrigin(0.5, 0.5).setDepth(70);
 
@@ -1338,9 +1346,13 @@ class MainScene extends Phaser.Scene {
           ? [sprite, barBg, barFill, badge, iconOverlay]
           : [sprite, barBg, barFill, badge];
 
-      } else if (posChanged || hpChanged) {
+      } else if (posChanged || hpChanged || paxChanged) {
         const [sprite, , barFill, badge] = this.unitSprites[id];
-        if (badge) badge.setText(this._modeIcon(unit.mode));
+        if (badge) {
+          // Boat avec passagers : montre "🧍N/4" au lieu du mode
+          if (unit.type === 'boat' && paxCount > 0) badge.setText(`🧍${paxCount}/4`);
+          else badge.setText(this._modeIcon(unit.mode));
+        }
         if (sprite.setTint) sprite.setTint(colorInt);
 
         if (hpChanged) {
@@ -1432,6 +1444,38 @@ class MainScene extends Phaser.Scene {
   _defaultRightClick(wx, wy) {
     const myId  = Network.getMyId();
     const state = Network.getState();
+
+    // ── Boat embark/disembark (avant le reste) ───────────────────────
+    const selUnits = Array.from(this.selectedUnitIds)
+      .map(id => (state.units || {})[id]).filter(Boolean);
+    const myBoats = selUnits.filter(u => u.type === 'boat' && u.ownerId === myId);
+    const myGroundSel = selUnits.filter(u => u.ownerId === myId && u.type !== 'boat');
+    const isOnWater = Network.isWaterAt && Network.isWaterAt(wx, wy);
+
+    // DISEMBARK : sélection contient un boat avec passagers + clic tile terre
+    if (myBoats.length > 0 && !isOnWater) {
+      const boatsWithPax = myBoats.filter(b => b.passengers && b.passengers.length > 0);
+      if (boatsWithPax.length > 0) {
+        for (const b of boatsWithPax) Network.disembarkBoat(b.id, wx, wy);
+        this._showMoveIndicator(wx, wy, false);
+        return;
+      }
+    }
+
+    // EMBARK : clic droit sur own boat + unités terrestres sélectionnées proches
+    let hitOwnBoat = null;
+    for (const [uid, unit] of Object.entries(state.units || {})) {
+      if (unit.ownerId !== myId || unit.type !== 'boat') continue;
+      if (Math.hypot(wx - unit.x, wy - unit.y) <= 35) { hitOwnBoat = unit; break; }
+    }
+    if (hitOwnBoat && myGroundSel.length > 0) {
+      const close = myGroundSel.filter(u => Math.hypot(u.x - hitOwnBoat.x, u.y - hitOwnBoat.y) <= 100);
+      if (close.length > 0) {
+        Network.embarkBoat(hitOwnBoat.id, close.map(u => u.id));
+        this._showMoveIndicator(hitOwnBoat.x, hitOwnBoat.y, false);
+        return;
+      }
+    }
 
     let hitEnemyUnit = null;
     for (const [uid, unit] of Object.entries(state.units || {})) {
@@ -1643,19 +1687,23 @@ class MainScene extends Phaser.Scene {
     const dist  = Math.hypot(tx - sx, ty - sy);
     // Projectiles lourds = plus lents
     const HEAVY = new Set(['proj_catapult_rock', 'proj_cannonball', 'proj_dragon_breath']);
-    const speed = HEAVY.has(projKey) ? 220 : 380; // px/s — un peu plus rapide pour fluidité
-    const duration = Math.max(80, Math.min(1000, (dist / speed) * 1000));
+    const speed = HEAVY.has(projKey) ? 240 : 320; // px/s
+    const duration = Math.max(150, Math.min(1200, (dist / speed) * 1000));
 
-    // Taille cohérente : projectiles ~36px de long (sauf lourds ~44px). Sans ça, les
-    // vrais PNG s'affichent à leur taille native qui peut être trop grosse en jeu.
-    const targetLen = HEAVY.has(projKey) ? 44 : 36;
+    // Taille cohérente : flèches/balles ~48px de long (lourds 56). Minimum 14px de
+    // hauteur pour rester clairement visible.
+    const targetLen = HEAVY.has(projKey) ? 56 : 48;
     const proj = this.add.sprite(sx, sy, projKey)
       .setRotation(angle).setDepth(56);
-    const tex = this.textures.get(projKey).getSourceImage();
-    const natW = (tex && tex.width)  || 28;
-    const natH = (tex && tex.height) || 10;
+    let natW = 32, natH = 12;
+    try {
+      const tex = this.textures.get(projKey).getSourceImage();
+      if (tex && tex.width)  natW = tex.width;
+      if (tex && tex.height) natH = tex.height;
+    } catch (_) {}
     const ratio = natH / natW;
-    proj.setDisplaySize(targetLen, targetLen * ratio);
+    const finalH = Math.max(14, targetLen * ratio);
+    proj.setDisplaySize(targetLen, finalH);
 
     if (typeof Animations !== 'undefined' && Animations.animateProjectile) {
       Animations.animateProjectile(this, proj, projKey);
