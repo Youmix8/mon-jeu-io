@@ -174,11 +174,13 @@ const Animations = (() => {
         duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
       });
     } else if (type === 'angel') {
-      // Flottement vertical ±3px
-      const baseY = sprite.y;
+      // Battement d'ailes léger via oscillation d'angle (±3°). PAS de y/scale
+      // car ils sont écrasés chaque frame par _syncUnits (mouvement) et
+      // _updateUnitBarPositions (wobble) → entrent en conflit et l'unité
+      // "tremblerait dans tous les sens" pendant le déplacement.
       sprite._idleAmbientTween = scene.tweens.add({
-        targets: sprite, y: { from: baseY - 3, to: baseY + 3 },
-        duration: 1500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+        targets: sprite, angle: { from: -3, to: 3 },
+        duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
       });
     } else if (type === 'god_avatar') {
       // Pulsation lumineuse via tint

@@ -689,3 +689,91 @@ hr {
   background: #eff6ff;
   color: #1e40af;
 }
+
+/* Building Info Panel — apparait au clic d'un bâtiment */
+#building-info-panel {
+  position: fixed;
+  top: 90px;
+  right: 16px;
+  width: 280px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 2px solid #3b82f6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #f1f5f9;
+  font-family: "Quicksand", sans-serif;
+  font-size: 13px;
+  z-index: 900;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+}
+#building-info-panel .bip-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+#building-info-panel .bip-icon { font-size: 22px; }
+#building-info-panel .bip-name {
+  flex: 1;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fbbf24;
+}
+#building-info-panel .bip-close {
+  background: transparent; border: none; color: #94a3b8;
+  font-size: 20px; cursor: pointer; padding: 0 4px;
+  line-height: 1;
+}
+#building-info-panel .bip-close:hover { color: #f1f5f9; }
+#building-info-panel .bip-hp-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+#building-info-panel .bip-label { color: #94a3b8; }
+#building-info-panel .bip-hp-bar {
+  flex: 1;
+  height: 7px;
+  background: #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+#building-info-panel .bip-hp-fill {
+  height: 100%;
+  transition: width 0.2s ease-out;
+}
+#building-info-panel .bip-hp-text {
+  font-size: 11px;
+  color: #cbd5e1;
+  min-width: 60px;
+  text-align: right;
+}
+#building-info-panel .bip-effects {
+  background: rgba(30, 41, 59, 0.6);
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+  color: #e2e8f0;
+}
+#building-info-panel .bip-footer { text-align: center; }
+#building-info-panel .bip-sell {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  font-family: "Quicksand", sans-serif;
+}
+#building-info-panel .bip-sell:hover { background: #ef4444; }
+#building-info-panel .bip-foreign {
+  color: #94a3b8;
+  font-style: italic;
+  font-size: 12px;
+  padding: 4px 0;
+}

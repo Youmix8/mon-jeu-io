@@ -606,110 +606,197 @@ function addBot() {
   return botPlayer;
 }
 
-// Logique IA simple :
-//  - Spawn une unité dès qu'il a assez de gold (préfère Knight > Archer > Soldier)
-//  - Recherche les techs dès qu'il a 1 pt
-//  - Upgrade HDV dès qu'il peut se le payer
-//  - Envoie ses unités idle vers le HDV ennemi le plus proche
+// ────────── IA stratégique des bots ──────────
+// Cycle de décision : DEVELOP (économie) → EXPAND (villages) → ATTACK (waves)
+// État persistant sur bot.botState : { strategy, lastWaveTime, lastVillageTargetTime,
+//   lastBuildTime, targetPlayerId }
+//
+// Boucle :
+//  1. Recherche techs prioritaires (économie d'abord, puis militaire, puis spécial)
+//  2. Upgrade HDV quand abordable (garde 100 gold de marge)
+//  3. Construction défensive (tours près du HDV) si gold permet et tech débloquée
+//  4. Spawn unité (préfère unités haut tiers débloquées)
+//  5. Capture village neutre le plus proche (envoie 3 unités si army >= 4)
+//  6. Wave d'attaque coordonnée (10+ unités groupées vers cible faible, cooldown 5s)
+//
+// Différence vs ancien : ne spam plus 1 unité/sec sur l'HDV ennemi ; constitue
+// d'abord une army, capture les villages pour le passif, et lance des vagues groupées.
+
+const BOT_TECH_PRIORITY = [
+  // Économie d'abord (gold passif = snowball)
+  'agriculture',
+  // Militaire de base
+  'archery', 'riding',
+  // Défense
+  'military_architecture',  // tour
+  // Économie avancée
+  'empire',
+  // Militaire avancé
+  'steel_forge', 'crossbows', 'war_academy',
+  'siege_engineering',      // catapulte
+  // Sciences avancées
+  'gunpowder', 'citadel',
+  'renaissance',
+];
+
 function botTick(bot) {
   if (bot.eliminated) return;
+  bot.botState = bot.botState || { lastWaveTime: 0, lastBuildTime: 0, lastVillageScout: 0 };
+  const nowMs = Date.now();
 
-  // Recherche tech v2 : priorité Science militaire → économie → magie/religion
-  // (le bot dépense ses PR dès qu'il atteint le coût d'un nœud prioritaire)
-  const BOT_TECH_PRIORITY = [
-    'agriculture',          // +1 gold/s — premier pick
-    'archery', 'riding',    // Archer + Chevalier
-    'siege_engineering',    // Catapulte
-    'crossbows', 'steel_forge',
-    'military_architecture', // Tour d'archer
-    'empire', 'war_academy',
-    'citadel',
-  ];
+  // 1. RECHERCHE TECH ────────────────────────────────────────────
   for (const tid of BOT_TECH_PRIORITY) {
     if ((bot.unlockedTechs || []).includes(tid)) continue;
     const node = NEW_TECH_TREE[tid];
     if (!node) continue;
     if ((bot.researchPoints || 0) < node.cost) continue;
-    // Vérifie les prérequis
-    const allPrereqs = (node.requires || []).every(r => (bot.unlockedTechs || []).includes(r));
-    if (!allPrereqs) continue;
+    if (!(node.requires || []).every(r => (bot.unlockedTechs || []).includes(r))) continue;
     bot.researchPoints -= node.cost;
     bot.unlockedTechs.push(tid);
     recomputeHdvStats(bot);
-    console.log(`[Bot ${bot.name}] researched ${tid}`);
-    break; // un seul unlock par tick
+    console.log(`[Bot ${bot.name}] tech débloquée : ${tid}`);
+    break;
   }
 
-  // Upgrade HDV
+  // 2. UPGRADE HDV ────────────────────────────────────────────────
   if (bot.hdvLevel < MAX_HDV_LEVEL) {
     const cost = HDV_LEVELS[bot.hdvLevel - 1].upgradeCost;
-    if (bot.gold >= cost + 50) { // garder un peu de gold pour spawner
+    if (bot.gold >= cost + 100) { // garde 100 gold de marge
       bot.gold -= cost;
       bot.hdvLevel++;
-      bot.researchPoints = (bot.researchPoints || 0) + 50; // bonus PR comme un joueur
+      bot.researchPoints = (bot.researchPoints || 0) + 50;
       recomputeHdvStats(bot);
       bot.hp = bot.maxHp;
       console.log(`[Bot ${bot.name}] → HDV lv ${bot.hdvLevel}`);
     }
   }
 
-  // Spawn unit — préfère les unités tier élevé d'abord
-  const preferOrder = ['heavy_knight', 'crossbowman', 'catapult', 'knight', 'archer', 'soldier'];
-  for (const typeId of preferOrder) {
-    const def = UNIT_TYPES[typeId];
-    if (!unitTypeUnlocked(bot, typeId)) continue;
-    if (bot.gold < def.cost) continue;
-    bot.gold -= def.cost;
-    bot.unitsCreated++;
-    const angle = Math.random() * Math.PI * 2;
-    const dist  = 60 + Math.random() * 40;
-    const unitId = `unit_${nextUnitId++}`;
-    const hpBonus = unitHpBonusFromVillages(bot);
-    gameState.units[unitId] = {
-      id: unitId, ownerId: bot.id,
-      x: Math.round(bot.x + Math.cos(angle) * dist),
-      y: Math.round(bot.y + Math.sin(angle) * dist),
-      type: typeId,
-      hp: def.hp + hpBonus, maxHp: def.hp + hpBonus,
-      speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
-      targetX: null, targetY: null,
-      attackTargetId: null, attackTargetType: null,
-      lastAttackTime: 0,
-      mode: 'defend', defendX: bot.x, defendY: bot.y, defendRadius: 320,
-    };
-    break; // une unité par tick d'IA
-  }
-
-  // Envoie une partie des unités du bot en attaque (mode 'move' vers HDV/village)
-  const myUnits = Object.values(gameState.units).filter(u =>
-    u.ownerId === bot.id && u.mode === 'defend' && u.attackTargetId === null
-  );
-  if (myUnits.length < 3) return; // attend d'avoir au moins 3 défenseurs avant d'attaquer
-
-  // Cible : HDV ennemi le plus proche du centre de mes unités
-  let bestTargetX = null, bestTargetY = null, bestDistSq = Infinity;
-  for (const p of Object.values(gameState.players)) {
-    if (p.id === bot.id || p.eliminated || p.hp <= 0) continue;
-    const dSq = (p.x - bot.x) ** 2 + (p.y - bot.y) ** 2;
-    if (dSq < bestDistSq) { bestDistSq = dSq; bestTargetX = p.x; bestTargetY = p.y; }
-  }
-  // Si rien, prendre un village neutre proche
-  if (bestTargetX === null) {
-    for (const v of gameState.villages) {
-      if (v.ownerId === bot.id) continue;
-      const dSq = (v.x - bot.x) ** 2 + (v.y - bot.y) ** 2;
-      if (dSq < bestDistSq) { bestDistSq = dSq; bestTargetX = v.x; bestTargetY = v.y; }
+  // 3. CONSTRUCTION DÉFENSIVE (tour près du HDV) ──────────────────
+  // Construit jusqu'à 2 tours d'archer à environ 130px du HDV.
+  if (hasTech(bot, 'military_architecture') && bot.gold > 80
+      && nowMs - bot.botState.lastBuildTime > 3000) {
+    const myTowers = gameState.buildings.filter(b => b.ownerId === bot.id && b.type === 'tower');
+    const towerDef = BUILDING_TYPES.tower;
+    if (myTowers.length < 2 && bot.gold >= towerDef.cost) {
+      // Trouve une position libre autour du HDV (8 directions)
+      const buildRadius = baseBuildRadius('hdv', bot);
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const angle = (attempt / 8) * Math.PI * 2 + Math.random() * 0.4;
+        const dist = Math.min(buildRadius - 30, 130);
+        const px = bot.x + Math.cos(angle) * dist;
+        const py = bot.y + Math.sin(angle) * dist;
+        const snap = snapToGrid(px, py);
+        // Vérifie qu'on ne pose pas sur l'eau, qu'on ne chevauche pas un autre bâtiment,
+        // et qu'on respecte la distance min au HDV
+        if (isWaterAt(snap.x, snap.y)) continue;
+        if (Math.hypot(bot.x - snap.x, bot.y - snap.y) < BUILDING_MIN_DIST_HDV) continue;
+        if (gameState.buildings.some(b => b.x === snap.x && b.y === snap.y)) continue;
+        // OK, construis
+        bot.gold -= towerDef.cost;
+        gameState.buildings.push({
+          id: `b_${nextBuildingId++}`,
+          ownerId: bot.id, type: 'tower',
+          x: snap.x, y: snap.y,
+          hp: towerDef.hp, maxHp: towerDef.hp,
+          lastAttackTime: 0,
+        });
+        bot.botState.lastBuildTime = nowMs;
+        console.log(`[Bot ${bot.name}] construit une Tour en (${snap.x}, ${snap.y})`);
+        break;
+      }
     }
   }
-  if (bestTargetX === null) return;
 
-  // 60% des défenseurs partent en attaque, 40% restent en défense
-  const sendCount = Math.max(1, Math.floor(myUnits.length * 0.6));
-  for (let i = 0; i < sendCount && i < myUnits.length; i++) {
-    const u = myUnits[i];
-    u.targetX = bestTargetX + (Math.random() - 0.5) * 100;
-    u.targetY = bestTargetY + (Math.random() - 0.5) * 100;
-    u.mode = 'move';
+  // 4. SPAWN UNITÉ ────────────────────────────────────────────────
+  // Préfère les unités haut tiers débloquées ; capé par army size pour éviter le spam.
+  const myUnits = Object.values(gameState.units).filter(u => u.ownerId === bot.id);
+  if (myUnits.length < 40) { // anti-spam économique
+    const preferOrder = ['heavy_knight', 'crossbowman', 'general', 'catapult', 'knight', 'archer', 'soldier'];
+    for (const typeId of preferOrder) {
+      const def = UNIT_TYPES[typeId];
+      if (!unitTypeUnlocked(bot, typeId)) continue;
+      if (bot.gold < def.cost) continue;
+      bot.gold -= def.cost;
+      bot.unitsCreated++;
+      const angle = Math.random() * Math.PI * 2;
+      const dist  = 60 + Math.random() * 40;
+      const unitId = `unit_${nextUnitId++}`;
+      gameState.units[unitId] = {
+        id: unitId, ownerId: bot.id,
+        x: Math.round(bot.x + Math.cos(angle) * dist),
+        y: Math.round(bot.y + Math.sin(angle) * dist),
+        type: typeId,
+        hp: def.hp, maxHp: def.hp,
+        speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
+        targetX: null, targetY: null,
+        attackTargetId: null, attackTargetType: null,
+        lastAttackTime: 0,
+        mode: 'defend', defendX: bot.x, defendY: bot.y, defendRadius: 320,
+      };
+      break;
+    }
+  }
+
+  // Unités au repos disponibles pour des ordres (proches du HDV)
+  const armyAtBase = myUnits.filter(u =>
+    u.mode === 'defend' && u.attackTargetId === null
+    && Math.hypot(u.x - bot.x, u.y - bot.y) < 400
+  );
+
+  // 5. CAPTURE VILLAGES NEUTRES ───────────────────────────────────
+  // Envoie 3 unités vers le village neutre le plus proche tous les 8s
+  if (armyAtBase.length >= 4 && nowMs - bot.botState.lastVillageScout > 8000) {
+    const neutralVillages = gameState.villages.filter(v => !v.ownerId);
+    if (neutralVillages.length > 0) {
+      let nearest = null, bestDsq = Infinity;
+      for (const v of neutralVillages) {
+        const dsq = (v.x - bot.x)**2 + (v.y - bot.y)**2;
+        if (dsq < bestDsq) { bestDsq = dsq; nearest = v; }
+      }
+      if (nearest) {
+        const toSend = armyAtBase.slice(0, 3);
+        for (const u of toSend) {
+          u.targetX = nearest.x + (Math.random() - 0.5) * 60;
+          u.targetY = nearest.y + (Math.random() - 0.5) * 60;
+          u.mode = 'move';
+        }
+        bot.botState.lastVillageScout = nowMs;
+        console.log(`[Bot ${bot.name}] envoie 3 unités capturer village ${nearest.id}`);
+      }
+    }
+  }
+
+  // 6. WAVE D'ATTAQUE COORDONNÉE ──────────────────────────────────
+  // Quand au moins 10 unités au HDV ET 6s depuis dernière wave
+  const stillAtBase = myUnits.filter(u =>
+    u.mode === 'defend' && u.attackTargetId === null
+    && Math.hypot(u.x - bot.x, u.y - bot.y) < 400
+  );
+  if (stillAtBase.length >= 10 && nowMs - bot.botState.lastWaveTime > 6000) {
+    // Cible : adversaire le plus FAIBLE (HP HDV) pondéré par distance
+    let target = null, bestScore = -Infinity;
+    for (const p of Object.values(gameState.players)) {
+      if (p.id === bot.id || p.eliminated || p.hp <= 0) continue;
+      if ((bot.allies || []).includes(p.id)) continue;
+      const dist = Math.hypot(p.x - bot.x, p.y - bot.y);
+      const hpFrac = p.hp / p.maxHp; // 1.0 = full, 0.0 = mort
+      // Score : favorise faible HP + distance proche
+      const score = (1 - hpFrac) * 800 - dist / 8;
+      if (score > bestScore) { bestScore = score; target = p; }
+    }
+    if (target) {
+      // 70% de l'army part en wave, 30% reste défensive
+      const waveSize = Math.floor(stillAtBase.length * 0.7);
+      const wave = stillAtBase.slice(0, waveSize);
+      for (const u of wave) {
+        u.targetX = target.x + (Math.random() - 0.5) * 180;
+        u.targetY = target.y + (Math.random() - 0.5) * 180;
+        u.mode = 'move';
+      }
+      bot.botState.lastWaveTime = nowMs;
+      bot.botState.targetPlayerId = target.id;
+      console.log(`[Bot ${bot.name}] WAVE de ${wave.length} unités sur ${target.name} (HP ${target.hp}/${target.maxHp})`);
+    }
   }
 }
 
@@ -1431,6 +1518,23 @@ io.on('connection', (socket) => {
   });
 
   // ── Construction d'un bâtiment dans la zone d'une base (HDV/village) ──
+  // Vendre un bâtiment : rembourse 50% du coût initial, détruit le bâtiment.
+  socket.on('sellBuilding', ({ buildingId } = {}) => {
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    const idx = gameState.buildings.findIndex(b => b.id === buildingId);
+    if (idx < 0) return;
+    const b = gameState.buildings[idx];
+    if (b.ownerId !== socket.id) return; // doit être le propriétaire
+    const def = BUILDING_TYPES[b.type];
+    if (!def) return;
+    const refund = Math.floor((def.cost || 0) * 0.5);
+    p.gold += refund;
+    gameState.buildings.splice(idx, 1);
+    io.emit('buildingSold', { buildingId, refund, ownerId: p.id });
+    console.log(`${p.name} vend ${b.type} (+${refund} gold remboursés)`);
+  });
+
   socket.on('buildBuilding', ({ type, x, y, baseType, baseId }) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;

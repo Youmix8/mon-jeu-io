@@ -142,6 +142,7 @@ const Network = (() => {
       // Rafraîchit le panneau HDV s'il est ouvert (gold, HP, techs en temps réel)
       if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible()) HdvPanel.refresh();
       if (typeof VillagePanel !== 'undefined' && VillagePanel.isVisible()) VillagePanel.refresh();
+      if (typeof BuildingInfoPanel !== 'undefined' && BuildingInfoPanel.isVisible()) BuildingInfoPanel.refresh();
       // Update léger des compteurs PR/Mana/Foi dans l'overlay tech (pas de rebuild SVG)
       if (typeof TechTreeOverlay !== 'undefined' && TechTreeOverlay.isOpen() && me) TechTreeOverlay.updateResources(me);
     });
@@ -300,6 +301,9 @@ const Network = (() => {
   function buildBuilding(type, x, y, baseType, baseId) {
     if (socket) socket.emit('buildBuilding', { type, x, y, baseType, baseId });
   }
+  function sellBuilding(buildingId) {
+    if (socket) socket.emit('sellBuilding', { buildingId });
+  }
   function debugSpawn(entityType, x, y) {
     if (socket) socket.emit('debugSpawn', { entityType, x, y });
   }
@@ -326,7 +330,7 @@ const Network = (() => {
   return {
     init, getState, getMyId, getMapInfo, getConfig, getWaterTiles,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
-    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, unlockTech, castSpell, proposeTreaty,
+    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty,
     debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnInitReceived,

@@ -697,21 +697,21 @@ class MainScene extends Phaser.Scene {
         // Marquage pour le mode TUNING du debug panel (clic → slider scale)
         bg._unitType = b.type;
         bg._unitOwnerId = b.ownerId;
+        bg._buildingId = b.id;
 
-        // Click handler : sur une tour → affiche le cercle de portée 2.5s
-        if ((b.type === 'tower' || b.type === 'bombard_tower' || b.type === 'citadel') && def.range) {
-          bg.setInteractive && bg.setInteractive();
-          bg.on && bg.on('pointerdown', () => {
-            const ring = this.add.graphics().setDepth(90);
-            ring.lineStyle(2, 0xfbbf24, 0.85);
-            ring.strokeCircle(b.x, b.y, def.range);
-            ring.fillStyle(0xfbbf24, 0.05);
-            ring.fillCircle(b.x, b.y, def.range);
-            this.tweens.add({
-              targets: ring, alpha: { from: 1, to: 0 },
-              duration: 2500, ease: 'Quad.easeIn',
-              onComplete: () => ring.destroy(),
-            });
+        // Click handler universel : ouvre le BuildingInfoPanel (HP, portée, effets, vendre)
+        // En mode TUNING, le DebugPanel intercepte avant via _unitType.
+        if (bg.setInteractive) {
+          bg.setInteractive();
+          bg.on('pointerover', () => this.input.setDefaultCursor('pointer'));
+          bg.on('pointerout',  () => this.input.setDefaultCursor('default'));
+          bg.on('pointerdown', () => {
+            // Si mode TUNING actif, laisse DebugPanel gérer (return tôt)
+            if (typeof DebugPanel !== 'undefined' && DebugPanel.getMode && DebugPanel.getMode() === 'tuning') return;
+            if (typeof BuildingInfoPanel !== 'undefined') {
+              const fresh = (Network.getState().buildings || []).find(bb => bb.id === b.id);
+              if (fresh) BuildingInfoPanel.open(fresh);
+            }
           });
         }
 

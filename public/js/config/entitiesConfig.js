@@ -175,7 +175,7 @@ const ENTITIES_CONFIG = {
   pilgrim: {
     type: 'unit', category: 'religion',
     assetKey: 'pilgrim', fallbackAssetKey: 'soldier',
-    scale: 1.8, displaySize: 40,
+    scale: 1.0, displaySize: 40,
     hp: 40, dmg: 0, speed: 100, range: 0, cost: 20,
     generatesFaith: 0.5,
     deathExplosion: { heal: 200, radius: 100 },
@@ -184,7 +184,7 @@ const ENTITIES_CONFIG = {
   inquisitor: {
     type: 'unit', category: 'religion',
     assetKey: 'inquisitor', fallbackAssetKey: 'soldier',
-    scale: 2.1, displaySize: 40,
+    scale: 1.0, displaySize: 40,
     hp: 60, dmg: 8, speed: 90, range: 90, cost: 30,
     projectile: 'proj_inquisitor_hammer',
     bonusVs: ['magic', 'undead'], bonusMultiplier: 2,
@@ -194,7 +194,7 @@ const ENTITIES_CONFIG = {
   holy_knight: {
     type: 'unit', category: 'religion',
     assetKey: 'paladin', fallbackAssetKey: 'cavalry',
-    scale: 2.3, displaySize: 48,
+    scale: 1.0, displaySize: 48,
     hp: 130, dmg: 14, speed: 110, range: 60, cost: 70,
     regen: 5,
   },
@@ -202,7 +202,7 @@ const ENTITIES_CONFIG = {
   angel: {
     type: 'unit', category: 'religion',
     assetKey: 'angel', fallbackAssetKey: 'archer',
-    scale: 2.6, displaySize: 56,
+    scale: 1.3, displaySize: 56,
     hp: 300, dmg: 20, speed: 100, range: 200, cost: 0,
     projectile: 'proj_holy_bolt',
     flying: true, summoned: true, lifetime: 90000,
@@ -212,7 +212,7 @@ const ENTITIES_CONFIG = {
   god_avatar: {
     type: 'unit', category: 'religion',
     assetKey: 'god_avatar', fallbackAssetKey: 'cavalry',
-    scale: 4.0, displaySize: 96,
+    scale: 2.3, displaySize: 96,
     hp: 1500, dmg: 60, speed: 50, range: 80, cost: 0,
     summoned: true, lifetime: 999999,
     boss: true, aoeRadius: 60,
@@ -226,7 +226,7 @@ const ENTITIES_CONFIG = {
   tower: {
     type: 'building', category: 'science',
     assetKey: 'tower_archer',
-    scale: 2.0, displaySize: 48,
+    scale: 3.0, displaySize: 48,
     hp: 250, cost: 60,
     autoAttack: { dmg: 6, range: 220, fireRate: 1100, projectile: 'proj_arrow' },
   },
