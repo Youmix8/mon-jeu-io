@@ -253,6 +253,17 @@ class MainScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     });
 
+    // Reset toutes les touches caméra si la fenêtre perd le focus (raccourci nav, alt-tab…).
+    // Sans ça, isDown reste true et la caméra dérive en continu.
+    const resetCamKeys = () => {
+      [this.cursors.left, this.cursors.right, this.cursors.up, this.cursors.down,
+       this.wasd.left, this.wasd.right, this.wasd.up, this.wasd.down].forEach(k => {
+        if (k && typeof k.reset === 'function') k.reset();
+      });
+    };
+    window.addEventListener('blur', resetCamKeys);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) resetCamKeys(); });
+
     this.input.mouse.disableContextMenu();
     this.attackGraphics = this.add.graphics();
 
@@ -550,10 +561,25 @@ class MainScene extends Phaser.Scene {
     if (!this.mapBuilt) return; // pas avant que l'event 'init' n'arrive
     const cam = this.cameras.main;
     const SPEED = 12 / cam.zoom;
-    if (this.cursors.left.isDown  || this.wasd.left.isDown)  cam.scrollX -= SPEED;
-    if (this.cursors.right.isDown || this.wasd.right.isDown) cam.scrollX += SPEED;
-    if (this.cursors.up.isDown    || this.wasd.up.isDown)    cam.scrollY -= SPEED;
-    if (this.cursors.down.isDown  || this.wasd.down.isDown)  cam.scrollY += SPEED;
+
+    // ── Scroll caméra UNIQUEMENT si aucun panel HTML ne capture le focus ──
+    // (Sinon, les raccourcis Chrome type Ctrl+Shift+D peuvent rendre une touche
+    //  stuck en isDown=true → caméra dérive à l'infini)
+    const anyPanelOpen =
+      (typeof HdvPanel       !== 'undefined' && HdvPanel.isVisible       && HdvPanel.isVisible()) ||
+      (typeof VillagePanel   !== 'undefined' && VillagePanel.isVisible   && VillagePanel.isVisible()) ||
+      (typeof TechTreeOverlay!== 'undefined' && TechTreeOverlay.isOpen   && TechTreeOverlay.isOpen()) ||
+      (typeof DebugPanel     !== 'undefined' && DebugPanel.isOpen        && DebugPanel.isOpen());
+    // Focus sur un élément interactif HTML ? → skip scroll (sécurité supplémentaire)
+    const ae = document.activeElement;
+    const focusOnUi = ae && ae !== document.body && (ae.tagName === 'INPUT' || ae.tagName === 'BUTTON' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT');
+
+    if (!anyPanelOpen && !focusOnUi) {
+      if (this.cursors.left.isDown  || this.wasd.left.isDown)  cam.scrollX -= SPEED;
+      if (this.cursors.right.isDown || this.wasd.right.isDown) cam.scrollX += SPEED;
+      if (this.cursors.up.isDown    || this.wasd.up.isDown)    cam.scrollY -= SPEED;
+      if (this.cursors.down.isDown  || this.wasd.down.isDown)  cam.scrollY += SPEED;
+    }
 
     this._updateRingPositions();
     this._updateUnitBarPositions();
@@ -621,7 +647,6 @@ class MainScene extends Phaser.Scene {
   _syncBuildings(buildings, players) {
     if (!this.buildingSprites) this.buildingSprites = {};
     const cfg = Network.getConfig();
-    const myId = Network.getMyId();
     const seen = new Set();
     for (const b of buildings) {
       seen.add(b.id);
@@ -629,23 +654,50 @@ class MainScene extends Phaser.Scene {
       const owner = players[b.ownerId];
       const colorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0xffffff;
       let s = this.buildingSprites[b.id];
-      const SIZE = (def.halfSize || 22) * 2;
+
+      // Lecture config visuelle (entitiesConfig.js) — assetKey, scale, displaySize
+      const eCfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[b.type] : null;
+      const assetKey  = (eCfg && eCfg.assetKey)    || b.type;
+      const scaleMult = (eCfg && eCfg.scale)       || 2.0;
+      const dispSize  = (eCfg && eCfg.displaySize) || ((def.halfSize || 22) * 2);
+      const finalSize = dispSize * scaleMult;
+      const usePng    = this._hasAsset(assetKey) && !(this._placeholderKeys && this._placeholderKeys.has(assetKey));
+
       if (!s) {
-        // Placeholder visuel : icône emoji sur un fond carré tinté équipe
-        const bg = this.add.rectangle(b.x, b.y, SIZE, SIZE, colorInt, 0.85)
-          .setStrokeStyle(2.5, 0x111111, 0.9).setDepth(28);
-        const icon = this.add.text(b.x, b.y, def.icon || '🏗', {
-          fontSize: (SIZE * 0.7) + 'px',
+        let bg;
+        if (usePng) {
+          // Vrai PNG : sprite tinté équipe (légère tinte pour ne pas écraser le design)
+          bg = this.add.sprite(b.x, b.y, assetKey)
+            .setOrigin(0.5, 0.5)
+            .setDisplaySize(finalSize, finalSize)
+            .setDepth(28);
+          // Tinte plus subtile pour préserver le design du sprite
+          bg.setTint(colorInt);
+          bg.setTintFill && (bg.tintFill = false); // multiply (par défaut), pas fill
+        } else {
+          // Placeholder rectangle + icône emoji
+          bg = this.add.rectangle(b.x, b.y, finalSize, finalSize, colorInt, 0.85)
+            .setStrokeStyle(2.5, 0x111111, 0.9).setDepth(28);
+        }
+
+        // Icône emoji : superposée UNIQUEMENT en placeholder (pas sur vrai sprite)
+        const icon = usePng ? null : this.add.text(b.x, b.y, def.icon || '🏗', {
+          fontSize: (finalSize * 0.55) + 'px',
         }).setOrigin(0.5, 0.5).setDepth(29);
-        const hpBg   = this.add.rectangle(b.x, b.y - SIZE / 2 - 8, SIZE + 10, 5, 0x111111, 0.85)
+
+        // Petite bannière de propriétaire (sous le sprite) — pour identifier l'équipe
+        // même quand le tint est subtil
+        const banner = owner ? this.add.rectangle(b.x, b.y + finalSize / 2 + 4, finalSize * 0.6, 3, colorInt, 1).setDepth(29) : null;
+
+        const hpBg   = this.add.rectangle(b.x, b.y - finalSize / 2 - 8, finalSize + 10, 5, 0x111111, 0.85)
           .setStrokeStyle(1, 0x000000, 0.7).setOrigin(0.5, 0.5).setDepth(60);
-        const hpFill = this.add.rectangle(b.x - (SIZE + 10) / 2, b.y - SIZE / 2 - 8, (SIZE + 10), 5, 0x22c55e)
+        const hpFill = this.add.rectangle(b.x - (finalSize + 10) / 2, b.y - finalSize / 2 - 8, (finalSize + 10), 5, 0x22c55e)
           .setOrigin(0, 0.5).setDepth(60);
 
         // Click handler : sur une tour → affiche le cercle de portée 2.5s
-        if (b.type === 'tower' && def.range) {
-          bg.setInteractive();
-          bg.on('pointerdown', () => {
+        if ((b.type === 'tower' || b.type === 'bombard_tower' || b.type === 'citadel') && def.range) {
+          bg.setInteractive && bg.setInteractive();
+          bg.on && bg.on('pointerdown', () => {
             const ring = this.add.graphics().setDepth(90);
             ring.lineStyle(2, 0xfbbf24, 0.85);
             ring.strokeCircle(b.x, b.y, def.range);
@@ -659,16 +711,26 @@ class MainScene extends Phaser.Scene {
           });
         }
 
-        s = { bg, icon, hpBg, hpFill };
+        s = { bg, icon, banner, hpBg, hpFill, _finalSize: finalSize, _usePng: usePng };
         this.buildingSprites[b.id] = s;
       }
+
+      const sz = s._finalSize;
       s.bg.setPosition(b.x, b.y);
-      s.bg.setFillStyle(colorInt, 0.85);
-      s.icon.setPosition(b.x, b.y);
-      s.hpBg.setPosition(b.x, b.y - SIZE / 2 - 8);
-      s.hpFill.setPosition(b.x - (SIZE + 10) / 2, b.y - SIZE / 2 - 8);
+      if (s._usePng) {
+        if (s.bg.setTint) s.bg.setTint(colorInt);
+      } else if (s.bg.setFillStyle) {
+        s.bg.setFillStyle(colorInt, 0.85);
+      }
+      if (s.icon) s.icon.setPosition(b.x, b.y);
+      if (s.banner) {
+        s.banner.setPosition(b.x, b.y + sz / 2 + 4);
+        s.banner.setFillStyle(colorInt, 1);
+      }
+      s.hpBg.setPosition(b.x, b.y - sz / 2 - 8);
+      s.hpFill.setPosition(b.x - (sz + 10) / 2, b.y - sz / 2 - 8);
       const hpRatio = b.hp / b.maxHp;
-      s.hpFill.width = (SIZE + 10) * hpRatio;
+      s.hpFill.width = (sz + 10) * hpRatio;
       const c = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
       s.hpFill.setFillStyle(c);
     }
@@ -676,7 +738,7 @@ class MainScene extends Phaser.Scene {
     for (const id of Object.keys(this.buildingSprites)) {
       if (!seen.has(id)) {
         const s = this.buildingSprites[id];
-        Object.values(s).forEach(o => o && o.destroy());
+        Object.values(s).forEach(o => o && o.destroy && o.destroy());
         delete this.buildingSprites[id];
       }
     }
@@ -1536,62 +1598,61 @@ class MainScene extends Phaser.Scene {
     const angle = Math.atan2(dy, dx);
 
     // Lecture config : si projectile défini → spawn sprite projectile qui vole
+    // INCLUSIF de l'archer (qui utilise proj_arrow.png comme tous les autres)
     const cfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[attacker.type] : null;
-    if (cfg && cfg.projectile && this._hasAsset(cfg.projectile) && attacker.type !== 'archer') {
+    if (cfg && cfg.projectile && this._hasAsset(cfg.projectile)) {
       this._playProjectileAnim(attacker.x, attacker.y, tx, ty, cfg.projectile);
       return;
     }
 
-    if (attacker.type === 'archer') {
-      // Flèche qui vole de l'archer à la cible
-      const arrow = this.add.sprite(attacker.x, attacker.y, 'arrow')
-        .setRotation(angle)
-        .setDepth(55);
+    // Pas de projectile défini (mêlée pure : soldier, knight, heavy_knight, paladin, etc.)
+    // → arc de slash blanc apparaissant sur la cible
+    const slash = this.add.sprite(tx, ty, 'slash')
+      .setRotation(angle)
+      .setDepth(55)
+      .setScale(0.5);
+    this.tweens.add({
+      targets: slash,
+      scale: { from: 0.7, to: 1.15 },
+      alpha: { from: 1, to: 0 },
+      duration: 220,
+      ease: 'Cubic.easeOut',
+      onComplete: () => slash.destroy(),
+    });
+    // Chevalier / cavalry : impact flash doré supplémentaire
+    if (attacker.type === 'knight' || attacker.type === 'heavy_knight' || attacker.type === 'holy_knight') {
+      const flash = this.add.circle(tx, ty, 18, 0xfbbf24, 0.55).setDepth(54);
       this.tweens.add({
-        targets: arrow,
-        x: tx, y: ty,
-        duration: 220,
-        ease: 'Quad.easeOut',
-        onComplete: () => arrow.destroy(),
+        targets: flash,
+        scale: { from: 0.6, to: 1.8 },
+        alpha: { from: 0.6, to: 0 },
+        duration: 250,
+        onComplete: () => flash.destroy(),
       });
-    } else {
-      // Soldat / Chevalier : arc de slash blanc apparaissant sur la cible
-      const slash = this.add.sprite(tx, ty, 'slash')
-        .setRotation(angle)
-        .setDepth(55)
-        .setScale(0.5);
-      this.tweens.add({
-        targets: slash,
-        scale: { from: 0.7, to: 1.15 },
-        alpha: { from: 1, to: 0 },
-        duration: 220,
-        ease: 'Cubic.easeOut',
-        onComplete: () => slash.destroy(),
-      });
-      // Chevalier : impact flash doré supplémentaire
-      if (attacker.type === 'knight') {
-        const flash = this.add.circle(tx, ty, 18, 0xfbbf24, 0.55).setDepth(54);
-        this.tweens.add({
-          targets: flash,
-          scale: { from: 0.6, to: 1.8 },
-          alpha: { from: 0.6, to: 0 },
-          duration: 250,
-          onComplete: () => flash.destroy(),
-        });
-      }
     }
   }
 
   // ── Projectile générique : sprite tourné vers la cible + anim arrivée ──
   _playProjectileAnim(sx, sy, tx, ty, projKey) {
+    if (!this.textures.exists(projKey)) return; // sécurité
     const angle = Math.atan2(ty - sy, tx - sx);
     const dist  = Math.hypot(tx - sx, ty - sy);
     // Projectiles lourds = plus lents
     const HEAVY = new Set(['proj_catapult_rock', 'proj_cannonball', 'proj_dragon_breath']);
-    const speed = HEAVY.has(projKey) ? 200 : 300; // px/s
-    const duration = Math.max(80, Math.min(1200, (dist / speed) * 1000));
+    const speed = HEAVY.has(projKey) ? 220 : 380; // px/s — un peu plus rapide pour fluidité
+    const duration = Math.max(80, Math.min(1000, (dist / speed) * 1000));
 
-    const proj = this.add.sprite(sx, sy, projKey).setRotation(angle).setDepth(56);
+    // Taille cohérente : projectiles ~36px de long (sauf lourds ~44px). Sans ça, les
+    // vrais PNG s'affichent à leur taille native qui peut être trop grosse en jeu.
+    const targetLen = HEAVY.has(projKey) ? 44 : 36;
+    const proj = this.add.sprite(sx, sy, projKey)
+      .setRotation(angle).setDepth(56);
+    const tex = this.textures.get(projKey).getSourceImage();
+    const natW = (tex && tex.width)  || 28;
+    const natH = (tex && tex.height) || 10;
+    const ratio = natH / natW;
+    proj.setDisplaySize(targetLen, targetLen * ratio);
+
     if (typeof Animations !== 'undefined' && Animations.animateProjectile) {
       Animations.animateProjectile(this, proj, projKey);
     }
@@ -1599,11 +1660,17 @@ class MainScene extends Phaser.Scene {
       targets: proj, x: tx, y: ty,
       duration, ease: 'Quad.easeOut',
       onComplete: () => {
-        // Petit flash d'impact
-        const flash = this.add.circle(tx, ty, 14, 0xffffff, 0.7).setDepth(54);
+        // Flash d'impact + couleur thématique
+        const impactColors = {
+          proj_dark_orb: 0x9333ea, proj_holy_bolt: 0xfde047, proj_dragon_breath: 0xdc2626,
+          proj_fireball_small: 0xf97316, proj_lightning: 0xfbbf24, proj_ice_shard: 0x60a5fa,
+          proj_magic_bolt: 0x8b5cf6, proj_inquisitor_hammer: 0xfde68a, proj_divine_beam: 0xfef9c3,
+        };
+        const flashColor = impactColors[projKey] || 0xffffff;
+        const flash = this.add.circle(tx, ty, 16, flashColor, 0.85).setDepth(54);
         this.tweens.add({
-          targets: flash, scale: { from: 0.5, to: 1.6 }, alpha: { from: 0.7, to: 0 },
-          duration: 200, onComplete: () => flash.destroy(),
+          targets: flash, scale: { from: 0.5, to: 1.8 }, alpha: { from: 0.85, to: 0 },
+          duration: 220, onComplete: () => flash.destroy(),
         });
         proj.destroy();
       },

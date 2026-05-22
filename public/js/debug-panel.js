@@ -42,10 +42,12 @@ const DebugPanel = (() => {
   }
 
   function _bindKeys() {
-    // Toggle DEBUG : Ctrl+Shift+D (n'entre pas en conflit avec sorts H/F/G/J)
+    // Toggle DEBUG : touche backtick ` (au-dessus de Tab).
+    // PAS Ctrl+Shift+D : conflit avec Chrome "Save all tabs as bookmarks" qui
+    // vole le focus → keyup de D perdu → caméra dérive à droite à l'infini.
     window.addEventListener('keydown', (e) => {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+      if (e.key === '`' || e.key === '~' || e.code === 'Backquote') {
         e.preventDefault();
         visible = !visible;
         panel.classList.toggle('hidden', !visible);
@@ -231,24 +233,50 @@ const DebugPanel = (() => {
   }
 
   function _exportConfig() {
-    const date = new Date().toISOString().slice(0, 10);
-    let txt = `// Valeurs ajustées via mode tuning le ${date}\n`;
     if (typeof ENTITIES_CONFIG === 'undefined') {
-      console.log(txt + '// (ENTITIES_CONFIG non chargé)');
+      alert('ENTITIES_CONFIG non chargé');
       return;
     }
+    const date = new Date().toISOString().slice(0, 10);
+    const lines = [];
+    lines.push(`// ═══════════════════════════════════════════════════════════════`);
+    lines.push(`// Scales ajustés via mode tuning — ${date}`);
+    lines.push(`// Recherche/remplace les "scale: X.X" dans entitiesConfig.js par les valeurs ci-dessous.`);
+    lines.push(`// ═══════════════════════════════════════════════════════════════`);
+    // Tri par catégorie pour lecture facilitée
+    const groups = { science: [], magic: [], religion: [] };
     for (const [key, cfg] of Object.entries(ENTITIES_CONFIG)) {
-      txt += `${key}: { ..., scale: ${(cfg.scale || 1.0).toFixed(2)} },\n`;
+      const cat = cfg.category || 'science';
+      const sc = Number((cfg.scale || 1.0).toFixed(2));
+      (groups[cat] || groups.science).push({ key, sc, type: cfg.type });
     }
-    console.log('═══════════════════════════════════════');
-    console.log('Bloc à coller dans entitiesConfig.js :');
-    console.log('═══════════════════════════════════════');
+    for (const [cat, list] of Object.entries(groups)) {
+      if (list.length === 0) continue;
+      lines.push('');
+      lines.push(`// ── ${cat.toUpperCase()} (${list.length}) ──`);
+      // Sort: units before buildings, puis alpha
+      list.sort((a, b) => (a.type === b.type ? a.key.localeCompare(b.key) : a.type.localeCompare(b.type)));
+      for (const e of list) {
+        lines.push(`  ${e.key.padEnd(20)} scale: ${e.sc.toFixed(2)},`);
+      }
+    }
+    const txt = lines.join('\n');
     console.log(txt);
-    alert('Config exportée dans la console (ouvre les DevTools)');
+    // Tente de copier dans le presse-papier
+    const ok = (msg) => alert(msg);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(
+        () => ok(`✅ Config exportée et copiée dans le presse-papier (${Object.keys(ENTITIES_CONFIG).length} entités)\n\nColle dans entitiesConfig.js : remplace les "scale: X.X" par les valeurs.`),
+        () => ok('⚠️ Config affichée dans la console DevTools (presse-papier refusé par le navigateur).')
+      );
+    } else {
+      ok('Config affichée dans la console DevTools.');
+    }
   }
 
   function getMode() { return mode; }
   function hasPendingSpawn() { return !!pendingSpawn; }
+  function isOpen() { return visible; }
 
-  return { init, tryHandleMapClick, tryHandleSpriteClick, getMode, hasPendingSpawn };
+  return { init, tryHandleMapClick, tryHandleSpriteClick, getMode, hasPendingSpawn, isOpen };
 })();
