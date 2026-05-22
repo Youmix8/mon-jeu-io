@@ -86,12 +86,31 @@ const PLACEHOLDER_COLORS = {
 };
 
 // Dimensions du placeholder par catalogue
+// Projectiles : 28x10 pour bien visibles en vol (avant : 14x6 c'était trop petit)
 const PLACEHOLDER_SIZES = {
   UNITS_NEW:     { w: 32, h: 32 },
   BUILDINGS_NEW: { w: 44, h: 44 },
   SPELLS_FX:     { w: 48, h: 48 },
-  PROJECTILES:   { w: 14, h:  6 },
+  PROJECTILES:   { w: 28, h: 10 },
   UI_ICONS:      { w: 22, h: 22 },
+};
+
+// Couleurs spécifiques par clé de projectile pour distinguer les types en vol
+const PROJECTILE_COLORS = {
+  proj_arrow:             0xd97706,  // bois/ambre
+  proj_crossbow_bolt:     0x92400e,  // bois foncé
+  proj_catapult_rock:     0x6b7280,  // pierre grise
+  proj_cannonball:        0x1f2937,  // boulet noir
+  proj_throwing_spear:    0xa16207,  // lance bois
+  proj_magic_bolt:        0x8b5cf6,  // violet magique
+  proj_fireball_small:    0xf97316,  // orange feu
+  proj_lightning:         0xfbbf24,  // jaune éclair
+  proj_ice_shard:         0x60a5fa,  // bleu glace
+  proj_dark_orb:          0x4c1d95,  // pourpre sombre
+  proj_dragon_breath:     0xdc2626,  // rouge dragon
+  proj_holy_bolt:         0xfde047,  // jaune sacré
+  proj_inquisitor_hammer: 0x78350f,  // marron marteau
+  proj_divine_beam:       0xfef9c3,  // lumière divine
 };
 
 class MainScene extends Phaser.Scene {
@@ -174,20 +193,30 @@ class MainScene extends Phaser.Scene {
 
     for (const key of missingKeys) {
       const info  = meta[key] || { category: 'science', group: 'UNITS_NEW' };
-      const color = PLACEHOLDER_COLORS[info.category] || 0x888888;
-      const size  = PLACEHOLDER_SIZES[info.group]     || { w: 32, h: 32 };
+      const color = (info.group === 'PROJECTILES' && PROJECTILE_COLORS[key])
+                  ? PROJECTILE_COLORS[key]
+                  : (PLACEHOLDER_COLORS[info.category] || 0x888888);
+      const size  = PLACEHOLDER_SIZES[info.group] || { w: 32, h: 32 };
 
       const g = this.make.graphics({ add: false });
-      g.fillStyle(color, 0.92);
-      g.fillRect(0, 0, size.w, size.h);
-      // Bordure blanche fine pour les distinguer du fond
-      g.lineStyle(1.5, 0xffffff, 0.65);
-      g.strokeRect(1, 1, size.w - 2, size.h - 2);
-      // Croix centrale pour que le placeholder soit visuellement identifiable
-      const cx = size.w / 2, cy = size.h / 2, r = Math.min(cx, cy) * 0.45;
-      g.lineStyle(1.5, 0xffffff, 0.55);
-      g.lineBetween(cx - r, cy, cx + r, cy);
-      g.lineBetween(cx, cy - r, cx, cy + r);
+      g.fillStyle(color, 1);
+      // Forme adaptée par catégorie : projectile = forme allongée pointue
+      if (info.group === 'PROJECTILES') {
+        // Corps : rectangle plein + pointe triangulaire à droite (sens du tir)
+        g.fillRect(0, 0, size.w - 6, size.h);
+        g.fillTriangle(size.w - 6, 0, size.w, size.h / 2, size.w - 6, size.h);
+        g.lineStyle(1.5, 0xffffff, 0.9);
+        g.strokeRect(0, 0, size.w - 6, size.h);
+      } else {
+        g.fillRect(0, 0, size.w, size.h);
+        g.lineStyle(1.5, 0xffffff, 0.65);
+        g.strokeRect(1, 1, size.w - 2, size.h - 2);
+        // Croix centrale pour identifier les placeholders unités/bâtiments
+        const cx = size.w / 2, cy = size.h / 2, r = Math.min(cx, cy) * 0.45;
+        g.lineStyle(1.5, 0xffffff, 0.55);
+        g.lineBetween(cx - r, cy, cx + r, cy);
+        g.lineBetween(cx, cy - r, cx, cy + r);
+      }
       g.generateTexture(key, size.w, size.h);
       g.destroy();
 
@@ -1155,9 +1184,20 @@ class MainScene extends Phaser.Scene {
       if (!this.unitSprites[id]) {
         // Lecture de la config centralisée pour l'asset, la taille et le scale
         const cfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[unit.type] : null;
-        const assetKey  = (cfg && cfg.assetKey)    || unit.type;
+        let assetKey   = (cfg && cfg.assetKey)    || unit.type;
         const unitSize  = (cfg && cfg.displaySize) || 40;
         const scaleMult = (cfg && cfg.scale)       || 1.0;
+
+        // Si l'asset principal est un placeholder coloré ET qu'on a un fallback
+        // visuellement cohérent (soldier/archer/cavalry), on l'utilise → l'unité
+        // hérite d'un vrai design au lieu d'un carré coloré.
+        // L'emoji du type reste superposé pour distinction visuelle.
+        const isPrimaryPlaceholder = this._placeholderKeys && this._placeholderKeys.has(assetKey);
+        if (isPrimaryPlaceholder && cfg && cfg.fallbackAssetKey
+            && this.textures.exists(cfg.fallbackAssetKey)
+            && !(this._placeholderKeys && this._placeholderKeys.has(cfg.fallbackAssetKey))) {
+          assetKey = cfg.fallbackAssetKey;
+        }
         const useAsset  = this._hasAsset(assetKey);
 
         let sprite;
@@ -1207,16 +1247,24 @@ class MainScene extends Phaser.Scene {
           if (unit.type === 'fire_elemental') Animations.animateIdleAmbient(this, sprite, unit.type);
         }
 
-        // Si l'asset est un placeholder coloré → superpose l'emoji du type d'unité
-        // pour rendre chaque type visuellement distinguable (à virer quand les vrais PNG arriveront)
+        // Si l'asset PRIMAIRE était un placeholder (peu importe qu'on ait swappé
+        // vers un fallback intelligent), superpose l'emoji du type pour
+        // distinguer visuellement les unités qui partagent le même sprite.
+        // → soldier/archer/knight (vrais sprites) : pas d'emoji
+        // → heavy_knight / paladin / inquisitor / etc. : emoji sur sprite hérité
         let iconOverlay = null;
-        const isPlaceholder = this._placeholderKeys && this._placeholderKeys.has(assetKey);
-        if (isPlaceholder) {
+        if (isPrimaryPlaceholder) {
           const ut = (Network.getConfig().unitTypes || {})[unit.type] || {};
           const icon = ut.icon || '❓';
-          iconOverlay = this.add.text(unit.x, unit.y, icon, {
-            fontSize: Math.floor(unitSize * 0.55 * scaleMult) + 'px',
-          }).setOrigin(0.5, 0.5).setDepth(51);
+          // Position : en haut à droite du sprite (badge "type"), pas centré
+          const offsetX = unitSize * 0.35 * scaleMult;
+          const offsetY = -unitSize * 0.35 * scaleMult;
+          iconOverlay = this.add.text(unit.x + offsetX, unit.y + offsetY, icon, {
+            fontSize: Math.floor(unitSize * 0.38 * scaleMult) + 'px',
+            stroke: '#000', strokeThickness: 3,
+          }).setOrigin(0.5, 0.5).setDepth(52);
+          iconOverlay._iconOffsetX = offsetX;
+          iconOverlay._iconOffsetY = offsetY;
         }
 
         // [sprite, barBg, barFill, badge, iconOverlay?] — l'overlay est optionnel
@@ -1293,7 +1341,11 @@ class MainScene extends Phaser.Scene {
       barBg.setPosition(sprite.x, sprite.y + BAR_Y - 4);
       barFill.setPosition(sprite.x - BAR_W / 2, sprite.y + BAR_Y - 4);
       if (badge) badge.setPosition(sprite.x + 22, sprite.y - 22);
-      if (iconOverlay) iconOverlay.setPosition(sprite.x, sprite.y);
+      if (iconOverlay) {
+        const ox = iconOverlay._iconOffsetX || 0;
+        const oy = iconOverlay._iconOffsetY || 0;
+        iconOverlay.setPosition(sprite.x + ox, sprite.y + oy);
+      }
       // Multiplie le baseScale (pas setScale absolu) pour garder la taille définie par setDisplaySize
       const bx = sprite._baseScaleX || sprite.scaleX;
       const by = sprite._baseScaleY || sprite.scaleY;

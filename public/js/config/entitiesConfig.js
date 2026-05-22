@@ -8,29 +8,14 @@
 //   type        : 'unit' | 'building'
 //   category    : 'science' | 'magic' | 'religion'
 //   assetKey    : clé Phaser de la texture (= type si identique, sinon explicite)
-//   scale       : facteur de scale visuel — 1.0 par défaut, ajusté via mode tuning
+//   fallbackAssetKey : clé d'asset à utiliser si l'assetKey est un placeholder
+//                      (pour réutiliser visuellement soldier/archer/cavalry)
+//   scale       : facteur de scale visuel — soldier=2.0 référence
+//                 Plus gros : boss, unités lourdes ; plus petit : invocations légères
 //   displaySize : taille d'affichage Phaser en px (setDisplaySize carré)
 //   hp, dmg, speed, range, cost : stats gameplay (miroir de server.js UNIT_TYPES)
 //   projectile  : clé asset du projectile lancé (units à distance)
-//   aura        : { type, value, radius } — effets passifs de zone
-//   special     : comportements serveur spéciaux (chaîne libre)
-//   summoned    : true si invoquée (durée limitée)
-//   lifetime    : durée de vie en ms (summoned seulement)
-//   flying      : true si ignore obstacles au sol
-//   boss        : true si unité "boss" (spawn spécial, anim dramatique)
-//   bonusVs     : categories contre lesquelles les dégâts sont multipliés
-//   bonusMultiplier : facteur de bonus (bonusVs)
-//   regen       : HP/sec d'auto-régénération passive
-//   generatesFaith : foi/sec passive générée par l'unité
-//   deathExplosion  : { heal, radius } soin AoE à la mort
-//   healAura    : { value, radius } soin passif de zone/sec
-//   fearAura    : { slowPct, radius } ralentissement passif de zone
-//   aoeRadius   : rayon AoE des attaques au contact
-//   antiBuilding: true si dégâts bonifiés vs bâtiments
-//   autoAttack  : { dmg, range, fireRate, projectile } (bâtiments défensifs)
-//   manaGen     : mana/sec générée (bâtiments magiques)
-//   faithGen    : foi/sec générée (bâtiments religion)
-//   produces    : type d'unité que le bâtiment peut produire
+//   aura, special, summoned, lifetime, flying, boss, bonusVs, regen, etc.
 // ════════════════════════════════════════════════════════════════════
 
 const ENTITIES_CONFIG = {
@@ -39,6 +24,7 @@ const ENTITIES_CONFIG = {
   // UNITÉS — AXE SCIENCE
   // ══════════════════════════════════════════════════════════════════
 
+  // Référence — scale 2.0 = base de comparaison
   soldier: {
     type: 'unit', category: 'science',
     assetKey: 'soldier',
@@ -54,18 +40,18 @@ const ENTITIES_CONFIG = {
     projectile: 'proj_arrow',
   },
 
-  // Serveur : 'knight' — asset PNG : cavalry.png (héritage du nom)
+  // Serveur : 'knight' — asset PNG : cavalry.png
   knight: {
     type: 'unit', category: 'science',
     assetKey: 'cavalry',
-    scale: 2.0, displaySize: 48,
+    scale: 2.2, displaySize: 48,
     hp: 80, dmg: 8, speed: 140, range: 55, cost: 25,
   },
 
   catapult: {
     type: 'unit', category: 'science',
-    assetKey: 'catapult',
-    scale: 2.0, displaySize: 52,
+    assetKey: 'catapult', fallbackAssetKey: 'cavalry',
+    scale: 2.4, displaySize: 52,
     hp: 70, dmg: 25, speed: 50, range: 220, cost: 60,
     projectile: 'proj_catapult_rock',
     antiBuilding: true,
@@ -73,21 +59,21 @@ const ENTITIES_CONFIG = {
 
   settler: {
     type: 'unit', category: 'science',
-    assetKey: 'soldier',        // pas d'asset dédié pour l'instant
-    scale: 2.0, displaySize: 40,
+    assetKey: 'soldier',
+    scale: 1.8, displaySize: 40,
     hp: 40, dmg: 0, speed: 100, range: 0, cost: 80,
   },
 
   heavy_knight: {
     type: 'unit', category: 'science',
-    assetKey: 'heavy_knight',
-    scale: 2.0, displaySize: 48,
+    assetKey: 'heavy_knight', fallbackAssetKey: 'cavalry',
+    scale: 2.4, displaySize: 48,
     hp: 150, dmg: 12, speed: 100, range: 55, cost: 50,
   },
 
   crossbowman: {
     type: 'unit', category: 'science',
-    assetKey: 'crossbowman',
+    assetKey: 'crossbowman', fallbackAssetKey: 'archer',
     scale: 2.0, displaySize: 40,
     hp: 35, dmg: 7, speed: 75, range: 200, cost: 25,
     projectile: 'proj_crossbow_bolt',
@@ -95,24 +81,24 @@ const ENTITIES_CONFIG = {
 
   general: {
     type: 'unit', category: 'science',
-    assetKey: 'general',
-    scale: 2.0, displaySize: 48,
+    assetKey: 'general', fallbackAssetKey: 'soldier',
+    scale: 2.3, displaySize: 48,
     hp: 120, dmg: 10, speed: 110, range: 80, cost: 120,
     aura: { type: 'damage_boost', value: 0.25, radius: 200 },
   },
 
   cannon: {
     type: 'unit', category: 'science',
-    assetKey: 'cannon',
-    scale: 2.0, displaySize: 52,
+    assetKey: 'cannon', fallbackAssetKey: 'cavalry',
+    scale: 2.4, displaySize: 52,
     hp: 60, dmg: 35, speed: 40, range: 280, cost: 100,
     projectile: 'proj_cannonball',
   },
 
   elite_guard: {
     type: 'unit', category: 'science',
-    assetKey: 'elite_guard',
-    scale: 2.0, displaySize: 48,
+    assetKey: 'elite_guard', fallbackAssetKey: 'soldier',
+    scale: 2.3, displaySize: 48,
     hp: 200, dmg: 20, speed: 110, range: 60, cost: 80,
   },
 
@@ -123,7 +109,7 @@ const ENTITIES_CONFIG = {
   // Serveur : 'wizard' — asset PNG : mage.png
   wizard: {
     type: 'unit', category: 'magic',
-    assetKey: 'mage',
+    assetKey: 'mage', fallbackAssetKey: 'archer',
     scale: 2.0, displaySize: 40,
     hp: 40, dmg: 10, speed: 80, range: 200, cost: 50,
     projectile: 'proj_magic_bolt',
@@ -131,45 +117,42 @@ const ENTITIES_CONFIG = {
 
   necromancer: {
     type: 'unit', category: 'magic',
-    assetKey: 'necromancer',
-    scale: 2.0, displaySize: 40,
+    assetKey: 'necromancer', fallbackAssetKey: 'archer',
+    scale: 2.1, displaySize: 40,
     hp: 50, dmg: 6, speed: 80, range: 150, cost: 80,
     projectile: 'proj_dark_orb',
-    // À chaque kill ennemi dans rayon 150 → spawn un skeleton allié (60s)
     special: 'resurrect_on_kill',
   },
 
   skeleton: {
     type: 'unit', category: 'magic',
-    assetKey: 'skeleton',
-    scale: 2.0, displaySize: 36,
+    assetKey: 'skeleton', fallbackAssetKey: 'soldier',
+    scale: 1.7, displaySize: 36,
     hp: 30, dmg: 5, speed: 80, range: 60, cost: 0,
     summoned: true, lifetime: 60000,
   },
 
   lich: {
     type: 'unit', category: 'magic',
-    assetKey: 'lich',
-    scale: 2.0, displaySize: 44,
+    assetKey: 'lich', fallbackAssetKey: 'archer',
+    scale: 2.3, displaySize: 44,
     hp: 120, dmg: 15, speed: 80, range: 180, cost: 150,
     projectile: 'proj_dark_orb',
-    // À chaque kill → spawn un skeleton_knight allié (60s)
     special: 'resurrect_knight_on_kill',
   },
 
-  // Pas encore dans server.js — sera ajouté à l'étape 3
   skeleton_knight: {
     type: 'unit', category: 'magic',
-    assetKey: 'skeleton_knight',
-    scale: 2.0, displaySize: 44,
+    assetKey: 'skeleton_knight', fallbackAssetKey: 'cavalry',
+    scale: 2.1, displaySize: 44,
     hp: 60, dmg: 8, speed: 80, range: 35, cost: 0,
     summoned: true, lifetime: 60000,
   },
 
   fire_elemental: {
     type: 'unit', category: 'magic',
-    assetKey: 'fire_elemental',
-    scale: 2.0, displaySize: 52,
+    assetKey: 'fire_elemental', fallbackAssetKey: 'soldier',
+    scale: 2.8, displaySize: 52,
     hp: 250, dmg: 25, speed: 80, range: 50, cost: 0,
     summoned: true, lifetime: 60000,
     aoeRadius: 40,
@@ -177,8 +160,8 @@ const ENTITIES_CONFIG = {
 
   arcane_dragon: {
     type: 'unit', category: 'magic',
-    assetKey: 'arcane_dragon',
-    scale: 2.0, displaySize: 80,
+    assetKey: 'arcane_dragon', fallbackAssetKey: 'cavalry',
+    scale: 3.5, displaySize: 80,
     hp: 800, dmg: 40, speed: 120, range: 250, cost: 0,
     projectile: 'proj_dragon_breath',
     summoned: true, lifetime: 60000,
@@ -191,18 +174,17 @@ const ENTITIES_CONFIG = {
 
   pilgrim: {
     type: 'unit', category: 'religion',
-    assetKey: 'pilgrim',
-    scale: 2.0, displaySize: 40,
+    assetKey: 'pilgrim', fallbackAssetKey: 'soldier',
+    scale: 1.8, displaySize: 40,
     hp: 40, dmg: 0, speed: 100, range: 0, cost: 20,
     generatesFaith: 0.5,
-    // À la mort : soin AoE 200 HP dans rayon 100 sur les alliés
     deathExplosion: { heal: 200, radius: 100 },
   },
 
   inquisitor: {
     type: 'unit', category: 'religion',
-    assetKey: 'inquisitor',
-    scale: 2.0, displaySize: 40,
+    assetKey: 'inquisitor', fallbackAssetKey: 'soldier',
+    scale: 2.1, displaySize: 40,
     hp: 60, dmg: 8, speed: 90, range: 90, cost: 30,
     projectile: 'proj_inquisitor_hammer',
     bonusVs: ['magic', 'undead'], bonusMultiplier: 2,
@@ -211,17 +193,16 @@ const ENTITIES_CONFIG = {
   // Serveur : 'holy_knight' — asset PNG : paladin.png
   holy_knight: {
     type: 'unit', category: 'religion',
-    assetKey: 'paladin',
-    scale: 2.0, displaySize: 48,
+    assetKey: 'paladin', fallbackAssetKey: 'cavalry',
+    scale: 2.3, displaySize: 48,
     hp: 130, dmg: 14, speed: 110, range: 60, cost: 70,
     regen: 5,
   },
 
-  // Pas encore dans server.js — sera ajouté à l'étape 3
   angel: {
     type: 'unit', category: 'religion',
-    assetKey: 'angel',
-    scale: 2.0, displaySize: 56,
+    assetKey: 'angel', fallbackAssetKey: 'archer',
+    scale: 2.6, displaySize: 56,
     hp: 300, dmg: 20, speed: 100, range: 200, cost: 0,
     projectile: 'proj_holy_bolt',
     flying: true, summoned: true, lifetime: 90000,
@@ -230,8 +211,8 @@ const ENTITIES_CONFIG = {
 
   god_avatar: {
     type: 'unit', category: 'religion',
-    assetKey: 'god_avatar',
-    scale: 2.0, displaySize: 96,
+    assetKey: 'god_avatar', fallbackAssetKey: 'cavalry',
+    scale: 4.0, displaySize: 96,
     hp: 1500, dmg: 60, speed: 50, range: 80, cost: 0,
     summoned: true, lifetime: 999999,
     boss: true, aoeRadius: 60,
@@ -242,7 +223,6 @@ const ENTITIES_CONFIG = {
   // BÂTIMENTS — AXE SCIENCE
   // ══════════════════════════════════════════════════════════════════
 
-  // Serveur : 'tower' — asset PNG : tower_archer.png
   tower: {
     type: 'building', category: 'science',
     assetKey: 'tower_archer',
@@ -253,16 +233,15 @@ const ENTITIES_CONFIG = {
 
   wall: {
     type: 'building', category: 'science',
-    assetKey: 'wall',              // pas d'asset PNG dédié
+    assetKey: 'wall',
     scale: 2.0, displaySize: 50,
     hp: 500, cost: 25,
   },
 
-  // Pas encore dans server.js — à wirer à l'étape 3
   bombard_tower: {
     type: 'building', category: 'science',
     assetKey: 'bombard_tower',
-    scale: 2.0, displaySize: 52,
+    scale: 2.2, displaySize: 52,
     hp: 350, cost: 120,
     autoAttack: { dmg: 18, range: 280, fireRate: 3000, projectile: 'proj_cannonball' },
   },
@@ -270,7 +249,7 @@ const ENTITIES_CONFIG = {
   citadel: {
     type: 'building', category: 'science',
     assetKey: 'citadel',
-    scale: 2.0, displaySize: 64,
+    scale: 2.6, displaySize: 64,
     hp: 2000, cost: 300,
     autoAttack: { dmg: 10, range: 200, fireRate: 1200, projectile: 'proj_arrow' },
     hdvUpgrade: true,
@@ -279,7 +258,7 @@ const ENTITIES_CONFIG = {
   port: {
     type: 'building', category: 'science',
     assetKey: 'port',
-    scale: 2.0, displaySize: 56,
+    scale: 2.2, displaySize: 56,
     hp: 300, cost: 150,
     produces: 'boat',
   },
@@ -287,7 +266,7 @@ const ENTITIES_CONFIG = {
   boat: {
     type: 'unit', category: 'science',
     assetKey: 'boat',
-    scale: 2.0, displaySize: 60,
+    scale: 2.4, displaySize: 60,
     hp: 100, dmg: 0, speed: 100, range: 0, cost: 80,
     water: true,
   },
@@ -307,7 +286,7 @@ const ENTITIES_CONFIG = {
   mage_tower: {
     type: 'building', category: 'magic',
     assetKey: 'tower_mage',
-    scale: 2.0, displaySize: 52,
+    scale: 2.2, displaySize: 52,
     hp: 250, cost: 90,
     manaGen: 1,
     produces: 'wizard',
@@ -328,7 +307,7 @@ const ENTITIES_CONFIG = {
   temple: {
     type: 'building', category: 'religion',
     assetKey: 'temple',
-    scale: 2.0, displaySize: 56,
+    scale: 2.4, displaySize: 56,
     hp: 350, cost: 110,
     faithGen: 1.5,
   },
@@ -336,15 +315,13 @@ const ENTITIES_CONFIG = {
   cathedral: {
     type: 'building', category: 'religion',
     assetKey: 'cathedral',
-    scale: 2.0, displaySize: 64,
+    scale: 2.8, displaySize: 64,
     hp: 500, cost: 220,
     faithGen: 3,
   },
 };
 
 // ── Compat Node.js (require) + browser global ─────────────────────
-// Le fichier est chargé via <script> côté client → ENTITIES_CONFIG est global.
-// Le serveur le charge via require() → module.exports.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { ENTITIES_CONFIG };
 }
