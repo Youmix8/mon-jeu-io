@@ -208,27 +208,42 @@ const DebugPanel = (() => {
   //   - Ne JAMAIS multiplier par sprite.scaleY (qui contient le wobble)
   function _applyScaleLive(type, scale) {
     const main = _getMainScene();
-    if (!main || !main.unitSprites) return;
+    if (!main) return;
     if (typeof ENTITIES_CONFIG !== 'undefined' && ENTITIES_CONFIG[type]) {
       ENTITIES_CONFIG[type].scale = scale;
     }
-    for (const arr of Object.values(main.unitSprites)) {
+
+    // ── Unités ─────────────────────────────────────────────────────
+    for (const arr of Object.values(main.unitSprites || {})) {
       const s = arr && arr[0];
       if (!s || s._unitType !== type) continue;
       const oldMult = s._scaleMult || 1.0;
       const ratio = scale / oldMult;
-      // Multiplie _baseScale (référence stable) — le wobble s'appliquera dessus à la frame suivante
       const newBaseX = (s._baseScaleX || s.scaleX) * ratio;
       const newBaseY = (s._baseScaleY || s.scaleY) * ratio;
       s._baseScaleX = newBaseX;
       s._baseScaleY = newBaseY;
       s.setScale(newBaseX, newBaseY);
       s._scaleMult = scale;
-      // L'emoji overlay (placeholder) suit le scale du sprite
       const overlay = arr[4];
-      if (overlay && overlay.setScale) {
-        overlay.setScale(overlay.scaleX * ratio, overlay.scaleY * ratio);
+      if (overlay && overlay.setScale) overlay.setScale(overlay.scaleX * ratio, overlay.scaleY * ratio);
+    }
+
+    // ── Bâtiments ──────────────────────────────────────────────────
+    // Note : les sprites bâtiments n'ont pas de wobble, donc on peut directement
+    // multiplier scaleX/scaleY. On scale aussi l'icon overlay si placeholder.
+    for (const obj of Object.values(main.buildingSprites || {})) {
+      const s = obj && obj.bg;
+      if (!s || s._unitType !== type) continue;
+      const oldMult = s._scaleMult || (ENTITIES_CONFIG[type] ? ENTITIES_CONFIG[type].scale : 2.0);
+      const ratio = scale / oldMult;
+      if (s.setScale && s.scaleX != null) {
+        s.setScale(s.scaleX * ratio, s.scaleY * ratio);
+      } else if (s.setDisplaySize && s.width != null) {
+        s.setDisplaySize(s.width * ratio, s.height * ratio);
       }
+      s._scaleMult = scale;
+      if (obj.icon && obj.icon.setScale) obj.icon.setScale(obj.icon.scaleX * ratio, obj.icon.scaleY * ratio);
     }
   }
 

@@ -694,6 +694,10 @@ class MainScene extends Phaser.Scene {
         const hpFill = this.add.rectangle(b.x - (finalSize + 10) / 2, b.y - finalSize / 2 - 8, (finalSize + 10), 5, 0x22c55e)
           .setOrigin(0, 0.5).setDepth(60);
 
+        // Marquage pour le mode TUNING du debug panel (clic → slider scale)
+        bg._unitType = b.type;
+        bg._unitOwnerId = b.ownerId;
+
         // Click handler : sur une tour → affiche le cercle de portée 2.5s
         if ((b.type === 'tower' || b.type === 'bombard_tower' || b.type === 'citadel') && def.range) {
           bg.setInteractive && bg.setInteractive();
