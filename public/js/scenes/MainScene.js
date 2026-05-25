@@ -307,22 +307,9 @@ class MainScene extends Phaser.Scene {
       cam.centerOn(this.MAP_W / 2, this.MAP_H / 2);
     });
 
-    // ── DEBUG : raccourcis 1-5 pour sorts (gratuits, cast direct au curseur) ──
-    // 1=fireball, 2=freeze, 3=blessing, 4=purifying_light, 5=portal sur unités sélectionnées
-    const debugSpellMap = { ONE: 'fireball', TWO: 'freeze', THREE: 'blessing', FOUR: 'purifying_light' };
-    Object.keys(debugSpellMap).forEach((k) => {
-      this.input.keyboard.on('keydown-' + k, () => {
-        if (!this.mapBuilt) return;
-        const ptr = this.input.activePointer;
-        Network.castSpell(debugSpellMap[k], ptr.worldX, ptr.worldY);
-      });
-    });
-    this.input.keyboard.on('keydown-FIVE', () => {
-      if (!this.mapBuilt) return;
-      if (this.selectedUnitIds.size === 0) return;
-      const ptr = this.input.activePointer;
-      Network.debugCastPortal(Array.from(this.selectedUnitIds), ptr.worldX, ptr.worldY);
-    });
+    // Raccourcis sorts F/G/H/J/1-5 SUPPRIMÉS (sorts désactivés en phase 4).
+    // Les ressources mana/foi servent maintenant à PRODUIRE les unités magie/religion
+    // depuis le panel HDV/village (au lieu de caster des sorts).
 
     // ── Ctrl+A — select all own units ────────────────────────────
     this.input.keyboard.on('keydown-A', (event) => {

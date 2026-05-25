@@ -647,6 +647,8 @@ function computeManaRate(player) {
     if (b.type === 'sanctum')    rate += 0.5;
     if (b.type === 'mage_tower') rate += 1;
   }
+  // Tech "Enchantement" : ×1.5 sur tous les bâtiments magiques
+  if (hasTech(player, 'enchantment')) rate *= 1.5;
   return rate;
 }
 
@@ -1939,9 +1941,13 @@ io.on('connection', (socket) => {
     broadcastFilteredState();
   });
 
-  // ── Sorts actifs (axe Magie/Religion) ────────────────────────
-  // Anti-cheat : cooldown 400ms par sort par joueur ; coords clampées à la map.
-  socket.on('castSpell', ({ spellId, x, y } = {}) => {
+  // ── Sorts actifs ──── DÉSACTIVÉS ──
+  // Les sorts ont été remplacés par des passifs / unit unlocks dans l'arbre tech.
+  // Les unités boss (élémentaire, ange, dragon, avatar divin) se produisent
+  // désormais via spawnUnit normal (gold + mana/foi + population).
+  // L'event reste en place pour compat client mais ne fait rien.
+  socket.on('castSpell', () => { /* no-op : sorts supprimés */ });
+  socket.on('_legacyCastSpell_disabled', ({ spellId, x, y } = {}) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
     const spell = SPELLS[spellId];
@@ -2365,9 +2371,14 @@ setInterval(() => {
       if (unit.attackTargetType === 'unit') {
         target = gameState.units[unit.attackTargetId];
         if (!target || toDelete.has(target.id)) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        // Inquisiteur : double dmg sur magique/undead
+        // Inquisiteur : ×2 dmg vs magique/undead, ×3 si tech 'purifying_light' débloquée
         if (unit.type === 'inquisitor' && MAGIC_UNDEAD.has(target.type)) {
-          uDamage *= 2;
+          const owner = gameState.players[unit.ownerId];
+          uDamage *= hasTech(owner, 'purifying_light') ? 3 : 2;
+        }
+        // Tech 'pyromancy' : +30% dmg pour unités magie/undead du joueur
+        if (MAGIC_UNDEAD.has(unit.type) && hasTech(gameState.players[unit.ownerId], 'pyromancy')) {
+          uDamage *= 1.3;
         }
         // Catapulte/Canon : pénalité contre unités (gros vs bâtiments seulement)
         if ((unit.type === 'catapult' || unit.type === 'cannon') && target.type) {
