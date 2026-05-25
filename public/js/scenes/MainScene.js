@@ -431,6 +431,13 @@ class MainScene extends Phaser.Scene {
     // ── Input ─────────────────────────────────────────────────────
 
     this.input.on('pointerdown', (pointer, currentlyOver) => {
+      // Ferme BuildingInfoPanel si on clique ailleurs que sur un bâtiment
+      // (le sprite bâtiment ré-ouvrira son panel s'il est cliqué)
+      if (typeof BuildingInfoPanel !== 'undefined' && BuildingInfoPanel.isVisible
+          && BuildingInfoPanel.isVisible()) {
+        const clickedBuilding = currentlyOver.find(go => go._buildingId);
+        if (!clickedBuilding) BuildingInfoPanel.close();
+      }
       // Mode build prioritaire sur tous les autres clics
       if (typeof BuildMode !== 'undefined' && BuildMode.isActive()) {
         if (pointer.button === 0) {
@@ -700,14 +707,16 @@ class MainScene extends Phaser.Scene {
         bg._unitOwnerId = b.ownerId;
         bg._buildingId = b.id;
 
-        // Click handler universel : ouvre le BuildingInfoPanel (HP, portée, effets, vendre)
-        // En mode TUNING, le DebugPanel intercepte avant via _unitType.
+        // Click handler universel : LEFT click ouvre le BuildingInfoPanel.
+        // RIGHT click traverse vers le world handler (pour attaquer un bâtiment ennemi).
         if (bg.setInteractive) {
           bg.setInteractive();
           bg.on('pointerover', () => this.input.setDefaultCursor('pointer'));
           bg.on('pointerout',  () => this.input.setDefaultCursor('default'));
-          bg.on('pointerdown', () => {
-            // Si mode TUNING actif, laisse DebugPanel gérer (return tôt)
+          bg.on('pointerdown', (pointer) => {
+            // Right click → ne bloque pas, laisse passer au world handler pour attaque
+            if (pointer && pointer.button !== 0) return;
+            // Mode TUNING actif → laisse DebugPanel gérer
             if (typeof DebugPanel !== 'undefined' && DebugPanel.getMode && DebugPanel.getMode() === 'tuning') return;
             if (typeof BuildingInfoPanel !== 'undefined') {
               const fresh = (Network.getState().buildings || []).find(bb => bb.id === b.id);
@@ -1696,8 +1705,10 @@ class MainScene extends Phaser.Scene {
     // Taille cohérente : flèches/balles ~48px de long (lourds 56). Minimum 14px de
     // hauteur pour rester clairement visible.
     const targetLen = HEAVY.has(projKey) ? 56 : 48;
+    // Depth 110 : AU-DESSUS du fog of war (depth 100) — sinon les projectiles
+    // entre 2 unités ennemies dans le fog sont masqués par l'overlay noir
     const proj = this.add.sprite(sx, sy, projKey)
-      .setRotation(angle).setDepth(56);
+      .setRotation(angle).setDepth(110);
     let natW = 32, natH = 12;
     try {
       const tex = this.textures.get(projKey).getSourceImage();
@@ -1722,7 +1733,7 @@ class MainScene extends Phaser.Scene {
           proj_magic_bolt: 0x8b5cf6, proj_inquisitor_hammer: 0xfde68a, proj_divine_beam: 0xfef9c3,
         };
         const flashColor = impactColors[projKey] || 0xffffff;
-        const flash = this.add.circle(tx, ty, 16, flashColor, 0.85).setDepth(54);
+        const flash = this.add.circle(tx, ty, 16, flashColor, 0.85).setDepth(110);
         this.tweens.add({
           targets: flash, scale: { from: 0.5, to: 1.8 }, alpha: { from: 0.85, to: 0 },
           duration: 220, onComplete: () => flash.destroy(),

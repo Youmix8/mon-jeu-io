@@ -2201,8 +2201,14 @@ setInterval(() => {
     const baseSpeed = unit.speed || 80;
     const isFrozen  = unit.frozenUntil  && unit.frozenUntil  > nowMs;
     const isFeared  = unit.fearedUntil  && unit.fearedUntil  > nowMs;
+    // Bonus tech : Téléportation/Mobilité magique → +15% vitesse toutes unités
+    const owner = gameState.players[unit.ownerId];
+    let speedBonus = 1.0;
+    if (owner && hasTech(owner, 'teleportation')) speedBonus *= 1.15;
+    // Bonus tech 'lightning' (magic_speed_vision) → +25% vitesse pour unités magie
+    if (owner && hasTech(owner, 'lightning') && MAGIC_UNDEAD.has(unit.type)) speedBonus *= 1.25;
     // Frozen : 0.3× (gel magique) — Feared : 0.5× (aura god_avatar)
-    const speedMult = isFrozen ? 0.3 : (isFeared ? 0.5 : 1.0);
+    const speedMult = isFrozen ? 0.3 : (isFeared ? 0.5 : speedBonus);
     const uSpeed    = baseSpeed * speedMult;
     const uRange = unit.range || 80;
     const step = uSpeed / TICK_RATE;
@@ -2419,6 +2425,11 @@ setInterval(() => {
     // Inquisiteur : ×2 dmg vs unités magiques/undead
     const effectiveRange = uRange - UNIT_RADIUS;
 
+    // Tech 'crossbows' : archer +50% dmg, -20% portée
+    if (unit.type === 'archer' && hasTech(gameState.players[unit.ownerId], 'crossbows')) {
+      uDamage *= 1.5;
+    }
+
     if (unit.attackTargetId !== null) {
       let target, inRange = false;
       if (unit.attackTargetType === 'unit') {
@@ -2432,6 +2443,11 @@ setInterval(() => {
         // Tech 'pyromancy' : +30% dmg pour unités magie/undead du joueur
         if (MAGIC_UNDEAD.has(unit.type) && hasTech(gameState.players[unit.ownerId], 'pyromancy')) {
           uDamage *= 1.3;
+        }
+        // Tech 'unwavering_faith' (côté CIBLE) : -25% dmg reçus si l'attaquant est magie/undead
+        if (MAGIC_UNDEAD.has(unit.type) && target.ownerId
+            && hasTech(gameState.players[target.ownerId], 'unwavering_faith')) {
+          uDamage *= 0.75;
         }
         // Catapulte/Canon : pénalité contre unités (gros vs bâtiments seulement)
         if ((unit.type === 'catapult' || unit.type === 'cannon') && target.type) {
@@ -2453,12 +2469,31 @@ setInterval(() => {
       }
       if (!inRange) continue;
 
+      // Tech 'crusade' : +25% dégâts sur HDV / bâtiments / villages
+      if ((unit.attackTargetType === 'hdv' || unit.attackTargetType === 'building'
+           || unit.attackTargetType === 'village')
+          && hasTech(gameState.players[unit.ownerId], 'crusade')) {
+        uDamage *= 1.25;
+      }
+
       unit.lastAttackTime = nowMs;
       target.hp = Math.max(0, target.hp - uDamage);
       // Fire elemental : tag pour AoE splash (traité en section 3.6)
       if (unit.type === 'fire_elemental' && unit.attackTargetType === 'unit') {
         unit._aoeAroundTarget = { x: target.x, y: target.y };
       }
+      // Riposte automatique : si la cible est une unité capable d'attaquer et n'a
+      // pas de cible, elle prend son attaquant comme cible (et passe en mode 'attack'
+      // pour pouvoir sortir de sa zone de défense si nécessaire).
+      // → fix le bug "soldats restent passifs quand un mage les tire à distance"
+      if (unit.attackTargetType === 'unit' && target.attackTargetId === null
+          && (target.damage || 0) > 0 && target.hp > 0) {
+        target.attackTargetId   = unit.id;
+        target.attackTargetType = 'unit';
+        target.targetX = null; target.targetY = null;
+        if (target.mode === 'defend') target.mode = 'attack';
+      }
+
       // Inclut attacker/target X/Y pour que le client puisse afficher le projectile
       // même si l'unité (attaquant OU cible) est filtrée par fog of war
       const attackEntry = {
@@ -2522,6 +2557,13 @@ setInterval(() => {
       if (unit.type === 'fire_elemental' && bestType === 'unit') {
         unit._aoeAroundTarget = { x: best.x, y: best.y };
       }
+      // Riposte automatique pour les unités attaquées en IDLE auto-attack
+      if (bestType === 'unit' && best.attackTargetId === null && (best.damage || 0) > 0 && best.hp > 0) {
+        best.attackTargetId   = unit.id;
+        best.attackTargetType = 'unit';
+        best.targetX = null; best.targetY = null;
+        if (best.mode === 'defend') best.mode = 'attack';
+      }
       const attackEntry = {
         attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type,
         targetType: bestType, targetId: best.id,
@@ -2561,6 +2603,13 @@ setInterval(() => {
     if (bestTarget) {
       b.lastAttackTime = nowMs;
       bestTarget.hp = Math.max(0, bestTarget.hp - def.damage);
+      // Riposte : l'unité touchée par la tour la prend pour cible si elle est libre
+      if (bestTarget.attackTargetId === null && (bestTarget.damage || 0) > 0 && bestTarget.hp > 0) {
+        bestTarget.attackTargetId   = b.id;
+        bestTarget.attackTargetType = 'building';
+        bestTarget.targetX = null; bestTarget.targetY = null;
+        if (bestTarget.mode === 'defend') bestTarget.mode = 'attack';
+      }
       const entry = { attackerId: b.id, attackerType: 'building', attackerBuildingType: b.type, targetType: 'unit', targetId: bestTarget.id, bx: b.x, by: b.y };
       if (bestTarget.hp <= 0) {
         toDelete.add(bestTarget.id);
@@ -2765,6 +2814,7 @@ setInterval(() => {
 
     // Aura HDV "Prière" : +1 HP/s à chaque unité du joueur à <200 d'un HDV propre
     // + Auto-regen Chevalier sacré (+5 HP/s) + Ange (+3 HP/s aux alliés rayon 120)
+    // + Tech 'blessing' : +0.5 HP/s à TOUTES les unités du joueur
     // Pré-calcule les anges par propriétaire pour l'aura
     const angelsByOwner = {};
     for (const u of Object.values(gameState.units)) {
@@ -2781,8 +2831,10 @@ setInterval(() => {
       let heal = 0;
       if (u.type === 'holy_knight') heal += 5;
       const owner = gameState.players[u.ownerId];
-      if (owner && !owner.eliminated && hasTech(owner, 'prayer')) {
-        if (Math.hypot(u.x - owner.x, u.y - owner.y) <= 200) heal += 1;
+      if (owner && !owner.eliminated) {
+        if (hasTech(owner, 'prayer') && Math.hypot(u.x - owner.x, u.y - owner.y) <= 200) heal += 1;
+        // Tech 'blessing' : +0.5 HP/s à toutes les unités du joueur
+        if (hasTech(owner, 'blessing')) heal += 0.5;
       }
       // Aura ange : +3 HP/s aux alliés dans rayon 120
       const angels = angelsByOwner[u.ownerId];
