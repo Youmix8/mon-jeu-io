@@ -405,6 +405,42 @@ function isWaterTile(tx, ty) {
 function isWaterAt(x, y) {
   return isWaterTile(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
 }
+// ────────── Pathfinding simple — contournement de l'eau ──────────
+// Pour les unités terrestres : si la trajectoire directe traverse trop d'eau,
+// on calcule un waypoint intermédiaire pour contourner le lac/rivière.
+// Algorithme simple (suffisant pour des grands plans d'eau, pas pour des labyrinthes) :
+//   1. Compte les tiles d'eau sur le segment direct (raycast 30px par sample)
+//   2. Si >3 tiles d'eau croisées → essaie un waypoint perpendiculaire au milieu
+//   3. Offsets progressifs (200, 400, 600, 800, 1200 px de chaque côté)
+function pathHasWaterCount(fromX, fromY, toX, toY) {
+  const dist = Math.hypot(toX - fromX, toY - fromY);
+  const steps = Math.max(5, Math.floor(dist / 30));
+  let waterCount = 0;
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    if (isWaterAt(fromX + (toX - fromX) * t, fromY + (toY - fromY) * t)) waterCount++;
+  }
+  return waterCount;
+}
+function findWaypointAroundWater(fromX, fromY, toX, toY) {
+  const mx = (fromX + toX) / 2, my = (fromY + toY) / 2;
+  const dx = toX - fromX, dy = toY - fromY;
+  const len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len, py = dx / len; // unité perpendiculaire
+  for (const offset of [200, 400, 600, 800, 1200]) {
+    for (const sign of [1, -1]) {
+      const wx = mx + px * sign * offset;
+      const wy = my + py * sign * offset;
+      if (wx < 50 || wx > MAP_WIDTH - 50 || wy < 50 || wy > MAP_HEIGHT - 50) continue;
+      if (isWaterAt(wx, wy)) continue;
+      if (pathHasWaterCount(fromX, fromY, wx, wy) > 2) continue;
+      if (pathHasWaterCount(wx, wy, toX, toY) > 2) continue;
+      return { x: Math.round(wx), y: Math.round(wy) };
+    }
+  }
+  return null;
+}
+
 // Cherche une position de spawn libre (non-eau) autour de (cx, cy).
 // Pour unités terrestres : essaie 16 angles, retourne la 1ère position grass.
 // Pour bateaux (preferWater=true) : retourne la 1ère position water.
@@ -1627,6 +1663,15 @@ io.on('connection', (socket) => {
       unit.attackTargetId   = null;
       unit.attackTargetType = null;
       unit.mode = 'move';
+      // Pathfinding eau : calcule un waypoint de contournement si lac sur la trajectoire
+      unit.waypoint = null;
+      if (unit.type !== 'boat') {
+        const waterCount = pathHasWaterCount(unit.x, unit.y, cx, cy);
+        if (waterCount > 3) {
+          const wp = findWaypointAroundWater(unit.x, unit.y, cx, cy);
+          if (wp) unit.waypoint = wp;
+        }
+      }
     }
   });
 
@@ -2189,9 +2234,17 @@ setInterval(() => {
         skipPlayerId = unit.attackTargetId;
       }
     } else if (unit.targetX !== null) {
-      goalX = unit.targetX; goalY = unit.targetY;
-      const dist = Math.hypot(goalX - unit.x, goalY - unit.y);
-      if (dist <= step) {
+      // Waypoint actif (contournement d'eau) → on vise le waypoint d'abord
+      if (unit.waypoint) {
+        goalX = unit.waypoint.x; goalY = unit.waypoint.y;
+        if (Math.hypot(unit.x - goalX, unit.y - goalY) < 40) {
+          unit.waypoint = null; // waypoint atteint → cap sur la vraie cible
+        }
+      } else {
+        goalX = unit.targetX; goalY = unit.targetY;
+      }
+      const dist = Math.hypot(unit.targetX - unit.x, unit.targetY - unit.y);
+      if (!unit.waypoint && dist <= step) {
         unit.x = unit.targetX; unit.y = unit.targetY;
         unit.targetX = null;   unit.targetY = null;
         // Colon arrivé à destination : fonde un village

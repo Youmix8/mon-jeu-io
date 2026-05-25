@@ -219,7 +219,7 @@ const TECH_TREE = {
 
   lightning: {
     id: 'lightning', axis: 'magic', tier: 3, name: 'Foudre', icon: '⚡',
-    desc: 'Eclair : unites magie +25% vitesse + vision +30%.'à 5 cibles proches.',
+    desc: 'Eclair : unites magie +25% vitesse + vision +30%.',
     cost: 60, requires: ['pyromancy'],
     unlocks: { passives: ['magic_speed_vision'] },
     pos: pos('magic', 3, -1.2),
@@ -248,7 +248,7 @@ const TECH_TREE = {
   },
   illusion: {
     id: 'illusion', axis: 'magic', tier: 4, name: 'Illusion', icon: '👤',
-    desc: 'Illusion : tes unites magiques +15% HP max.'une unité (0 dmg, mêmes HP).',
+    desc: 'Illusion : tes unites magiques +15% HP max.',
     cost: 80, requires: ['teleportation'],
     unlocks: { passives: ['magic_hp_boost'] },
     pos: pos('magic', 4, 0),
@@ -277,7 +277,7 @@ const TECH_TREE = {
   },
   time_mastery: {
     id: 'time_mastery', axis: 'magic', tier: 5, name: 'Maîtrise du temps', icon: '⏳',
-    desc: 'Maitrise du temps : cooldown d attaque de tes unites magie -20%.'une zone pendant 8s (alliées et ennemies).',
+    desc: 'Maitrise du temps : cooldown d attaque de tes unites magie -20%.',
     cost: 180, requires: ['illusion', 'curses'],
     unlocks: { passives: ['magic_atk_speed'] },
     pos: pos('magic', 5, 1),
@@ -399,7 +399,7 @@ const TECH_TREE = {
 
   divine_invocation: {
     id: 'divine_invocation', axis: 'religion', tier: 6, name: 'Invocation divine', icon: '👁',
-    desc: 'Debloque la production de l Avatar divin (1500 HP, peur, AoE 60).'Avatar du Dieu (HP 1500, dmg 60 AoE, peur en zone). 1× par partie.',
+    desc: 'Debloque la production de l Avatar divin (1500 HP, peur, AoE 60).',
     cost: 280, requires: ['guardian_angel', 'unwavering_faith'],
     unlocks: { units: ['god_avatar'] },
     pos: pos('religion', 6, 0),
