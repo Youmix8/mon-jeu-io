@@ -94,15 +94,20 @@ const HdvPanel = (() => {
     const cfg = Network.getConfig();
     if (!cfg.unitTypes || !cfg.techTree) return false;
 
-    prodEl.innerHTML = Object.values(cfg.unitTypes).map(u => `
+    prodEl.innerHTML = Object.values(cfg.unitTypes).map(u => {
+      const extraCost = u.manaCost ? ` + ${u.manaCost} 🔮`
+                      : u.faithCost ? ` + ${u.faithCost} 🙏`
+                      : '';
+      const popCost = u.populationCost || 1;
+      return `
       <div class="unit-card" data-unit-id="${u.id}">
         <div class="unit-card-icon">${u.icon}</div>
         <div class="unit-card-name">${u.name}</div>
-        <div class="unit-card-stats">❤️ ${u.hp} &nbsp; 🗡 ${u.damage} &nbsp; 🎯 ${u.range}</div>
-        <div class="unit-card-cost">${u.cost} 💰</div>
+        <div class="unit-card-stats">❤️ ${u.hp} &nbsp; 🗡 ${u.damage} &nbsp; 🎯 ${u.range} &nbsp; 👥 ${popCost}</div>
+        <div class="unit-card-cost">${u.cost} 💰${extraCost}</div>
         <div class="locked-note" data-role="lock"></div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
 
     const techList = Object.values(cfg.techTree).sort((a, b) => a.tier - b.tier || a.id.localeCompare(b.id));
     if (techEl) techEl.innerHTML = techList.map(t => `
@@ -180,7 +185,11 @@ const HdvPanel = (() => {
       const u = cfg.unitTypes[card.dataset.unitId];
       if (!u) continue;
       const unlocked   = !u.requiresTech || (me.unlockedTechs || []).includes(u.requiresTech);
-      const affordable = me.gold >= u.cost;
+      const popCost = u.populationCost || 1;
+      const popOk = (me.populationUsed || 0) + popCost <= (me.populationMax || 8);
+      const manaOk  = !u.manaCost  || (me.mana  || 0) >= u.manaCost;
+      const faithOk = !u.faithCost || (me.faith || 0) >= u.faithCost;
+      const affordable = me.gold >= u.cost && manaOk && faithOk && popOk;
       card.classList.toggle('locked', !unlocked);
       card.classList.toggle('poor', unlocked && !affordable);
       const lockNote = card.querySelector('[data-role="lock"]');

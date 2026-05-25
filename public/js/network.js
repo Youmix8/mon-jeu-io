@@ -98,6 +98,10 @@ const Network = (() => {
         if (elPr)   elPr.textContent   = Math.floor(me.researchPoints || 0);
         if (elMana) elMana.textContent = Math.floor(me.mana  || 0);
         if (elFaith)elFaith.textContent= Math.floor(me.faith || 0);
+        const elPop    = document.getElementById('my-pop');
+        const elPopMax = document.getElementById('my-pop-max');
+        if (elPop)    elPop.textContent    = Math.floor(me.populationUsed || 0);
+        if (elPopMax) elPopMax.textContent = Math.floor(me.populationMax || 8);
 
         // Affichage conditionnel mana/faith selon bâtiments possédés
         const MAGIC_BLDGS = new Set(['sanctum', 'mage_tower']);

@@ -55,58 +55,62 @@ const VISION_UNIT = 240;
 
 // ────────── Tech tree, types d'unités, niveaux HDV ──────────
 
+// Système de population : chaque unité occupe un nombre de "places" de pop.
+// Le total ne peut dépasser le populationMax du joueur (calculé via HDV+villages).
+// Les boss (dragon, god_avatar) coûtent 10-15 → on n'en a qu'1-2 par partie max.
+
 const UNIT_TYPES = {
   // Unité de base — toujours disponible
-  soldier:       { id: 'soldier',       name: 'Soldat',          cost: 10,  hp: 50,  speed:  80, range:  35, damage:  5,  requiresTech: null,
+  soldier:       { id: 'soldier',       name: 'Soldat',          cost: 10,  manaCost: 0,  faithCost: 0,  populationCost: 1,  hp: 50,  speed:  80, range:  35, damage:  5,  requiresTech: null,
                    icon: '⚔️', desc: 'Polyvalent. Disponible dès le départ.' },
   // Unités Science Tier 2-6
-  archer:        { id: 'archer',        name: 'Archer',          cost: 15,  hp: 30,  speed:  80, range: 250, damage:  4,  requiresTech: 'archery',
+  archer:        { id: 'archer',        name: 'Archer',          cost: 18,  manaCost: 0,  faithCost: 0,  populationCost: 1,  hp: 30,  speed:  80, range: 250, damage:  4,  requiresTech: 'archery',
                    icon: '🏹', desc: 'Longue portée mais fragile.' },
-  knight:        { id: 'knight',        name: 'Chevalier',       cost: 25,  hp: 80,  speed: 140, range:  35, damage:  8,  requiresTech: 'riding',
+  knight:        { id: 'knight',        name: 'Chevalier',       cost: 30,  manaCost: 0,  faithCost: 0,  populationCost: 2,  hp: 80,  speed: 140, range:  35, damage:  8,  requiresTech: 'riding',
                    icon: '🐎', desc: 'Lourd et rapide, gros dégâts au contact.' },
-  catapult:      { id: 'catapult',      name: 'Catapulte',       cost: 60,  hp: 70,  speed:  50, range: 220, damage: 25,  requiresTech: 'siege_engineering',
+  catapult:      { id: 'catapult',      name: 'Catapulte',       cost: 70,  manaCost: 0,  faithCost: 0,  populationCost: 3,  hp: 70,  speed:  50, range: 220, damage: 25,  requiresTech: 'siege_engineering',
                    icon: '⚙️', desc: 'Lente, dégâts massifs sur bâtiments.' },
-  settler:       { id: 'settler',       name: 'Colon',           cost: 80,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'colonization',
+  settler:       { id: 'settler',       name: 'Colon',           cost: 90,  manaCost: 0,  faithCost: 0,  populationCost: 2,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'colonization',
                    icon: '🚩', desc: 'Fonde un village au point de destination.' },
-  heavy_knight:  { id: 'heavy_knight',  name: 'Chevalier lourd', cost: 50,  hp: 150, speed: 100, range:  35, damage: 12,  requiresTech: 'steel_forge',
+  heavy_knight:  { id: 'heavy_knight',  name: 'Chevalier lourd', cost: 60,  manaCost: 0,  faithCost: 0,  populationCost: 2,  hp: 150, speed: 100, range:  35, damage: 12,  requiresTech: 'steel_forge',
                    icon: '🛡', desc: 'Tank lourd, gros dégâts au contact.' },
-  crossbowman:   { id: 'crossbowman',   name: 'Arbalétrier',     cost: 25,  hp: 35,  speed:  75, range: 200, damage:  7,  requiresTech: 'crossbows',
+  crossbowman:   { id: 'crossbowman',   name: 'Arbalétrier',     cost: 30,  manaCost: 0,  faithCost: 0,  populationCost: 1,  hp: 35,  speed:  75, range: 200, damage:  7,  requiresTech: 'crossbows',
                    icon: '🎯', desc: 'Archer amélioré. Plus de dégâts, moins de portée.' },
-  general:       { id: 'general',       name: 'Général',         cost: 120, hp: 120, speed: 110, range:  40, damage: 10,  requiresTech: 'war_academy',
+  general:       { id: 'general',       name: 'Général',         cost: 140,  manaCost: 0,  faithCost: 0,  populationCost: 3, hp: 120, speed: 110, range:  40, damage: 10,  requiresTech: 'war_academy',
                    icon: '🎖', desc: 'Aura +25% dégâts aux unités proches (rayon 200).' },
-  cannon:        { id: 'cannon',        name: 'Canon',           cost: 100, hp: 60,  speed:  40, range: 280, damage: 35,  requiresTech: 'gunpowder',
+  cannon:        { id: 'cannon',        name: 'Canon',           cost: 120,  manaCost: 0,  faithCost: 0,  populationCost: 3, hp: 60,  speed:  40, range: 280, damage: 35,  requiresTech: 'gunpowder',
                    icon: '💣', desc: 'Très lent, dégâts énormes à longue portée.' },
-  elite_guard:   { id: 'elite_guard',   name: 'Garde d\'élite',  cost: 80,  hp: 200, speed: 110, range:  35, damage: 20,  requiresTech: 'renaissance',
+  elite_guard:   { id: 'elite_guard',   name: 'Garde d\'élite',  cost: 100, manaCost: 0,  faithCost: 0,  populationCost: 3,  hp: 200, speed: 110, range:  35, damage: 20,  requiresTech: 'renaissance',
                    icon: '👑', desc: 'L\'élite militaire. Le meilleur soldat du jeu.' },
   // Unités Magie
-  wizard:        { id: 'wizard',        name: 'Sorcier',         cost: 50,  hp: 40,  speed:  80, range: 200, damage: 10,  requiresTech: 'mage_tower',
+  wizard:        { id: 'wizard',        name: 'Sorcier',         cost: 50,  manaCost: 30,  faithCost: 0,  populationCost: 1,  hp: 40,  speed:  80, range: 200, damage: 10,  requiresTech: 'mage_tower',
                    icon: '🧙', desc: 'Dégâts magiques à distance, ignore les armures.' },
-  necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 80,  hp: 50,  speed:  80, range: 150, damage:  6,  requiresTech: 'necromancy',
+  necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 80,  manaCost: 50,  faithCost: 0,  populationCost: 2,  hp: 50,  speed:  80, range: 150, damage:  6,  requiresTech: 'necromancy',
                    icon: '💀', desc: 'Attaque magique à distance. (Résurrection : à venir.)' },
-  skeleton:      { id: 'skeleton',      name: 'Squelette',       cost: 0,   hp: 30,  speed:  80, range:  30, damage:  5,  requiresTech: null,
+  skeleton:      { id: 'skeleton',      name: 'Squelette',       cost: 15,  manaCost: 10,  faithCost: 0,  populationCost: 1,   hp: 30,  speed:  80, range:  30, damage:  5,  requiresTech: null,
                    icon: '☠️', desc: 'Invoqué par le Nécromancien. Durée 60s.' },
-  lich:          { id: 'lich',          name: 'Liche',           cost: 150, hp: 120, speed:  80, range: 180, damage: 15,  requiresTech: 'lich',
+  lich:          { id: 'lich',          name: 'Liche',           cost: 150,  manaCost: 80,  faithCost: 0,  populationCost: 4, hp: 120, speed:  80, range: 180, damage: 15,  requiresTech: 'lich',
                    icon: '☠️', desc: 'Nécromancien suprême : longue portée + dégâts massifs.' },
   // Unités Religion
-  pilgrim:       { id: 'pilgrim',       name: 'Pèlerin',         cost: 20,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'pilgrimage',
+  pilgrim:       { id: 'pilgrim',       name: 'Pèlerin',         cost: 20,  manaCost: 0,  faithCost: 10,  populationCost: 1,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'pilgrimage',
                    icon: '🚶', desc: 'Ne combat pas. +0.5 foi/sec à son propriétaire.' },
-  inquisitor:    { id: 'inquisitor',    name: 'Inquisiteur',     cost: 30,  hp: 60,  speed:  90, range:  90, damage:  8,  requiresTech: 'inquisition',
+  inquisitor:    { id: 'inquisitor',    name: 'Inquisiteur',     cost: 30,  manaCost: 0,  faithCost: 15,  populationCost: 2,  hp: 60,  speed:  90, range:  90, damage:  8,  requiresTech: 'inquisition',
                    icon: '🗡', desc: 'Double dégâts vs unités magiques/undead.' },
-  holy_knight:   { id: 'holy_knight',   name: 'Chevalier sacré', cost: 70,  hp: 130, speed: 110, range:  35, damage: 14,  requiresTech: 'sacred_order',
+  holy_knight:   { id: 'holy_knight',   name: 'Chevalier sacré', cost: 70,  manaCost: 0,  faithCost: 30,  populationCost: 2,  hp: 130, speed: 110, range:  35, damage: 14,  requiresTech: 'sacred_order',
                    icon: '🛡', desc: 'Combattant sacré. +5 HP/sec auto-regen.' },
   // ── Nouvelles unités étape 3 (summoned/boss) ──
-  skeleton_knight: { id: 'skeleton_knight', name: 'Cavalier squelette', cost: 0, hp: 60, speed: 80, range: 35, damage: 8, requiresTech: null,
+  skeleton_knight: { id: 'skeleton_knight', name: 'Cavalier squelette', cost: 30,  manaCost: 15,  faithCost: 0,  populationCost: 2, hp: 60, speed: 80, range: 35, damage: 8, requiresTech: null,
                      icon: '☠️', desc: 'Invoqué par la Liche au kill. Durée 60s.' },
-  fire_elemental:  { id: 'fire_elemental',  name: 'Élémentaire de feu', cost: 0, hp: 250, speed: 80, range: 40, damage: 25, requiresTech: null,
+  fire_elemental:  { id: 'fire_elemental',  name: 'Élémentaire de feu', cost: 100,  manaCost: 60,  faithCost: 0,  populationCost: 5, hp: 250, speed: 80, range: 40, damage: 25, requiresTech: null,
                      icon: '🔥', desc: 'Invocation. AoE rayon 40. Durée 60s.' },
-  arcane_dragon:   { id: 'arcane_dragon',   name: 'Dragon arcanique',   cost: 0, hp: 800, speed: 120, range: 250, damage: 40, requiresTech: null,
+  arcane_dragon:   { id: 'arcane_dragon',   name: 'Dragon arcanique',   cost: 250,  manaCost: 150,  faithCost: 0,  populationCost: 10, hp: 800, speed: 120, range: 250, damage: 40, requiresTech: null,
                      icon: '🐲', desc: 'Boss invoqué. Vole. Durée 60s.' },
-  angel:           { id: 'angel',           name: 'Ange',               cost: 0, hp: 300, speed: 100, range: 200, damage: 20, requiresTech: null,
+  angel:           { id: 'angel',           name: 'Ange',               cost: 100,  manaCost: 0,  faithCost: 70,  populationCost: 6, hp: 300, speed: 100, range: 200, damage: 20, requiresTech: null,
                      icon: '👼', desc: 'Vole. Aura soin +3 HP/s rayon 120. Durée 90s.' },
-  god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 0, hp: 1500, speed: 50, range: 60, damage: 60, requiresTech: null,
+  god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 250,  manaCost: 0,  faithCost: 150,  populationCost: 15, hp: 1500, speed: 50, range: 60, damage: 60, requiresTech: null,
                      icon: '🌟', desc: 'Boss. Aura peur (ennemis ralentis 50% rayon 400). AoE 60.' },
   // Bateau : se déplace UNIQUEMENT sur l'eau, produit depuis un Port
-  boat:            { id: 'boat',            name: 'Bateau',             cost: 80, hp: 100, speed: 100, range: 0,  damage: 0, requiresTech: 'marine',
+  boat:            { id: 'boat',            name: 'Bateau',             cost: 90,  manaCost: 0,  faithCost: 0,  populationCost: 1, hp: 100, speed: 100, range: 0,  damage: 0, requiresTech: 'marine',
                      icon: '⛵', desc: 'Va sur l\'eau uniquement. Produit depuis un Port.' },
 };
 
@@ -575,6 +579,31 @@ function hasTech(player, techId) {
   return player && Array.isArray(player.unlockedTechs) && player.unlockedTechs.includes(techId);
 }
 
+// ────────── Système de population ──────────
+// Pop max = 8 (base) + 3 par level HDV au-dessus de 1 + 2 par village possédé
+//          + 1 par level village au-dessus de 1
+// Pop utilisée = somme des populationCost des unités du joueur
+const BASE_POPULATION = 8;
+function getPopulationMax(player) {
+  let pop = BASE_POPULATION;
+  pop += Math.max(0, (player.hdvLevel || 1) - 1) * 3;
+  for (const v of gameState.villages) {
+    if (v.ownerId !== player.id || v.hp <= 0) continue;
+    pop += 2;
+    pop += Math.max(0, (v.level || 1) - 1);
+  }
+  return pop;
+}
+function getPopulationUsed(player) {
+  let used = 0;
+  for (const u of Object.values(gameState.units)) {
+    if (u.ownerId !== player.id) continue;
+    const def = UNIT_TYPES[u.type];
+    used += (def && def.populationCost) || 1;
+  }
+  return used;
+}
+
 // Citadelle : si la tech 'citadel' est débloquée, le HDV gagne 3× HP
 function recomputeHdvStats(player) {
   const lvl = HDV_LEVELS[player.hdvLevel - 1] || HDV_LEVELS[0];
@@ -670,6 +699,7 @@ function addBot() {
     activeSpells: [],
     allies: [], // ids des joueurs avec pacte de non-agression
     vision: HDV_LEVELS[0].vision,
+    populationUsed: 0, populationMax: BASE_POPULATION,
     botCooldown: 0,
   };
   gameState.players[botId] = botPlayer;
@@ -782,15 +812,22 @@ function botTick(bot) {
   }
 
   // 4. SPAWN UNITÉ ────────────────────────────────────────────────
-  // Préfère les unités haut tiers débloquées ; capé par army size pour éviter le spam.
+  // Préfère les unités haut tiers débloquées ; respect du cap de population.
   const myUnits = Object.values(gameState.units).filter(u => u.ownerId === bot.id);
-  if (myUnits.length < 40) { // anti-spam économique
+  const botPopUsed = getPopulationUsed(bot);
+  const botPopMax  = getPopulationMax(bot);
+  if (botPopUsed < botPopMax) {
     const preferOrder = ['heavy_knight', 'crossbowman', 'general', 'catapult', 'knight', 'archer', 'soldier'];
     for (const typeId of preferOrder) {
       const def = UNIT_TYPES[typeId];
       if (!unitTypeUnlocked(bot, typeId)) continue;
       if (bot.gold < def.cost) continue;
+      if (def.manaCost && (bot.mana || 0) < def.manaCost) continue;
+      if (def.faithCost && (bot.faith || 0) < def.faithCost) continue;
+      if (botPopUsed + (def.populationCost || 1) > botPopMax) continue;
       bot.gold -= def.cost;
+      if (def.manaCost)  bot.mana  = Math.max(0, (bot.mana  || 0) - def.manaCost);
+      if (def.faithCost) bot.faith = Math.max(0, (bot.faith || 0) - def.faithCost);
       bot.unitsCreated++;
       const pos = findFreeSpawnPos(bot.x, bot.y, 70 + Math.random() * 30, false);
       const unitId = `unit_${nextUnitId++}`;
@@ -1327,6 +1364,7 @@ io.on('connection', (socket) => {
     activeSpells: [],
     allies: [],
     vision: HDV_LEVELS[0].vision,
+    populationUsed: 0, populationMax: BASE_POPULATION,
   };
 
   gameState.players[socket.id] = player;
@@ -1374,8 +1412,25 @@ io.on('connection', (socket) => {
       socket.emit('spawnFailed', { reason: 'unit_locked' });
       return;
     }
+    // Check coûts : gold + mana (magie) ou foi (religion) selon l'unité
     if (p.gold < def.cost) {
       socket.emit('spawnFailed', { reason: 'not_enough_gold' });
+      return;
+    }
+    if (def.manaCost && (p.mana || 0) < def.manaCost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_mana' });
+      return;
+    }
+    if (def.faithCost && (p.faith || 0) < def.faithCost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_faith' });
+      return;
+    }
+    // Check population : refuse si la nouvelle unité ferait dépasser le cap
+    const popCost = def.populationCost || 1;
+    const popUsed = getPopulationUsed(p);
+    const popMax  = getPopulationMax(p);
+    if (popUsed + popCost > popMax) {
+      socket.emit('spawnFailed', { reason: 'population_cap', popUsed, popMax, popCost });
       return;
     }
 
@@ -1419,6 +1474,8 @@ io.on('connection', (socket) => {
     }
 
     p.gold -= def.cost;
+    if (def.manaCost)  p.mana  = Math.max(0, (p.mana  || 0) - def.manaCost);
+    if (def.faithCost) p.faith = Math.max(0, (p.faith || 0) - def.faithCost);
     p.unitsCreated++;
     const unitId = `unit_${nextUnitId++}`;
 
@@ -1787,7 +1844,23 @@ io.on('connection', (socket) => {
       socket.emit('spawnFailed', { reason: 'not_enough_gold' });
       return;
     }
+    if (def.manaCost && (p.mana || 0) < def.manaCost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_mana' });
+      return;
+    }
+    if (def.faithCost && (p.faith || 0) < def.faithCost) {
+      socket.emit('spawnFailed', { reason: 'not_enough_faith' });
+      return;
+    }
+    // Check population
+    const popCost = def.populationCost || 1;
+    if (getPopulationUsed(p) + popCost > getPopulationMax(p)) {
+      socket.emit('spawnFailed', { reason: 'population_cap' });
+      return;
+    }
     p.gold -= def.cost;
+    if (def.manaCost)  p.mana  = Math.max(0, (p.mana  || 0) - def.manaCost);
+    if (def.faithCost) p.faith = Math.max(0, (p.faith || 0) - def.faithCost);
     p.unitsCreated++;
     const pos = findFreeSpawnPos(v.x, v.y, 55 + Math.random() * 25, false);
     const unitId = `unit_${nextUnitId++}`;
@@ -2621,6 +2694,9 @@ setInterval(() => {
       p.researchPoints  = (p.researchPoints || 0) + prRate;
       p.mana            = Math.min(200, (p.mana  || 0) + manaRate);  // cap mana à 200
       p.faith           = Math.min(200, (p.faith || 0) + faithRate); // cap foi à 200
+      // Population (synchro vers le client)
+      p.populationUsed = getPopulationUsed(p);
+      p.populationMax  = getPopulationMax(p);
     }
 
     // Aura HDV "Prière" : +1 HP/s à chaque unité du joueur à <200 d'un HDV propre

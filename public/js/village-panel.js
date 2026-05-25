@@ -162,7 +162,11 @@ const VillagePanel = (() => {
       const lvlAllowsType = allowedAll
         ? (!u.requiresTech || (me.unlockedTechs || []).includes(u.requiresTech))
         : (allowedList && allowedList.includes(u.id));
-      const affordable = me.gold >= u.cost;
+      const popCost = u.populationCost || 1;
+      const popOk = (me.populationUsed || 0) + popCost <= (me.populationMax || 8);
+      const manaOk  = !u.manaCost  || (me.mana  || 0) >= u.manaCost;
+      const faithOk = !u.faithCost || (me.faith || 0) >= u.faithCost;
+      const affordable = me.gold >= u.cost && manaOk && faithOk && popOk;
       card.classList.toggle('locked', !lvlAllowsType);
       card.classList.toggle('poor', lvlAllowsType && !affordable);
       const lockNote = card.querySelector('[data-role="lock"]');
