@@ -174,8 +174,14 @@ const Network = (() => {
     });
 
     socket.on('techUnlocked', (data) => {
+      // Update local state IMMÉDIATEMENT pour que refresh() voit la nouvelle tech
+      // (sans attendre le prochain broadcast gameState — sinon décalage visible)
+      if (data.playerId === myId && state.players && state.players[myId]) {
+        const me = state.players[myId];
+        me.unlockedTechs = me.unlockedTechs || [];
+        if (!me.unlockedTechs.includes(data.techId)) me.unlockedTechs.push(data.techId);
+      }
       if (onTechUnlockedCallback) onTechUnlockedCallback(data);
-      // Rafraîchit l'arbre s'il est ouvert
       if (typeof TechTreeOverlay !== 'undefined' && TechTreeOverlay.isOpen()) TechTreeOverlay.refresh();
     });
 

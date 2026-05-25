@@ -379,13 +379,15 @@ class MainScene extends Phaser.Scene {
       const state = Network.getState();
 
       // ── Résoudre la position de la cible ──
+      // Si la cible est filtrée par fog → fallback sur data.targetX/Y serveur
+      // → permet de voir les projectiles même quand la cible n'est pas visible localement
       let tx, ty;
       if (data.targetType === 'unit') {
         const t = state.units && state.units[data.targetId];
-        if (!t) return;
-        tx = t.x; ty = t.y;
-        this._flashUnit(data.targetId);
-        if (data.killed) {
+        if (t) { tx = t.x; ty = t.y; this._flashUnit(data.targetId); }
+        else if (data.targetX != null) { tx = data.targetX; ty = data.targetY; }
+        else return;
+        if (data.killed && t) {
           const owner = state.players[t.ownerId];
           const colorInt = owner
             ? Phaser.Display.Color.HexStringToColor(owner.color).color
@@ -409,10 +411,18 @@ class MainScene extends Phaser.Scene {
 
       // ── Résoudre l'attaquant (unité OU bâtiment) ──
       if (data.attackerType === 'building') {
-        // Flèche depuis le bâtiment (les coords sont fournies en bx, by)
+        // Projectile depuis le bâtiment : utilise le vrai PNG du projectile selon le type
         const ax = (data.bx != null) ? data.bx : tx;
         const ay = (data.by != null) ? data.by : ty;
-        this._playArrowAnimation(ax, ay, tx, ty);
+        // Détermine le type de projectile : tour/citadel = arrow, bombard = cannonball
+        const bldType = data.attackerBuildingType || 'tower';
+        const projKey = (bldType === 'bombard_tower') ? 'proj_cannonball'
+                      : 'proj_arrow';
+        if (this._hasAsset(projKey)) {
+          this._playProjectileAnim(ax, ay, tx, ty, projKey);
+        } else {
+          this._playArrowAnimation(ax, ay, tx, ty); // fallback legacy
+        }
       } else {
         // L'attaquant peut être filtré par fog → fallback sur attackerX/Y serveur
         let attacker = state.units && state.units[data.attackerId];
@@ -1499,11 +1509,17 @@ class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Bâtiment ennemi → attaque
+    // Bâtiment ennemi → attaque (tolérance basée sur la taille visuelle réelle du bâtiment)
+    const cfg = Network.getConfig();
     let hitEnemyBuilding = null;
     for (const b of (state.buildings || [])) {
       if (b.ownerId === myId) continue;
-      if (Math.abs(wx - b.x) <= 30 && Math.abs(wy - b.y) <= 30) { hitEnemyBuilding = b.id; break; }
+      const def = (cfg.buildingTypes || {})[b.type] || {};
+      const eCfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[b.type] : null;
+      const scaleMult = (eCfg && eCfg.scale) || 2.0;
+      // Tolérance = halfSize × scaleMult avec minimum 40px (clic généreux)
+      const tol = Math.max(40, ((def.halfSize || 22) * scaleMult));
+      if (Math.abs(wx - b.x) <= tol && Math.abs(wy - b.y) <= tol) { hitEnemyBuilding = b.id; break; }
     }
     if (hitEnemyBuilding) {
       Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyBuilding, 'building');

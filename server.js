@@ -1543,6 +1543,8 @@ io.on('connection', (socket) => {
     }
     console.log(`[${p.name}] tech débloquée : ${techId} (${node.cost} PR)`);
     io.emit('techUnlocked', { playerId: p.id, techId, name: node.name, icon: node.icon, axis: node.axis });
+    // Broadcast immédiat pour que le client voie le nouvel état sans attendre le tick
+    broadcastFilteredState();
   });
   // Legacy alias (ancien event, plus utilisé mais garde la compat)
   socket.on('researchTech', () => { /* no-op : remplacé par unlockTech */ });
@@ -2320,9 +2322,13 @@ setInterval(() => {
       if (unit.type === 'fire_elemental' && unit.attackTargetType === 'unit') {
         unit._aoeAroundTarget = { x: target.x, y: target.y };
       }
-      // Inclut attackerX/Y pour que le client puisse afficher le projectile même
-      // si l'attaquant est filtré par fog of war (sinon attacker introuvable client)
-      const attackEntry = { attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type, targetType: unit.attackTargetType, targetId: target.id };
+      // Inclut attacker/target X/Y pour que le client puisse afficher le projectile
+      // même si l'unité (attaquant OU cible) est filtrée par fog of war
+      const attackEntry = {
+        attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type,
+        targetType: unit.attackTargetType, targetId: target.id,
+        targetX: target.x, targetY: target.y,
+      };
 
       if (unit.attackTargetType === 'unit' && target.hp <= 0) {
         // Tag pour résurrection au kill (necro/lich) — voir section 3.6
@@ -2379,7 +2385,11 @@ setInterval(() => {
       if (unit.type === 'fire_elemental' && bestType === 'unit') {
         unit._aoeAroundTarget = { x: best.x, y: best.y };
       }
-      const attackEntry = { attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type, targetType: bestType, targetId: best.id };
+      const attackEntry = {
+        attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type,
+        targetType: bestType, targetId: best.id,
+        targetX: best.x, targetY: best.y,
+      };
 
       if (bestType === 'unit' && best.hp <= 0) {
         best._killedByType  = unit.type;
@@ -2414,7 +2424,7 @@ setInterval(() => {
     if (bestTarget) {
       b.lastAttackTime = nowMs;
       bestTarget.hp = Math.max(0, bestTarget.hp - def.damage);
-      const entry = { attackerId: b.id, attackerType: 'building', targetType: 'unit', targetId: bestTarget.id, bx: b.x, by: b.y };
+      const entry = { attackerId: b.id, attackerType: 'building', attackerBuildingType: b.type, targetType: 'unit', targetId: bestTarget.id, bx: b.x, by: b.y };
       if (bestTarget.hp <= 0) {
         toDelete.add(bestTarget.id);
         entry.killed = true;
@@ -2442,7 +2452,7 @@ setInterval(() => {
     if (best) {
       p.lastCitadelAttack = nowMs;
       best.hp = Math.max(0, best.hp - CIT_DMG);
-      const entry = { attackerId: 'citadel_' + p.id, attackerType: 'building', targetType: 'unit', targetId: best.id, bx: p.x, by: p.y };
+      const entry = { attackerId: 'citadel_' + p.id, attackerType: 'building', attackerBuildingType: 'citadel', targetType: 'unit', targetId: best.id, bx: p.x, by: p.y };
       if (best.hp <= 0) {
         toDelete.add(best.id);
         entry.killed = true;
