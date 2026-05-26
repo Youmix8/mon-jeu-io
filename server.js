@@ -296,6 +296,8 @@ const SPELLS = {
 
 // Unités "magie/undead" (cibles bonus de Lumière purificatrice + Inquisiteur)
 const MAGIC_UNDEAD = new Set(['wizard', 'necromancer', 'lich', 'skeleton', 'skeleton_knight', 'fire_elemental', 'arcane_dragon']);
+// Unités "religion" pour aura d'excommunication (religion_curse_aura)
+const RELIGION_UNITS = new Set(['holy_knight', 'inquisitor', 'pilgrim', 'paladin', 'angel', 'god_avatar']);
 
 // ────────── Villages neutres (modèle Polytopia : base secondaire conquérable) ──────────
 const VILLAGE_RADIUS         = 70;              // rayon de capture
@@ -709,6 +711,17 @@ function unitHpBonusFromVillages(_player) {
   return 0;
 }
 
+// Multiplicateur HP max appliqué au spawn selon les techs passives du propriétaire.
+// Centralise les bonus pour qu'ils s'appliquent depuis HDV / village / bot / spawn invoqué.
+function unitHpMult(player, typeId) {
+  let mult = 1;
+  // Passif 'magic_hp_boost' (illusion) : +15% HP max pour unités magie/undead
+  if (player && hasTech(player, 'illusion') && MAGIC_UNDEAD.has(typeId)) {
+    mult *= 1.15;
+  }
+  return mult;
+}
+
 // ────────── Bot IA ──────────
 let nextBotId = 1;
 const BOT_NAMES = ['Atlas', 'Hermès', 'Apollon', 'Arès', 'Hadès', 'Zeus'];
@@ -781,13 +794,34 @@ const BOT_TECH_PRIORITY = [
   'renaissance',
 ];
 
+// Priorité tech additionnelle pour bots ayant détecté de l'eau sur la map.
+// Insérée APRÈS les techs de base (économie + archery/riding) mais AVANT le militaire haut tier.
+const BOT_TECH_PRIORITY_NAVAL = [
+  'construction', // prérequis marine
+  'marine',       // débloque port + bateau
+];
+
 function botTick(bot) {
   if (bot.eliminated) return;
-  bot.botState = bot.botState || { lastWaveTime: 0, lastBuildTime: 0, lastVillageScout: 0 };
+  bot.botState = bot.botState || {
+    lastWaveTime: 0, lastBuildTime: 0, lastVillageScout: 0,
+    lastPortTime: 0, lastBoatSpawnTime: 0, lastNavalWaveTime: 0,
+    hasNavalAmbition: null,
+  };
   const nowMs = Date.now();
 
+  // Détecte une seule fois si la map a assez d'eau pour justifier l'effort naval.
+  // currentMapType est 'no_water' | 'lakes' | 'continental' | 'island'.
+  if (bot.botState.hasNavalAmbition === null) {
+    bot.botState.hasNavalAmbition = (typeof currentMapType !== 'undefined' && currentMapType !== 'no_water');
+  }
+
   // 1. RECHERCHE TECH ────────────────────────────────────────────
-  for (const tid of BOT_TECH_PRIORITY) {
+  // Priorité de base, puis naval si pertinent (insertion juste après archery/riding).
+  const techRoute = bot.botState.hasNavalAmbition
+    ? [...BOT_TECH_PRIORITY.slice(0, 3), ...BOT_TECH_PRIORITY_NAVAL, ...BOT_TECH_PRIORITY.slice(3)]
+    : BOT_TECH_PRIORITY;
+  for (const tid of techRoute) {
     if ((bot.unlockedTechs || []).includes(tid)) continue;
     const node = NEW_TECH_TREE[tid];
     if (!node) continue;
@@ -849,11 +883,95 @@ function botTick(bot) {
     }
   }
 
+  // 3.5. CONSTRUCTION PORT (naval) ────────────────────────────────
+  // Construit 1 port à proximité d'une water tile dans la zone constructible du HDV.
+  if (hasTech(bot, 'marine') && bot.gold >= BUILDING_TYPES.port.cost
+      && nowMs - bot.botState.lastPortTime > 4000) {
+    const myPorts = gameState.buildings.filter(b => b.ownerId === bot.id && b.type === 'port');
+    if (myPorts.length < 1) {
+      const portDef = BUILDING_TYPES.port;
+      const buildR = baseBuildRadius('hdv', bot);
+      // Scan en spirale autour du HDV pour trouver une case-grille avec voisin eau
+      let placed = false;
+      for (let attempt = 0; attempt < 24 && !placed; attempt++) {
+        const angle = (attempt / 24) * Math.PI * 2 + Math.random() * 0.3;
+        const dist  = 110 + Math.random() * (buildR - 130);
+        const px = bot.x + Math.cos(angle) * dist;
+        const py = bot.y + Math.sin(angle) * dist;
+        const snap = snapToGrid(px, py);
+        if (isWaterAt(snap.x, snap.y)) continue;
+        if (!hasWaterNeighbor(snap.x, snap.y)) continue;
+        if (Math.hypot(bot.x - snap.x, bot.y - snap.y) < BUILDING_MIN_DIST_HDV) continue;
+        if (gameState.buildings.some(b => b.x === snap.x && b.y === snap.y)) continue;
+        bot.gold -= portDef.cost;
+        gameState.buildings.push({
+          id: `b_${nextBuildingId++}`,
+          ownerId: bot.id, type: 'port',
+          x: snap.x, y: snap.y,
+          hp: portDef.hp, maxHp: portDef.hp,
+          lastAttackTime: 0,
+        });
+        bot.botState.lastPortTime = nowMs;
+        console.log(`[Bot ${bot.name}] construit un Port en (${snap.x}, ${snap.y})`);
+        placed = true;
+      }
+    }
+  }
+
   // 4. SPAWN UNITÉ ────────────────────────────────────────────────
   // Préfère les unités haut tiers débloquées ; respect du cap de population.
   const myUnits = Object.values(gameState.units).filter(u => u.ownerId === bot.id);
   const botPopUsed = getPopulationUsed(bot);
   const botPopMax  = getPopulationMax(bot);
+
+  // 4.bis. SPAWN BOAT (si port construit + tech marine + sous le cap de 2 bateaux)
+  if (hasTech(bot, 'marine') && bot.gold >= UNIT_TYPES.boat.cost
+      && nowMs - bot.botState.lastBoatSpawnTime > 5000
+      && botPopUsed + (UNIT_TYPES.boat.populationCost || 1) <= botPopMax) {
+    const myBoats = myUnits.filter(u => u.type === 'boat');
+    const myPorts = gameState.buildings.filter(b => b.ownerId === bot.id && b.type === 'port' && b.hp > 0);
+    if (myPorts.length > 0 && myBoats.length < 2) {
+      // Trouve water tile adjacente au port
+      let found = null;
+      for (const port of myPorts) {
+        const tx0 = Math.floor(port.x / TILE_SIZE);
+        const ty0 = Math.floor(port.y / TILE_SIZE);
+        for (let r = 1; r <= 3 && !found; r++) {
+          for (let dy = -r; dy <= r && !found; dy++) {
+            for (let dx = -r; dx <= r && !found; dx++) {
+              if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+              if (isWaterTile(tx0 + dx, ty0 + dy)) {
+                found = {
+                  x: (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2,
+                  y: (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2,
+                };
+              }
+            }
+          }
+        }
+        if (found) break;
+      }
+      if (found) {
+        const def = UNIT_TYPES.boat;
+        bot.gold -= def.cost;
+        bot.unitsCreated++;
+        const unitId = `unit_${nextUnitId++}`;
+        gameState.units[unitId] = {
+          id: unitId, ownerId: bot.id,
+          x: found.x, y: found.y, type: 'boat',
+          hp: def.hp, maxHp: def.hp,
+          speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
+          targetX: null, targetY: null,
+          attackTargetId: null, attackTargetType: null,
+          lastAttackTime: 0,
+          mode: 'defend', defendX: found.x, defendY: found.y, defendRadius: 320,
+          passengers: [],
+        };
+        bot.botState.lastBoatSpawnTime = nowMs;
+        console.log(`[Bot ${bot.name}] a produit un Bateau (port→eau)`);
+      }
+    }
+  }
   if (botPopUsed < botPopMax) {
     const preferOrder = ['heavy_knight', 'crossbowman', 'general', 'catapult', 'knight', 'archer', 'soldier'];
     for (const typeId of preferOrder) {
@@ -869,11 +987,12 @@ function botTick(bot) {
       bot.unitsCreated++;
       const pos = findFreeSpawnPos(bot.x, bot.y, 70 + Math.random() * 30, false);
       const unitId = `unit_${nextUnitId++}`;
+      const botHp = Math.round(def.hp * unitHpMult(bot, typeId));
       gameState.units[unitId] = {
         id: unitId, ownerId: bot.id,
         x: pos.x, y: pos.y,
         type: typeId,
-        hp: def.hp, maxHp: def.hp,
+        hp: botHp, maxHp: botHp,
         speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
         targetX: null, targetY: null,
         attackTargetId: null, attackTargetType: null,
@@ -943,6 +1062,121 @@ function botTick(bot) {
       bot.botState.lastWaveTime = nowMs;
       bot.botState.targetPlayerId = target.id;
       console.log(`[Bot ${bot.name}] WAVE de ${wave.length} unités sur ${target.name} (HP ${target.hp}/${target.maxHp})`);
+    }
+  }
+
+  // 7. WAVE NAVALE ───────────────────────────────────────────────
+  // Si on a un bateau libre (sans passagers) et qu'une cible ennemie est "bloquée"
+  // par de l'eau, embarque jusqu'à 4 unités terrestres proches du bateau, puis envoie
+  // le bateau vers la côte ennemie pour débarquer.
+  if (hasTech(bot, 'marine') && nowMs - bot.botState.lastNavalWaveTime > 12000) {
+    const myBoats = myUnits.filter(u => u.type === 'boat');
+    const freeBoats = myBoats.filter(b => (!b.passengers || b.passengers.length === 0));
+    if (freeBoats.length > 0) {
+      // Cible : un HDV ennemi accessible uniquement en passant par >3 tiles d'eau
+      let navalTarget = null;
+      for (const p of Object.values(gameState.players)) {
+        if (p.id === bot.id || p.eliminated || p.hp <= 0) continue;
+        if ((bot.allies || []).includes(p.id)) continue;
+        const waterTiles = pathHasWaterCount(bot.x, bot.y, p.x, p.y);
+        if (waterTiles >= 3) { navalTarget = p; break; }
+      }
+      if (navalTarget) {
+        const boat = freeBoats[0];
+        // Embarque jusqu'à 4 unités terrestres à proximité du bateau (≤200px)
+        const candidates = myUnits.filter(u =>
+          u.type !== 'boat' && u.type !== 'pilgrim' && u.type !== 'settler'
+          && (u.damage || 0) > 0
+          && Math.hypot(u.x - boat.x, u.y - boat.y) <= 200
+          && (u.mode === 'defend' || u.mode === 'attack')
+        ).slice(0, 4);
+        if (candidates.length >= 2) {
+          boat.passengers = boat.passengers || [];
+          for (const c of candidates) {
+            if (boat.passengers.length >= 4) break;
+            boat.passengers.push({
+              type: c.type, hp: c.hp, maxHp: c.maxHp,
+              speed: c.speed, range: c.range, damage: c.damage, cost: c.cost,
+            });
+            delete gameState.units[c.id];
+          }
+          // Trouve une water tile côtière près du HDV cible et envoie le bateau là
+          let landing = null;
+          const tx0 = Math.floor(navalTarget.x / TILE_SIZE);
+          const ty0 = Math.floor(navalTarget.y / TILE_SIZE);
+          for (let r = 2; r <= 8 && !landing; r++) {
+            for (let dy = -r; dy <= r && !landing; dy++) {
+              for (let dx = -r; dx <= r && !landing; dx++) {
+                if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                if (isWaterTile(tx0 + dx, ty0 + dy)) {
+                  landing = {
+                    x: (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2,
+                    y: (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2,
+                  };
+                }
+              }
+            }
+          }
+          if (landing) {
+            boat.targetX = landing.x;
+            boat.targetY = landing.y;
+            boat.mode = 'move';
+            boat._navalLanding = { x: navalTarget.x, y: navalTarget.y }; // pour débarquement auto
+            bot.botState.lastNavalWaveTime = nowMs;
+            console.log(`[Bot ${bot.name}] WAVE NAVALE : ${boat.passengers.length} passagers vers ${navalTarget.name}`);
+          } else {
+            // Pas trouvé de tile côtière — abandonne (rare)
+            console.log(`[Bot ${bot.name}] WAVE NAVALE annulée : pas de tile côtière trouvée`);
+          }
+        }
+      }
+    }
+
+    // Débarquement automatique : si un bateau du bot avec passagers est ≤ 80px de sa landing
+    for (const boat of myBoats) {
+      if (!boat._navalLanding || !boat.passengers || boat.passengers.length === 0) continue;
+      const d = Math.hypot(boat.x - boat._navalLanding.x, boat.y - boat._navalLanding.y);
+      if (d > 250) continue; // pas encore arrivé
+      // Cherche une tile terre proche du HDV cible pour débarquer
+      const tx0 = Math.floor(boat._navalLanding.x / TILE_SIZE);
+      const ty0 = Math.floor(boat._navalLanding.y / TILE_SIZE);
+      let landTile = null;
+      for (let r = 1; r <= 4 && !landTile; r++) {
+        for (let dy = -r; dy <= r && !landTile; dy++) {
+          for (let dx = -r; dx <= r && !landTile; dx++) {
+            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+            if (!isWaterTile(tx0 + dx, ty0 + dy)) {
+              landTile = {
+                x: (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2,
+                y: (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2,
+              };
+            }
+          }
+        }
+      }
+      if (!landTile) continue;
+      // Recrée les unités sur la terre et donne ordre d'attaque sur le HDV
+      const targetHdvX = boat._navalLanding.x, targetHdvY = boat._navalLanding.y;
+      for (const pInfo of boat.passengers) {
+        const pos = findFreeSpawnPos(landTile.x, landTile.y, 40 + Math.random() * 30, false);
+        const unitId = `unit_${nextUnitId++}`;
+        gameState.units[unitId] = {
+          id: unitId, ownerId: bot.id,
+          x: pos.x, y: pos.y, type: pInfo.type,
+          hp: pInfo.hp, maxHp: pInfo.maxHp,
+          speed: pInfo.speed, range: pInfo.range, damage: pInfo.damage, cost: pInfo.cost,
+          targetX: targetHdvX + (Math.random() - 0.5) * 100,
+          targetY: targetHdvY + (Math.random() - 0.5) * 100,
+          attackTargetId: null, attackTargetType: null,
+          lastAttackTime: 0,
+          mode: 'move', defendX: pos.x, defendY: pos.y, defendRadius: 280,
+        };
+      }
+      const count = boat.passengers.length;
+      boat.passengers = [];
+      boat._navalLanding = null;
+      io.emit('boatDisembarked', { boatId: boat.id, count, x: landTile.x, y: landTile.y });
+      console.log(`[Bot ${bot.name}] DÉBARQUE ${count} unités en (${landTile.x},${landTile.y})`);
     }
   }
 }
@@ -1517,7 +1751,8 @@ io.on('connection', (socket) => {
     p.unitsCreated++;
     const unitId = `unit_${nextUnitId++}`;
 
-    const hpBonus = unitHpBonusFromVillages(p);
+    const hpBase = Math.round(def.hp * unitHpMult(p, typeId));
+    const hpBonus = unitHpBonusFromVillages(p) + (hpBase - def.hp);
     gameState.units[unitId] = {
       id: unitId,
       ownerId: socket.id,
@@ -1911,11 +2146,12 @@ io.on('connection', (socket) => {
     p.unitsCreated++;
     const pos = findFreeSpawnPos(v.x, v.y, 55 + Math.random() * 25, false);
     const unitId = `unit_${nextUnitId++}`;
+    const vHp = Math.round(def.hp * unitHpMult(p, typeId));
     gameState.units[unitId] = {
       id: unitId, ownerId: socket.id,
       x: pos.x, y: pos.y,
       type: typeId,
-      hp: def.hp, maxHp: def.hp,
+      hp: vHp, maxHp: vHp,
       speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
       targetX: null, targetY: null,
       attackTargetId: null, attackTargetType: null,
@@ -2418,7 +2654,12 @@ setInterval(() => {
 
   for (const unit of Object.values(gameState.units)) {
     if (toDelete.has(unit.id)) continue;
-    if (nowMs - unit.lastAttackTime < ATTACK_COOLDOWN_MS) continue;
+    // Cooldown d'attaque — réduit de 20% pour les unités magie/undead si tech 'time_mastery'
+    let atkCooldown = ATTACK_COOLDOWN_MS;
+    if (MAGIC_UNDEAD.has(unit.type) && hasTech(gameState.players[unit.ownerId], 'time_mastery')) {
+      atkCooldown *= 0.8;
+    }
+    if (nowMs - unit.lastAttackTime < atkCooldown) continue;
     const uRange  = unit.range  || 80;
     // Aura Général : +25% dégâts pour les unités proches d'un Général allié
     let uDamage = (unit.damage || 5) * generalAuraDmgBonus(unit);
@@ -2448,6 +2689,35 @@ setInterval(() => {
         if (MAGIC_UNDEAD.has(unit.type) && target.ownerId
             && hasTech(gameState.players[target.ownerId], 'unwavering_faith')) {
           uDamage *= 0.75;
+        }
+        // Passif 'magic_curse_aura' (CIBLE) : si la cible est <150 d'un mage du défenseur
+        //  ET le défenseur a tech 'curses' → l'attaquant ennemi inflige -15% dmg.
+        if (target.ownerId && target.ownerId !== unit.ownerId
+            && hasTech(gameState.players[target.ownerId], 'curses')) {
+          const def = gameState.players[target.ownerId];
+          // Cherche un mage allié au défenseur dans le rayon 150 de la cible
+          for (const mage of Object.values(gameState.units)) {
+            if (mage.ownerId !== def.id) continue;
+            if (!MAGIC_UNDEAD.has(mage.type)) continue;
+            if (Math.hypot(mage.x - target.x, mage.y - target.y) <= 150) { uDamage *= 0.85; break; }
+          }
+        }
+        // Passif 'religion_curse_aura' (CIBLE) : idem pour les unités religion, -20%.
+        if (target.ownerId && target.ownerId !== unit.ownerId
+            && hasTech(gameState.players[target.ownerId], 'excommunication')) {
+          const def = gameState.players[target.ownerId];
+          for (const rel of Object.values(gameState.units)) {
+            if (rel.ownerId !== def.id) continue;
+            if (!RELIGION_UNITS.has(rel.type)) continue;
+            if (Math.hypot(rel.x - target.x, rel.y - target.y) <= 150) { uDamage *= 0.80; break; }
+          }
+        }
+        // Passif 'magic_slow_chance' (cryomancy) : à chaque tir magique, 20% chance
+        //  d'appliquer un freeze de 2s sur la cible.
+        if (MAGIC_UNDEAD.has(unit.type)
+            && hasTech(gameState.players[unit.ownerId], 'cryomancy')
+            && Math.random() < 0.20) {
+          target.frozenUntil = nowMs + 2000;
         }
         // Catapulte/Canon : pénalité contre unités (gros vs bâtiments seulement)
         if ((unit.type === 'catapult' || unit.type === 'cannon') && target.type) {
@@ -2690,15 +2960,18 @@ setInterval(() => {
   for (const deadId of toDelete) {
     const dead = gameState.units[deadId];
     if (!dead) continue;
-    // c) Pilgrim explosion
+    // c) Pilgrim explosion — uniquement si tech 'martyrs' débloquée
     if (dead.type === 'pilgrim') {
-      for (const ally of Object.values(gameState.units)) {
-        if (ally.ownerId !== dead.ownerId || toDelete.has(ally.id)) continue;
-        if (Math.hypot(ally.x - dead.x, ally.y - dead.y) <= 100) {
-          ally.hp = Math.min(ally.maxHp || ally.hp, ally.hp + 200);
+      const pilgrimOwner = gameState.players[dead.ownerId];
+      if (pilgrimOwner && hasTech(pilgrimOwner, 'martyrs')) {
+        for (const ally of Object.values(gameState.units)) {
+          if (ally.ownerId !== dead.ownerId || toDelete.has(ally.id)) continue;
+          if (Math.hypot(ally.x - dead.x, ally.y - dead.y) <= 100) {
+            ally.hp = Math.min(ally.maxHp || ally.hp, ally.hp + 200);
+          }
         }
+        io.emit('pilgrimExplosion', { x: dead.x, y: dead.y, ownerId: dead.ownerId });
       }
-      io.emit('pilgrimExplosion', { x: dead.x, y: dead.y, ownerId: dead.ownerId });
     }
     // d) Si tué par necro/lich → résurrection alliée du killer
     if (dead._killedByType === 'necromancer' || dead._killedByType === 'lich') {
