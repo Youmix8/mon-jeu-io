@@ -231,13 +231,14 @@ Format multi-lignes via heredoc, avec :
 | # | Sujet | État |
 |---|---|---|
 | 1 | **Boats sans combat naval** : `damage: 0, range: 0` → pas d'attaque entre bateaux | Latent, non prioritaire |
-| 2 | **IA bot ignore le naval** : pas de port/bateau construit, coincée sur île | Latent, gros chantier |
-| 3 | **Passifs tech décoratifs** : ~13/25 passifs n'ont aucun code serveur | Implémenter au cas par cas |
+| 2 | ~~**IA bot ignore le naval**~~ | ✅ RÉSOLU (commit `976387c`) — voir botTick : construit port, spawn bateaux, wave navale (embarque/traverse/débarque) |
+| 3 | **Passifs tech décoratifs** | ✅ QUASI-RÉSOLU (commit `976387c`) — 6 passifs activés (martyr_explosion gaté, magic_slow_chance, magic_hp_boost, magic_curse_aura, religion_curse_aura, magic_atk_speed). **Reste UNIQUEMENT `reveal_enemy_techs`** (besoin UI client) |
 | 4 | **Debug panel accessible en prod** (touche `` ` ``) | Cheat possible — à gater par env var |
 | 5 | **HUD double 👥 emoji** (pop + unit count) | UX mineur |
 | 6 | **Pas de feedback "port nécessite eau adjacente"** | UX |
 | 7 | **Pas de tutoriel intégré** | Onboarding |
 | 8 | **Cold start free tier ~30s** | Limite Render — passer Starter ($7/mois) si besoin |
+| 9 | **Qualité visuelle en retrait** : sprites PNG statiques, pas d'anim de coup, pas de particules/FX/audio | 🎯 PRIORITÉ — gros pass polish AAA prévu (voir section Priorités) |
 
 ### Pièges techniques (gotchas)
 - `MAP_WIDTH/HEIGHT/GRID_W/GRID_H` sont `let`, recalculés dans `applyMapConfig()`. Si tu utilises ces vars dans une closure stockée, attention au moment de capture.
@@ -274,27 +275,54 @@ créatifs.
 
 ---
 
-## 🎯 Priorités actuelles (au moment de la session zen-ptolemy)
+## 🎯 Priorités actuelles (mise à jour session charming-black)
 
-État au dernier commit (`4cd5d6d`) :
+État au dernier commit (`976387c`) :
 - ✅ Bugs critiques résolus : caméra dérive, projectiles, ange tremble, tech panel
   refresh, buildings cliquables, riposte auto
 - ✅ Système population implémenté
 - ✅ Coûts unités revus (gold + mana/foi selon catégorie)
-- ✅ Pathfinding eau basique (slide axe par axe + push-out défensif)
+- ✅ Pathfinding eau (slide axe par axe + push-out défensif + waypoint contournement)
 - ✅ Boats transport (embark/disembark)
 - ✅ Village côtier garanti sur maps avec eau
-- ✅ Audit équilibrage : 6 passifs critiques activés
+- ✅ **IA bot naval** : construit port, spawn bateaux, wave navale complète
+- ✅ **6 passifs tech activés** (cf. tableau bugs #3)
 
 À faire dans une prochaine session (par ordre d'impact estimé) :
-1. **IA bot naval** : qu'elle construise des ports/bateaux pour franchir les océans
-2. **Combat naval** : donner damage aux bateaux ou créer des unités navales
-3. **Implémenter les passifs restants** : `magic_hp_boost`, `martyr_explosion`,
-   `magic_slow_chance`, `reveal_enemy_techs`, etc.
+1. **🎨 GROS PASS POLISH VISUEL AAA** (priorité #1) — c'est le gros chantier en cours :
+   - **Animations de coups** par type d'unité (mêlée : anticipation→lunge→recoil
+     + arc d'arme ; distance : draw→fire ; caster : channel→cast)
+   - **Redesign cohérent** de TOUTES les entités (unités, bâtiments, projectiles)
+     pour un style "AAA indie" lisible et animé. Deux pistes possibles selon ce qui
+     rend le mieux : (a) animer les PNG existants par rig procédural (lunge/recoil/
+     idle bob), (b) régénérer en sprites procéduraux multi-parties (Phaser Graphics)
+     animables. Le rendu FINAL doit être propre et homogène.
+   - **Game juice** : hit-stop, camera shake, damage numbers flottants, squash&stretch,
+     burst de particules sur kill, debris sur destruction bâtiment
+   - **FX WebGL** (Phaser 3.90 FX API) : bloom/glow projectiles+sorts, glow sélection,
+     vignette + color grading, trails de projectiles
+   - **Eau animée** (waterTiles existent) : scroll/shader + écume côtière
+   - **HUD glassmorphism** (skill frontend-design) : compteurs animés, transitions
+   - **Audio** (Web Audio/Howler) : SFX spawn/coup/mort/sort/capture + musique ambiance
+   → Procéder PAR PHASES avec commit + vérif preview à chaque étape. 60 fps obligatoire
+     (réutiliser les emitters). `AskUserQuestion` pour les choix créatifs (intensité shake, palette).
+2. **`reveal_enemy_techs`** (renaissance) : seul passif restant, besoin d'UI client
+3. **Combat naval** : donner damage aux bateaux ou unités navales dédiées
 4. **Tutoriel intégré** (1ère partie : 3 tooltips guidés)
-5. **Audio** (musique + SFX — impact énorme, effort faible)
-6. **Particules + screen shake** sur kills et impacts importants
-7. **Touch controls mobile**
+5. **Touch controls mobile**
+
+### ⚠️ Notes pour le pass visuel
+- Phaser 3.90 a l'**API FX** (`sprite.postFX.addBloom/addGlow/addVignette/addShine`,
+  `preFX`) — utiliser ça plutôt que de réinventer en Graphics.
+- `sprite-factory.js` génère déjà des textures procédurales (fallback historique
+  soldier/archer/cavalry) — c'est le point de départ pour un rig procédural si on
+  part sur la piste (b).
+- `utils/animations.js` contient les helpers tweens existants (animateUnitMove/
+  Attack/Death/Spawn, animateProjectile) — ÉTENDRE ceux-là, ne pas dupliquer.
+- Respecter le **depth ordering** (cf. section Conventions visuelles) et le piège
+  `_baseScaleX/_baseScaleY` (JAMAIS lire `sprite.scaleX/Y` pour modifier le scale).
+- Les PNG existants dans `public/assets/` ne doivent PAS être modifiés (fournis par
+  Robin) — soit on les anime, soit on génère des textures procédurales À CÔTÉ.
 
 ---
 
@@ -319,6 +347,8 @@ créatifs.
 
 ---
 
-**Dernière mise à jour** : commit `4cd5d6d` (session zen-ptolemy-5f057c).
+**Dernière mise à jour** : commit `976387c` (session charming-black) — IA bot
+naval complète + 6 passifs tech activés. Prochain gros chantier : pass polish
+visuel AAA (animations de coups + redesign entités + juice + FX + audio).
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier commit
 de ta session.
