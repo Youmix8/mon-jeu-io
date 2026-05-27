@@ -1149,18 +1149,19 @@ class MainScene extends Phaser.Scene {
         zoneBorder.strokeRect(player.x - buildR, player.y - buildR, buildR * 2, buildR * 2);
 
         // HDV : sprite PNG tinté équipe, sinon fallback procédural
+        const hdvTint = destroyed ? 0x888888 : this._factionTint(colorInt);
         let hdvObj;
         if (useAsset) {
           hdvObj = this.add.sprite(player.x, player.y, 'hdv')
             .setOrigin(0.5, 0.5)
             .setDisplaySize(HDV_DISPLAY, HDV_DISPLAY)
             .setDepth(30);
-          hdvObj.setTint(destroyed ? 0x888888 : colorInt);
+          hdvObj.setTint(hdvTint);
         } else if (this.textures.exists('hdv-castle')) {
           hdvObj = this.add.sprite(player.x, player.y, 'hdv-castle')
             .setOrigin(0.5, 0.85)
             .setDisplaySize(HDV_DISPLAY + 30, HDV_DISPLAY + 40)
-            .setTint(destroyed ? 0x888888 : colorInt)
+            .setTint(hdvTint)
             .setDepth(30);
         } else {
           hdvObj = this.add.rectangle(player.x, player.y, HDV_DISPLAY, HDV_DISPLAY, destroyed ? 0x888888 : colorInt)
@@ -1168,7 +1169,7 @@ class MainScene extends Phaser.Scene {
             .setDepth(30);
         }
         if (destroyed) hdvObj.setAlpha(0.45);
-        hdvObj._factionColor = colorInt;
+        hdvObj._factionColor = hdvTint;
 
         if (id === myId) {
           hdvObj.setInteractive();
@@ -1196,8 +1197,9 @@ class MainScene extends Phaser.Scene {
         const [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder] = this.hdvSprites[id];
 
         hdvObj.setPosition(player.x, player.y);
-        if (hdvObj.setTint) hdvObj.setTint(destroyed ? 0x888888 : colorInt);
-        hdvObj._factionColor = destroyed ? 0x888888 : colorInt;
+        const hdvTintU = destroyed ? 0x888888 : this._factionTint(colorInt);
+        if (hdvObj.setTint) hdvObj.setTint(hdvTintU);
+        hdvObj._factionColor = hdvTintU;
         hdvObj.setAlpha(destroyed ? 0.45 : 1);
 
         if (!destroyed && hpRatio < 0.3) {
@@ -1285,19 +1287,20 @@ class MainScene extends Phaser.Scene {
         }
         const useAsset  = this._hasAsset(assetKey);
 
+        const softTint = this._factionTint(colorInt);
         let sprite;
         if (useAsset) {
           sprite = this.add.sprite(unit.x, unit.y, assetKey)
             .setOrigin(0.5, 0.5)
             .setDisplaySize(unitSize * scaleMult, unitSize * scaleMult)
             .setDepth(50);
-          sprite.setTint(colorInt);
+          sprite.setTint(softTint);
         } else {
           // Fallback SpriteFactory pour les 3 unités historiques
           const texKey = unit.type === 'archer' ? 'unit-archer'
                       : unit.type === 'knight' ? 'unit-knight'
                       : 'unit-soldier';
-          sprite = this.add.sprite(unit.x, unit.y, texKey).setTint(colorInt).setDepth(50);
+          sprite = this.add.sprite(unit.x, unit.y, texKey).setTint(softTint).setDepth(50);
           if (scaleMult !== 1.0) sprite.setScale(sprite.scaleX * scaleMult, sprite.scaleY * scaleMult);
         }
 
@@ -1309,7 +1312,8 @@ class MainScene extends Phaser.Scene {
         sprite._unitOwnerId = unit.ownerId;
         sprite._unitType    = unit.type;
         sprite._idlePhase   = Math.random() * Math.PI * 2;
-        sprite._factionColor = colorInt;
+        sprite._factionColor = softTint;   // teinte affichée (restaurée après flash)
+        sprite._factionRaw   = colorInt;    // couleur brute vive (ring de sélection)
         // Multiplicateurs de scale d'attaque (squash&stretch) lus par le wobble
         sprite._atkScaleX = 1;
         sprite._atkScaleY = 1;
@@ -1320,7 +1324,8 @@ class MainScene extends Phaser.Scene {
         const shadow = this.add.ellipse(unit.x, unit.y, shW, shW * 0.40, 0x000000,
           cfg && cfg.flying ? 0.16 : 0.26).setDepth(48);
         sprite._shadow = shadow;
-        sprite._shadowOffsetY = unitSize * scaleMult * (cfg && cfg.flying ? 0.55 : 0.34);
+        // Offset abaissé : l'ombre se pose sous les pieds (était un peu haute)
+        sprite._shadowOffsetY = unitSize * scaleMult * (cfg && cfg.flying ? 0.62 : 0.46);
 
         if (unit.ownerId === myId) {
           sprite.setInteractive(new Phaser.Geom.Circle(sprite.width / 2, sprite.height / 2, 30), Phaser.Geom.Circle.Contains);
@@ -1378,8 +1383,10 @@ class MainScene extends Phaser.Scene {
           if (unit.type === 'boat' && paxCount > 0) badge.setText(`🧍${paxCount}/4`);
           else badge.setText(this._modeIcon(unit.mode));
         }
-        if (sprite.setTint && !sprite._attacking && !sprite._flashing) { sprite.setTint(colorInt); }
-        sprite._factionColor = colorInt;
+        const softTint = this._factionTint(colorInt);
+        if (sprite.setTint && !sprite._attacking && !sprite._flashing) { sprite.setTint(softTint); }
+        sprite._factionColor = softTint;
+        sprite._factionRaw   = colorInt;
 
         if (hpChanged) {
           const ratio = Math.max(0, unit.hp / unit.maxHp);
@@ -1412,7 +1419,7 @@ class MainScene extends Phaser.Scene {
       const ownerSprite = this.unitSprites[id][0];
       const ring = this.add.sprite(ownerSprite.x, ownerSprite.y, 'selection-ring');
       ring.setDepth(55); // au-dessus des unités, sous les barres de vie
-      ring.setTint(ownerSprite._factionColor != null ? ownerSprite._factionColor : 0xfbbf24);
+      ring.setTint(ownerSprite._factionRaw != null ? ownerSprite._factionRaw : 0xfbbf24);
       this.tweens.add({
         targets: ring,
         scaleX: { from: 0.85, to: 1.05 },
@@ -1630,6 +1637,18 @@ class MainScene extends Phaser.Scene {
   }
 
   // ── Visual effects ────────────────────────────────────────────────
+
+  // Teinte de faction ADOUCIE : mélange la couleur vers le blanc pour que le
+  // tint multiplicatif n'assombrisse pas le PNG (une couleur saturée comme le
+  // rouge écrase les canaux verts/bleus). On garde le hue de l'équipe, en plus clair.
+  _factionTint(colorInt) {
+    const c = Phaser.Display.Color.IntegerToColor(colorInt);
+    const m = 0.55; // 55 % vers le blanc
+    const r = Math.round(c.red   + (255 - c.red)   * m);
+    const g = Math.round(c.green + (255 - c.green) * m);
+    const b = Math.round(c.blue  + (255 - c.blue)  * m);
+    return (r << 16) | (g << 8) | b;
+  }
 
   // Flash de coup encaissé : silhouette blanche brève (setTintFill) puis retour
   // à la teinte de faction. (Anciennement setFillStyle → cassé sur les Sprites.)
