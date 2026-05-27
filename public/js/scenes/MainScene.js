@@ -672,21 +672,39 @@ class MainScene extends Phaser.Scene {
       const usePng    = this._hasAsset(assetKey) && !(this._placeholderKeys && this._placeholderKeys.has(assetKey));
 
       if (!s) {
+        // Ombre portée sous le bâtiment (depth 27, sous le sprite 28)
+        const shadow = this.add.ellipse(b.x, b.y + finalSize * 0.36, finalSize * 0.62, finalSize * 0.24, 0x000000, 0.28).setDepth(27);
+
         let bg;
         if (usePng) {
-          // Vrai PNG : sprite tinté équipe (légère tinte pour ne pas écraser le design)
+          // Vrai PNG : sprite tinté équipe ADOUCIE (préserve le design du sprite)
           bg = this.add.sprite(b.x, b.y, assetKey)
             .setOrigin(0.5, 0.5)
             .setDisplaySize(finalSize, finalSize)
             .setDepth(28);
-          // Tinte plus subtile pour préserver le design du sprite
-          bg.setTint(colorInt);
+          bg.setTint(this._factionTint(colorInt));
           bg.setTintFill && (bg.tintFill = false); // multiply (par défaut), pas fill
         } else {
           // Placeholder rectangle + icône emoji
           bg = this.add.rectangle(b.x, b.y, finalSize, finalSize, colorInt, 0.85)
             .setStrokeStyle(2.5, 0x111111, 0.9).setDepth(28);
         }
+
+        // Aura pulsante subtile pour les bâtiments magie / religion (vie + lisibilité)
+        let aura = null;
+        if (eCfg && (eCfg.category === 'magic' || eCfg.category === 'religion')) {
+          const auraColor = eCfg.category === 'magic' ? 0x9333ea : 0xfbbf24;
+          aura = this.add.ellipse(b.x, b.y + finalSize * 0.30, finalSize * 0.85, finalSize * 0.42, auraColor, 0.18).setDepth(26);
+          this.tweens.add({ targets: aura, alpha: { from: 0.10, to: 0.26 }, scaleX: { from: 0.92, to: 1.06 }, scaleY: { from: 0.92, to: 1.06 },
+            duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        }
+
+        // Pop de construction : squash&stretch d'apparition + poussière
+        const popBaseX = bg._baseScaleX = bg.scaleX;
+        const popBaseY = bg._baseScaleY = bg.scaleY;
+        bg.setScale(popBaseX * 0.4, popBaseY * 0.4);
+        this.tweens.add({ targets: bg, scaleX: popBaseX, scaleY: popBaseY, duration: 380, ease: 'Back.easeOut' });
+        this._spawnBuildPuff(b.x, b.y + finalSize * 0.3, finalSize);
 
         // Icône emoji : superposée UNIQUEMENT en placeholder (pas sur vrai sprite)
         const icon = usePng ? null : this.add.text(b.x, b.y, def.icon || '🏗', {
@@ -725,14 +743,16 @@ class MainScene extends Phaser.Scene {
           });
         }
 
-        s = { bg, icon, banner, hpBg, hpFill, _finalSize: finalSize, _usePng: usePng };
+        s = { bg, shadow, aura, icon, banner, hpBg, hpFill, _finalSize: finalSize, _usePng: usePng };
         this.buildingSprites[b.id] = s;
       }
 
       const sz = s._finalSize;
       s.bg.setPosition(b.x, b.y);
+      if (s.shadow) s.shadow.setPosition(b.x, b.y + sz * 0.36);
+      if (s.aura)   s.aura.setPosition(b.x, b.y + sz * 0.30);
       if (s._usePng) {
-        if (s.bg.setTint) s.bg.setTint(colorInt);
+        if (s.bg.setTint) s.bg.setTint(this._factionTint(colorInt));
       } else if (s.bg.setFillStyle) {
         s.bg.setFillStyle(colorInt, 0.85);
       }
@@ -776,6 +796,9 @@ class MainScene extends Phaser.Scene {
 
       let sprite = this.villageSprites[v.id];
       if (!sprite) {
+        // Ombre portée sous le village (depth 29, sous le sprite 30)
+        const vShadow = this.add.ellipse(v.x, v.y + VILLAGE_DISPLAY * 0.34, VILLAGE_DISPLAY * 0.6, VILLAGE_DISPLAY * 0.22, 0x000000, 0.26).setDepth(29);
+
         // Sprite principal village (plus de cercle séparé — tint sur le sprite)
         let main;
         if (useAsset) {
@@ -783,8 +806,8 @@ class MainScene extends Phaser.Scene {
             .setOrigin(0.5, 0.5)
             .setDisplaySize(VILLAGE_DISPLAY, VILLAGE_DISPLAY)
             .setDepth(30);
-          // Tint d'équipe : neutre = blanc, capturé = couleur du joueur
-          main.setTint(owner ? ownerColorInt : 0xffffff);
+          // Tint d'équipe ADOUCI : neutre = blanc, capturé = couleur du joueur
+          main.setTint(owner ? this._factionTint(ownerColorInt) : 0xffffff);
         } else {
           main = this.add.rectangle(v.x, v.y, 50, 50, owner ? ownerColorInt : 0x8b7355)
             .setStrokeStyle(3, 0x000000, 0.7)
@@ -827,8 +850,12 @@ class MainScene extends Phaser.Scene {
           });
         }
 
-        sprite = { main, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder };
+        sprite = { main, vShadow, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder };
         this.villageSprites[v.id] = sprite;
+      }
+      if (sprite.vShadow) {
+        sprite.vShadow.setPosition(v.x, v.y + VILLAGE_DISPLAY * 0.34);
+        sprite.vShadow.setAlpha(destroyed ? 0.12 : 0.26);
       }
 
       // Met à jour la bordure carrée si possédé (sinon cachée)
@@ -847,7 +874,7 @@ class MainScene extends Phaser.Scene {
       sprite.main.setPosition(v.x, v.y);
       sprite.main.setAlpha(destroyed ? 0.35 : 1);
       if (sprite.main.setTint) {
-        sprite.main.setTint(owner ? ownerColorInt : 0xffffff);
+        sprite.main.setTint(owner ? this._factionTint(ownerColorInt) : 0xffffff);
       }
 
       sprite.label.setPosition(v.x, v.y + 52);
@@ -1189,14 +1216,20 @@ class MainScene extends Phaser.Scene {
           { fontSize: '13px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
         ).setOrigin(0.5, 0).setDepth(70);
 
-        // [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder]
-        this.hdvSprites[id] = [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder];
+        // Ombre portée sous le château (depth 29, sous le HDV 30) — appendée en
+        // fin de tuple (index 6) pour ne pas casser le destructuring positionnel.
+        const hdvShadow = this.add.ellipse(player.x, player.y + HDV_DISPLAY * 0.34, HDV_DISPLAY * 0.66, HDV_DISPLAY * 0.24, 0x000000, 0.30).setDepth(29);
+
+        // [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder, hdvShadow]
+        this.hdvSprites[id] = [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder, hdvShadow];
         this.hdvSprites[id]._currentBuildR = buildR; // mémorise pour détecter les changements de level
 
       } else {
         const [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder] = this.hdvSprites[id];
 
         hdvObj.setPosition(player.x, player.y);
+        const hdvShadow = this.hdvSprites[id][6];
+        if (hdvShadow) { hdvShadow.setPosition(player.x, player.y + HDV_DISPLAY * 0.34); hdvShadow.setAlpha(destroyed ? 0.14 : 0.30); }
         const hdvTintU = destroyed ? 0x888888 : this._factionTint(colorInt);
         if (hdvObj.setTint) hdvObj.setTint(hdvTintU);
         hdvObj._factionColor = hdvTintU;
@@ -1726,6 +1759,23 @@ class MainScene extends Phaser.Scene {
     this.time.delayedCall(700, () => emitter.destroy());
   }
 
+  // Poussière de construction (apparition d'un bâtiment)
+  _spawnBuildPuff(x, y, size) {
+    const n = Math.min(14, Math.max(6, Math.round(size / 8)));
+    const emitter = this.add.particles(x, y, 'particle', {
+      tint: [0xcbb89a, 0xa1887f, 0xe5e0d8],
+      speed: { min: 30, max: 90 },
+      angle: { min: 200, max: 340 },
+      scale: { start: size / 55, end: 0 },
+      alpha: { start: 0.7, end: 0 },
+      lifespan: 450,
+      gravityY: 80,
+      emitting: false,
+    }).setDepth(29);
+    emitter.explode(n);
+    this.time.delayedCall(700, () => emitter.destroy());
+  }
+
   // Flèche générique (pour les tours et autres attaquants distants)
   _playArrowAnimation(ax, ay, tx, ty) {
     const angle = Math.atan2(ty - ay, tx - ax);
@@ -1804,22 +1854,56 @@ class MainScene extends Phaser.Scene {
     if (typeof Animations !== 'undefined' && Animations.animateProjectile) {
       Animations.animateProjectile(this, proj, projKey);
     }
+
+    // Traînée : émetteur de particules qui suit le projectile (couleur du type).
+    const trailColor = PROJECTILE_COLORS[projKey] || 0xffffff;
+    const heavy = HEAVY.has(projKey);
+    const trail = this.add.particles(0, 0, 'particle', {
+      follow: proj,
+      tint: trailColor,
+      scale: { start: heavy ? 0.9 : 0.6, end: 0 },
+      alpha: { start: 0.7, end: 0 },
+      speed: 0,
+      lifespan: heavy ? 320 : 200,
+      frequency: 16,
+      quantity: 1,
+      blendMode: 'ADD',
+    }).setDepth(109);
+
     this.tweens.add({
       targets: proj, x: tx, y: ty,
       duration, ease: 'Quad.easeOut',
       onComplete: () => {
+        // Coupe l'émission + le suivi (le projectile va être détruit), laisse
+        // les particules résiduelles s'éteindre.
+        trail.stop();
+        if (trail.stopFollow) trail.stopFollow();
+        this.time.delayedCall(360, () => trail.destroy());
+
         // Flash d'impact + couleur thématique
         const impactColors = {
           proj_dark_orb: 0x9333ea, proj_holy_bolt: 0xfde047, proj_dragon_breath: 0xdc2626,
           proj_fireball_small: 0xf97316, proj_lightning: 0xfbbf24, proj_ice_shard: 0x60a5fa,
           proj_magic_bolt: 0x8b5cf6, proj_inquisitor_hammer: 0xfde68a, proj_divine_beam: 0xfef9c3,
         };
-        const flashColor = impactColors[projKey] || 0xffffff;
-        const flash = this.add.circle(tx, ty, 16, flashColor, 0.85).setDepth(110);
+        const flashColor = impactColors[projKey] || trailColor;
+        const flash = this.add.circle(tx, ty, heavy ? 22 : 16, flashColor, 0.85).setDepth(110);
         this.tweens.add({
-          targets: flash, scale: { from: 0.5, to: 1.8 }, alpha: { from: 0.85, to: 0 },
-          duration: 220, onComplete: () => flash.destroy(),
+          targets: flash, scale: { from: 0.5, to: heavy ? 2.4 : 1.8 }, alpha: { from: 0.85, to: 0 },
+          duration: heavy ? 280 : 220, onComplete: () => flash.destroy(),
         });
+        // Burst de particules d'impact (éclats colorés)
+        const burst = this.add.particles(tx, ty, 'particle', {
+          tint: flashColor,
+          speed: { min: heavy ? 80 : 50, max: heavy ? 200 : 130 },
+          scale: { start: heavy ? 0.9 : 0.6, end: 0 },
+          alpha: { start: 0.9, end: 0 },
+          lifespan: heavy ? 380 : 260,
+          blendMode: 'ADD',
+          emitting: false,
+        }).setDepth(110);
+        burst.explode(heavy ? 12 : 7);
+        this.time.delayedCall(500, () => burst.destroy());
         proj.destroy();
       },
     });
