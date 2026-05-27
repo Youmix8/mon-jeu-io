@@ -320,20 +320,31 @@ const SpriteFactory = {
     g.destroy();
   },
 
-  // ── Effet slash (arc de lame pour soldat / chevalier) ───────────
+  // ── Effet slash : croissant de lame rempli (arc d'arme) ─────────
+  // Base BLANCHE → tintable (doré pour cavalerie/élite). Croissant net qui
+  // se lit comme un trait d'épée en mouvement.
   _slash(scene) {
-    const S = 60;
+    const S = 64;
     const g = scene.make.graphics({ add: false });
     const cx = S / 2, cy = S / 2;
-    // Arc semi-cercle blanc translucide qui suggère un swing
-    g.lineStyle(5, 0xffffff, 1);
-    g.beginPath();
-    g.arc(cx, cy, 22, -Math.PI / 3, Math.PI / 3);
-    g.strokePath();
-    g.lineStyle(2.5, 0xffe082, 0.9);
-    g.beginPath();
-    g.arc(cx, cy, 18, -Math.PI / 3, Math.PI / 3);
-    g.strokePath();
+    const Ro = 27, Ri = 17;
+    const a0 = -Math.PI / 2.4, a1 = Math.PI / 2.4;
+    const N = 18;
+    const pts = [];
+    for (let i = 0; i <= N; i++) {
+      const a = a0 + (a1 - a0) * (i / N);
+      pts.push({ x: cx + Math.cos(a) * Ro, y: cy + Math.sin(a) * Ro });
+    }
+    for (let i = N; i >= 0; i--) {
+      const a = a0 + (a1 - a0) * (i / N);
+      pts.push({ x: cx + Math.cos(a) * Ri, y: cy + Math.sin(a) * Ri });
+    }
+    // Halo doux derrière le croissant
+    g.fillStyle(0xffffff, 0.25);
+    g.fillPoints(pts.map(p => ({ x: cx + (p.x - cx) * 1.12, y: cy + (p.y - cy) * 1.12 })), true);
+    // Croissant principal
+    g.fillStyle(0xffffff, 1);
+    g.fillPoints(pts, true);
     g.generateTexture('slash', S, S);
     g.destroy();
   },

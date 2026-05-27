@@ -27,32 +27,122 @@ const Animations = (() => {
     }
   }
 
-  // ── Anim d'attaque : lunge mêlée OU recul léger (distance) ──
-  function animateUnitAttack(scene, sprite, targetX, targetY, isRanged) {
-    if (!sprite) return null;
-    if (isRanged) {
-      // Léger recul de 5px en arrière du tireur
-      const dx = sprite.x - targetX, dy = sprite.y - targetY;
-      const d = Math.hypot(dx, dy) || 1;
-      const ox = (dx / d) * 5, oy = (dy / d) * 5;
-      const sx = sprite.x, sy = sprite.y;
-      return scene.tweens.add({
-        targets: sprite,
-        x: sx + ox, y: sy + oy,
-        duration: 80, yoyo: true, ease: 'Quad.easeOut',
-        onComplete: () => { sprite.x = sx; sprite.y = sy; },
-      });
-    }
-    // Mêlée : lunge +10px vers la cible, retour
-    const dx = targetX - sprite.x, dy = targetY - sprite.y;
+  // ════════════════════════════════════════════════════════════════
+  // RIG DE COMBAT — animations de coups par catégorie d'unité.
+  //
+  // Convention critique (cf. piège _baseScaleX/Y) :
+  //   - Le squash&stretch passe par sprite._atkScaleX/_atkScaleY (lus par
+  //     MainScene._updateUnitBarPositions) et JAMAIS par setScale direct, car
+  //     le wobble idle écrase le scale chaque frame.
+  //   - La position (lunge) tween sprite.x/y ; on stoppe le tween de sync
+  //     serveur le temps de l'anim puis on restaure la position autoritative
+  //     (scene.unitServerPos) au onComplete.
+  //   - Le facing passe par setFlipX (pas un scaleX négatif → casserait _baseScaleX).
+  // ════════════════════════════════════════════════════════════════
+
+  function _unitVec(sprite, tx, ty) {
+    const dx = tx - sprite.x, dy = ty - sprite.y;
     const d = Math.hypot(dx, dy) || 1;
-    const ox = (dx / d) * 10, oy = (dy / d) * 10;
+    return { ux: dx / d, uy: dy / d };
+  }
+
+  function _restoreAttack(scene, sprite, sx, sy) {
+    sprite._attacking = false;
+    sprite._atkScaleX = 1;
+    sprite._atkScaleY = 1;
+    if (sprite._attackSafety) { sprite._attackSafety.remove(false); sprite._attackSafety = null; }
+    const sp = scene.unitServerPos && sprite._unitId && scene.unitServerPos[sprite._unitId];
+    sprite.x = sp ? sp.x : sx;
+    sprite.y = sp ? sp.y : sy;
+  }
+
+  // Filet de sécurité : si la chaîne de tweens est interrompue sans onComplete
+  // (sprite détruit, tween remplacé, perte de focus prolongée…), force la
+  // restauration après la durée attendue → l'unité ne reste jamais coincée
+  // en "attacking" (sinon _syncUnits ne resynchronise plus sa position).
+  function _armSafety(scene, sprite, sx, sy, totalMs) {
+    if (sprite._attackSafety) sprite._attackSafety.remove(false);
+    sprite._attackSafety = scene.time.delayedCall(totalMs + 200, () => {
+      if (sprite._attacking) _restoreAttack(scene, sprite, sx, sy);
+    });
+  }
+
+  function _faceTarget(sprite, tx, ty) {
+    const dx = tx - sprite.x;
+    if (Math.abs(dx) > sprite.displayWidth * 0.15) sprite.setFlipX(dx < 0);
+  }
+
+  // ── Mêlée : anticipation (recul + squash) → lunge (avant + stretch) → recoil ──
+  function animateMelee(scene, sprite, tx, ty, onStrike) {
+    if (!sprite) { if (onStrike) onStrike(); return; }
+    if (sprite._attacking) { if (onStrike) onStrike(); return; }
+    sprite._attacking = true;
     const sx = sprite.x, sy = sprite.y;
-    return scene.tweens.add({
+    const { ux, uy } = _unitVec(sprite, tx, ty);
+    _faceTarget(sprite, tx, ty);
+    if (sprite._unitId && scene.unitTweens && scene.unitTweens[sprite._unitId]) {
+      scene.unitTweens[sprite._unitId].stop();
+      delete scene.unitTweens[sprite._unitId];
+    }
+    const BACK = 7, LUNGE = 16;
+    _armSafety(scene, sprite, sx, sy, 295);
+    scene.tweens.chain({
       targets: sprite,
-      x: sx + ox, y: sy + oy,
-      duration: 100, yoyo: true, ease: 'Quad.easeOut',
-      onComplete: () => { sprite.x = sx; sprite.y = sy; },
+      onComplete: () => _restoreAttack(scene, sprite, sx, sy),
+      tweens: [
+        { x: sx - ux * BACK, y: sy - uy * BACK, _atkScaleX: 1.12, _atkScaleY: 0.90,
+          duration: 95, ease: 'Sine.easeOut' },
+        { x: sx + ux * LUNGE, y: sy + uy * LUNGE, _atkScaleX: 0.88, _atkScaleY: 1.16,
+          duration: 80, ease: 'Quad.easeIn', onComplete: () => { if (onStrike) onStrike(); } },
+        { x: sx, y: sy, _atkScaleX: 1, _atkScaleY: 1, duration: 120, ease: 'Sine.easeOut' },
+      ],
+    });
+  }
+
+  // ── Distance (science) : draw (penche en arrière + compresse) → fire (snap) ──
+  function animateDraw(scene, sprite, tx, ty, onRelease) {
+    if (!sprite) { if (onRelease) onRelease(); return; }
+    if (sprite._attacking) { if (onRelease) onRelease(); return; }
+    sprite._attacking = true;
+    const sx = sprite.x, sy = sprite.y;
+    const { ux, uy } = _unitVec(sprite, tx, ty);
+    _faceTarget(sprite, tx, ty);
+    if (sprite._unitId && scene.unitTweens && scene.unitTweens[sprite._unitId]) {
+      scene.unitTweens[sprite._unitId].stop();
+      delete scene.unitTweens[sprite._unitId];
+    }
+    _armSafety(scene, sprite, sx, sy, 290);
+    scene.tweens.chain({
+      targets: sprite,
+      onComplete: () => _restoreAttack(scene, sprite, sx, sy),
+      tweens: [
+        { x: sx - ux * 5, y: sy - uy * 5, _atkScaleX: 1.08, _atkScaleY: 0.95,
+          duration: 130, ease: 'Sine.easeOut' },
+        { x: sx + ux * 3, y: sy + uy * 3, _atkScaleX: 0.96, _atkScaleY: 1.05,
+          duration: 70, ease: 'Quad.easeIn', onComplete: () => { if (onRelease) onRelease(); } },
+        { x: sx, y: sy, _atkScaleX: 1, _atkScaleY: 1, duration: 90, ease: 'Sine.easeOut' },
+      ],
+    });
+  }
+
+  // ── Caster (magie/religion) : channel (swell) → cast (snap release) ──
+  // Pas de déplacement (évite le conflit tween mouvement) — scale uniquement.
+  function animateCast(scene, sprite, tx, ty, onCast) {
+    if (!sprite) { if (onCast) onCast(); return; }
+    if (sprite._attacking) { if (onCast) onCast(); return; }
+    sprite._attacking = true;
+    const sx = sprite.x, sy = sprite.y;
+    _faceTarget(sprite, tx, ty);
+    _armSafety(scene, sprite, sx, sy, 350);
+    scene.tweens.chain({
+      targets: sprite,
+      onComplete: () => _restoreAttack(scene, sprite, sx, sy),
+      tweens: [
+        { _atkScaleX: 1.13, _atkScaleY: 1.13, duration: 160, ease: 'Sine.easeInOut' },
+        { _atkScaleX: 0.90, _atkScaleY: 0.90, duration: 70, ease: 'Quad.easeIn',
+          onComplete: () => { if (onCast) onCast(); } },
+        { _atkScaleX: 1, _atkScaleY: 1, duration: 120, ease: 'Sine.easeOut' },
+      ],
     });
   }
 
@@ -198,7 +288,7 @@ const Animations = (() => {
 
   return {
     animateUnitMove, stopUnitMove,
-    animateUnitAttack,
+    animateMelee, animateDraw, animateCast,
     animateProjectile,
     animateSpellCast,
     animateUnitDeath,

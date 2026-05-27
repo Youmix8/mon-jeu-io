@@ -417,7 +417,7 @@ class MainScene extends Phaser.Scene {
           attacker = { x: data.attackerX, y: data.attackerY, type: data.attackerType || 'soldier' };
         }
         if (!attacker) return;
-        this._playAttackAnimation(attacker, tx, ty);
+        this._playAttackAnimation(attacker, tx, ty, data.attackerId);
         // Kill feed unit→unit
         if (data.killed && data.targetType === 'unit') {
           const killerOwner = state.players[attacker.ownerId];
@@ -1168,6 +1168,7 @@ class MainScene extends Phaser.Scene {
             .setDepth(30);
         }
         if (destroyed) hdvObj.setAlpha(0.45);
+        hdvObj._factionColor = colorInt;
 
         if (id === myId) {
           hdvObj.setInteractive();
@@ -1196,6 +1197,7 @@ class MainScene extends Phaser.Scene {
 
         hdvObj.setPosition(player.x, player.y);
         if (hdvObj.setTint) hdvObj.setTint(destroyed ? 0x888888 : colorInt);
+        hdvObj._factionColor = destroyed ? 0x888888 : colorInt;
         hdvObj.setAlpha(destroyed ? 0.45 : 1);
 
         if (!destroyed && hpRatio < 0.3) {
@@ -1234,6 +1236,11 @@ class MainScene extends Phaser.Scene {
         // Animation de mort sur le sprite principal (fade + scale → destroy)
         const arr = this.unitSprites[id];
         const sprite = arr && arr[0];
+        if (sprite && sprite._shadow) {
+          // L'ombre s'estompe avec le corps
+          this.tweens.add({ targets: sprite._shadow, alpha: 0, duration: 300,
+            onComplete: () => sprite._shadow && sprite._shadow.destroy() });
+        }
         if (sprite && typeof Animations !== 'undefined') {
           Animations.animateUnitDeath(this, sprite);
           // Détruire les autres éléments immédiatement (barres, badge)
@@ -1302,6 +1309,18 @@ class MainScene extends Phaser.Scene {
         sprite._unitOwnerId = unit.ownerId;
         sprite._unitType    = unit.type;
         sprite._idlePhase   = Math.random() * Math.PI * 2;
+        sprite._factionColor = colorInt;
+        // Multiplicateurs de scale d'attaque (squash&stretch) lus par le wobble
+        sprite._atkScaleX = 1;
+        sprite._atkScaleY = 1;
+
+        // Ombre portée elliptique sous l'unité (depth 48, sous le sprite 50).
+        // Plus petite/diffuse pour les volants (suggère la hauteur).
+        const shW = unitSize * scaleMult * (cfg && cfg.flying ? 0.40 : 0.58);
+        const shadow = this.add.ellipse(unit.x, unit.y, shW, shW * 0.40, 0x000000,
+          cfg && cfg.flying ? 0.16 : 0.26).setDepth(48);
+        sprite._shadow = shadow;
+        sprite._shadowOffsetY = unitSize * scaleMult * (cfg && cfg.flying ? 0.55 : 0.34);
 
         if (unit.ownerId === myId) {
           sprite.setInteractive(new Phaser.Geom.Circle(sprite.width / 2, sprite.height / 2, 30), Phaser.Geom.Circle.Contains);
@@ -1359,15 +1378,17 @@ class MainScene extends Phaser.Scene {
           if (unit.type === 'boat' && paxCount > 0) badge.setText(`🧍${paxCount}/4`);
           else badge.setText(this._modeIcon(unit.mode));
         }
-        if (sprite.setTint) sprite.setTint(colorInt);
+        if (sprite.setTint && !sprite._attacking && !sprite._flashing) { sprite.setTint(colorInt); }
+        sprite._factionColor = colorInt;
 
         if (hpChanged) {
-          const ratio = unit.hp / unit.maxHp;
-          barFill.width = Math.max(0, BAR_W * ratio);
+          const ratio = Math.max(0, unit.hp / unit.maxHp);
           const c = ratio > 0.6 ? 0x22c55e : ratio > 0.3 ? 0xf59e0b : 0xef4444;
           barFill.setFillStyle(c);
+          // Barre de vie animée (tween de la largeur, subtil)
+          this.tweens.add({ targets: barFill, width: BAR_W * ratio, duration: 120, ease: 'Quad.easeOut' });
         }
-        if (posChanged) {
+        if (posChanged && !sprite._attacking) {
           if (this.unitTweens[id]) this.unitTweens[id].stop();
           this.unitTweens[id] = this.tweens.add({
             targets: sprite, x: unit.x, y: unit.y,
@@ -1387,9 +1408,11 @@ class MainScene extends Phaser.Scene {
     }
     for (const id of this.selectedUnitIds) {
       if (this.selectionRings[id] || !this.unitSprites[id]) continue;
-      // Sprite-based ring with pulse tween
-      const ring = this.add.sprite(this.unitSprites[id][0].x, this.unitSprites[id][0].y, 'selection-ring');
+      // Sprite-based ring with pulse tween — teinté couleur de faction
+      const ownerSprite = this.unitSprites[id][0];
+      const ring = this.add.sprite(ownerSprite.x, ownerSprite.y, 'selection-ring');
       ring.setDepth(55); // au-dessus des unités, sous les barres de vie
+      ring.setTint(ownerSprite._factionColor != null ? ownerSprite._factionColor : 0xfbbf24);
       this.tweens.add({
         targets: ring,
         scaleX: { from: 0.85, to: 1.05 },
@@ -1430,11 +1453,18 @@ class MainScene extends Phaser.Scene {
         const oy = iconOverlay._iconOffsetY || 0;
         iconOverlay.setPosition(sprite.x + ox, sprite.y + oy);
       }
-      // Multiplie le baseScale (pas setScale absolu) pour garder la taille définie par setDisplaySize
+      // Ombre portée : suit l'unité, légèrement écrasée quand l'unité s'étire (saut/lunge)
+      if (sprite._shadow) {
+        sprite._shadow.setPosition(sprite.x, sprite.y + (sprite._shadowOffsetY || 0));
+      }
+      // Multiplie le baseScale (pas setScale absolu) pour garder la taille définie
+      // par setDisplaySize. Inclut le squash&stretch d'attaque (_atkScaleX/Y).
       const bx = sprite._baseScaleX || sprite.scaleX;
       const by = sprite._baseScaleY || sprite.scaleY;
       if (bx && by) {
-        sprite.setScale(bx, by * (1 + wobble * 0.025));
+        const ax = sprite._atkScaleX || 1;
+        const ay = sprite._atkScaleY || 1;
+        sprite.setScale(bx * ax, by * ay * (1 + wobble * 0.025));
       }
     }
   }
@@ -1601,25 +1631,65 @@ class MainScene extends Phaser.Scene {
 
   // ── Visual effects ────────────────────────────────────────────────
 
+  // Flash de coup encaissé : silhouette blanche brève (setTintFill) puis retour
+  // à la teinte de faction. (Anciennement setFillStyle → cassé sur les Sprites.)
   _flashUnit(unitId) {
     const sprites = this.unitSprites[unitId];
     if (!sprites) return;
-    const [circle] = sprites;
-    const origColor = circle.fillColor;
-    circle.setFillStyle(0xffffff);
-    this.time.delayedCall(80, () => {
-      if (this.unitSprites[unitId]) circle.setFillStyle(origColor);
+    const sprite = sprites[0];
+    if (!sprite || !sprite.setTintFill) return;
+    sprite._flashing = true;
+    sprite.setTintFill(0xffffff);
+    this.time.delayedCall(70, () => {
+      const s = this.unitSprites[unitId] && this.unitSprites[unitId][0];
+      if (s && s.setTint) { s._flashing = false; s.setTint(s._factionColor != null ? s._factionColor : 0xffffff); }
     });
   }
 
   _flashHdv(playerId) {
     const sprites = this.hdvSprites[playerId];
     if (!sprites) return;
-    const [rect] = sprites;
-    const origColor = rect.fillColor;
-    rect.setFillStyle(0xffffff);
-    this.time.delayedCall(80, () => {
-      if (this.hdvSprites[playerId]) rect.setFillStyle(origColor);
+    const obj = sprites[0];
+    if (!obj) return;
+    if (obj.setTintFill) {
+      obj.setTintFill(0xffffff);
+      this.time.delayedCall(80, () => {
+        const o = this.hdvSprites[playerId] && this.hdvSprites[playerId][0];
+        if (o && o.setTint) o.setTint(o._factionColor != null ? o._factionColor : 0xffffff);
+      });
+    } else if (obj.setFillStyle) {
+      const orig = obj.fillColor;
+      obj.setFillStyle(0xffffff);
+      this.time.delayedCall(80, () => {
+        if (this.hdvSprites[playerId]) obj.setFillStyle(orig);
+      });
+    }
+  }
+
+  // Arc d'arme (croissant de lame) + étincelle d'impact pour la mêlée.
+  _spawnWeaponArc(ax, ay, tx, ty, type) {
+    const angle = Math.atan2(ty - ay, tx - ax);
+    // Point de contact ~65% vers la cible
+    const px = ax + (tx - ax) * 0.65;
+    const py = ay + (ty - ay) * 0.65;
+    const gold = (type === 'knight' || type === 'heavy_knight' || type === 'holy_knight'
+               || type === 'general' || type === 'elite_guard' || type === 'god_avatar');
+    const arc = this.add.sprite(px, py, 'slash')
+      .setRotation(angle - 0.85).setDepth(56).setScale(0.7).setAlpha(0.95);
+    if (gold) arc.setTint(0xfde047);
+    this.tweens.add({
+      targets: arc,
+      rotation: angle + 0.85,
+      scale: { from: 0.7, to: 1.25 },
+      alpha: { from: 0.95, to: 0 },
+      duration: 200, ease: 'Cubic.easeOut',
+      onComplete: () => arc.destroy(),
+    });
+    // Étincelle d'impact sur la cible
+    const spark = this.add.circle(tx, ty, 6, gold ? 0xfff3b0 : 0xffffff, 0.9).setDepth(57);
+    this.tweens.add({
+      targets: spark, scale: { from: 0.5, to: 2.2 }, alpha: { from: 0.9, to: 0 },
+      duration: 180, onComplete: () => spark.destroy(),
     });
   }
 
@@ -1652,44 +1722,37 @@ class MainScene extends Phaser.Scene {
     });
   }
 
-  // ── Animations d'attaque selon le type d'unité ──────────────────
-  _playAttackAnimation(attacker, tx, ty) {
-    const dx = tx - attacker.x, dy = ty - attacker.y;
-    const angle = Math.atan2(dy, dx);
-
-    // Lecture config : si projectile défini → spawn sprite projectile qui vole
-    // INCLUSIF de l'archer (qui utilise proj_arrow.png comme tous les autres)
+  // ── Animations d'attaque selon la catégorie d'unité ─────────────
+  //   mêlée      : anticipation → lunge → recoil + arc d'arme
+  //   distance   : draw → fire (puis projectile)
+  //   caster     : channel → cast (puis projectile)
+  _playAttackAnimation(attacker, tx, ty, attackerId) {
     const cfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[attacker.type] : null;
+    const sprite = (attackerId && this.unitSprites[attackerId]) ? this.unitSprites[attackerId][0] : null;
+    const hasRig = (sprite && typeof Animations !== 'undefined');
+
+    // DISTANCE / CASTER : projectile défini → l'anim déclenche le tir au bon moment
     if (cfg && cfg.projectile && this._hasAsset(cfg.projectile)) {
-      this._playProjectileAnim(attacker.x, attacker.y, tx, ty, cfg.projectile);
+      const fire = () => {
+        const ox = sprite ? sprite.x : attacker.x;
+        const oy = sprite ? sprite.y : attacker.y;
+        this._playProjectileAnim(ox, oy, tx, ty, cfg.projectile);
+      };
+      const isCaster = cfg.category === 'magic' || cfg.category === 'religion';
+      if (hasRig && isCaster && Animations.animateCast) Animations.animateCast(this, sprite, tx, ty, fire);
+      else if (hasRig && Animations.animateDraw)        Animations.animateDraw(this, sprite, tx, ty, fire);
+      else fire();
       return;
     }
 
-    // Pas de projectile défini (mêlée pure : soldier, knight, heavy_knight, paladin, etc.)
-    // → arc de slash blanc apparaissant sur la cible
-    const slash = this.add.sprite(tx, ty, 'slash')
-      .setRotation(angle)
-      .setDepth(55)
-      .setScale(0.5);
-    this.tweens.add({
-      targets: slash,
-      scale: { from: 0.7, to: 1.15 },
-      alpha: { from: 1, to: 0 },
-      duration: 220,
-      ease: 'Cubic.easeOut',
-      onComplete: () => slash.destroy(),
-    });
-    // Chevalier / cavalry : impact flash doré supplémentaire
-    if (attacker.type === 'knight' || attacker.type === 'heavy_knight' || attacker.type === 'holy_knight') {
-      const flash = this.add.circle(tx, ty, 18, 0xfbbf24, 0.55).setDepth(54);
-      this.tweens.add({
-        targets: flash,
-        scale: { from: 0.6, to: 1.8 },
-        alpha: { from: 0.6, to: 0 },
-        duration: 250,
-        onComplete: () => flash.destroy(),
-      });
-    }
+    // MÊLÉE : rig lunge + arc d'arme au moment de la frappe
+    const strike = () => {
+      const ox = sprite ? sprite.x : attacker.x;
+      const oy = sprite ? sprite.y : attacker.y;
+      this._spawnWeaponArc(ox, oy, tx, ty, attacker.type);
+    };
+    if (hasRig && Animations.animateMelee) Animations.animateMelee(this, sprite, tx, ty, strike);
+    else strike();
   }
 
   // ── Projectile générique : sprite tourné vers la cible + anim arrivée ──
