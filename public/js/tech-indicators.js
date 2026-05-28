@@ -35,7 +35,7 @@ const TechIndicators = (() => {
     empire:         { icon: '👑', color: 0xfbbf24, label: 'Empire (+50% gold)' },
     printing:       { icon: '📜', color: 0x8b5cf6, label: 'Imprimerie (×2 PR)' },
     citadel:        { icon: '🏰', color: 0xef4444, label: 'Citadelle (3× HP HDV)' },
-    renaissance:    { icon: '🌟', color: 0xfde68a, label: 'Renaissance' },
+    renaissance:    { icon: '👁', color: 0xfde68a, label: 'Renaissance — Omniscience minimap' },
     crossbows:      { icon: '🎯', color: 0xea580c, label: 'Arbalètes (archer +50% dmg)' },
     military_architecture: { icon: '🏯', color: 0x6b7280, label: 'Architecture militaire' },
 

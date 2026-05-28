@@ -11,6 +11,37 @@ const HdvPanel = (() => {
   let upgradeBtn  = null;
   let cardsBuilt  = false;
 
+  // Unités INVOQUÉES UNIQUEMENT (jamais en production HDV/village) — cachées
+  // par défaut. Ces unités apparaissent via le passif d'une autre unité
+  // (necromancer→skeleton, lich→skeleton_knight). Elles n'ont pas
+  // requiresTech ni d'entrée dans unlocks.units du techTree.
+  const SUMMONED_ONLY = new Set(['skeleton', 'skeleton_knight']);
+
+  // Map { unitId → techId requise } construite à partir des unlocks.units du
+  // techTree. Permet de cacher les unités dont la tech n'est pas débloquée
+  // même quand u.requiresTech est null côté serveur (ex: fire_elemental,
+  // arcane_dragon, angel, god_avatar — débloqués via unlocks.units).
+  let _unitTechMap = null;
+  function _buildUnitTechMap(cfg) {
+    if (_unitTechMap) return _unitTechMap;
+    _unitTechMap = {};
+    const tt = cfg.techTree || {};
+    for (const tid of Object.keys(tt)) {
+      const t = tt[tid];
+      const units = t.unlocks && t.unlocks.units;
+      if (Array.isArray(units)) units.forEach(uid => { _unitTechMap[uid] = tid; });
+    }
+    return _unitTechMap;
+  }
+  // Renvoie la tech requise pour qu'une unité apparaisse en production,
+  // ou null si l'unité est de base (soldat), ou SUMMONED_ONLY = caché.
+  function _effectiveRequiredTech(u, cfg) {
+    if (SUMMONED_ONLY.has(u.id)) return '__SUMMONED_ONLY__';
+    if (u.requiresTech) return u.requiresTech;
+    const map = _buildUnitTechMap(cfg);
+    return map[u.id] || null;
+  }
+
   function _initListenersOnce() {
     if (panelEl) return;
     panelEl    = document.getElementById('hdv-panel');
@@ -180,27 +211,27 @@ const HdvPanel = (() => {
       upgradeBtn.classList.toggle('disabled', me.gold < cost);
     }
 
-    // ── Unit cards : on update juste les classes et le label de lock ───
+    // ── Unit cards : CACHE complètement les unités dont la tech requise
+    //    n'est pas débloquée + les invocations pures (skeleton…). Les
+    //    autres conservent leur état locked/poor selon les ressources/pop.
     for (const card of prodEl.querySelectorAll('.unit-card')) {
       const u = cfg.unitTypes[card.dataset.unitId];
       if (!u) continue;
-      const unlocked   = !u.requiresTech || (me.unlockedTechs || []).includes(u.requiresTech);
+      const req = _effectiveRequiredTech(u, cfg);
+      const unlocked = (req === null) || (req !== '__SUMMONED_ONLY__'
+        && (me.unlockedTechs || []).includes(req));
+      // Hide / show selon le statut tech
+      card.style.display = unlocked ? '' : 'none';
+      if (!unlocked) continue;
       const popCost = u.populationCost || 1;
       const popOk = (me.populationUsed || 0) + popCost <= (me.populationMax || 8);
       const manaOk  = !u.manaCost  || (me.mana  || 0) >= u.manaCost;
       const faithOk = !u.faithCost || (me.faith || 0) >= u.faithCost;
       const affordable = me.gold >= u.cost && manaOk && faithOk && popOk;
-      card.classList.toggle('locked', !unlocked);
-      card.classList.toggle('poor', unlocked && !affordable);
+      card.classList.remove('locked');
+      card.classList.toggle('poor', !affordable);
       const lockNote = card.querySelector('[data-role="lock"]');
-      if (lockNote) {
-        if (!unlocked) {
-          lockNote.textContent = `🔒 ${techNameOf(u.requiresTech)}`;
-          lockNote.style.display = '';
-        } else {
-          lockNote.style.display = 'none';
-        }
-      }
+      if (lockNote) lockNote.style.display = 'none';
     }
 
     // ── Building cards : update lock + affordability ──────────────────
@@ -210,19 +241,14 @@ const HdvPanel = (() => {
         const b = cfg.buildingTypes[card.dataset.buildingType];
         if (!b) continue;
         const unlocked   = !b.requiresTech || (me.unlockedTechs || []).includes(b.requiresTech);
+        // Cache complètement les bâtiments tech-locked
+        card.style.display = unlocked ? '' : 'none';
+        if (!unlocked) continue;
         const affordable = me.gold >= b.cost;
-        card.classList.toggle('locked', !unlocked);
-        card.classList.toggle('poor', unlocked && !affordable);
+        card.classList.remove('locked');
+        card.classList.toggle('poor', !affordable);
         const lockNote = card.querySelector('[data-role="lock"]');
-        if (lockNote) {
-          if (!unlocked) {
-            const t = cfg.techTree && cfg.techTree[b.requiresTech];
-            lockNote.textContent = `🔒 ${t ? t.name : b.requiresTech}`;
-            lockNote.style.display = '';
-          } else {
-            lockNote.style.display = 'none';
-          }
-        }
+        if (lockNote) lockNote.style.display = 'none';
       }
     }
   }

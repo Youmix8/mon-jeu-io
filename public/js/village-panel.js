@@ -7,6 +7,26 @@ const VillagePanel = (() => {
   let panelEl, prodEl, upgradeBtn, titleEl, levelEl, hpEl, ratesEl;
   let cardsBuilt = false;
 
+  // Filtre tech (même logique que HdvPanel) : cache les unités dont la tech
+  // n'est pas débloquée + les invocations pures (skeleton, skeleton_knight).
+  const SUMMONED_ONLY = new Set(['skeleton', 'skeleton_knight']);
+  let _unitTechMap = null;
+  function _buildUnitTechMap(cfg) {
+    if (_unitTechMap) return _unitTechMap;
+    _unitTechMap = {};
+    const tt = cfg.techTree || {};
+    for (const tid of Object.keys(tt)) {
+      const units = tt[tid].unlocks && tt[tid].unlocks.units;
+      if (Array.isArray(units)) units.forEach(uid => { _unitTechMap[uid] = tid; });
+    }
+    return _unitTechMap;
+  }
+  function _effectiveRequiredTech(u, cfg) {
+    if (SUMMONED_ONLY.has(u.id)) return '__SUMMONED_ONLY__';
+    if (u.requiresTech) return u.requiresTech;
+    return _buildUnitTechMap(cfg)[u.id] || null;
+  }
+
   function _initOnce() {
     if (panelEl) return;
     panelEl    = document.getElementById('village-panel');
@@ -153,15 +173,23 @@ const VillagePanel = (() => {
       upgradeBtn.classList.toggle('disabled', me.gold < cost);
     }
 
-    // Production cards : selon allowedUnits du niveau + tech débloquée
+    // Production cards :
+    //   - CACHE les unités dont la tech requise n'est pas débloquée
+    //   - GARDE en grisé celles bloquées par le niveau du village (Lv2 requis)
     const allowedAll = curLvl.allowedUnits === 'all';
     const allowedList = Array.isArray(curLvl.allowedUnits) ? curLvl.allowedUnits : null;
     for (const card of prodEl.querySelectorAll('.unit-card')) {
       const u = cfg.unitTypes[card.dataset.unitId];
       if (!u) continue;
-      const lvlAllowsType = allowedAll
-        ? (!u.requiresTech || (me.unlockedTechs || []).includes(u.requiresTech))
-        : (allowedList && allowedList.includes(u.id));
+      // Tech débloquée ? (gère summoned-only + unlocks.units indirects)
+      const req = _effectiveRequiredTech(u, cfg);
+      const techOk = (req === null) || (req !== '__SUMMONED_ONLY__'
+        && (me.unlockedTechs || []).includes(req));
+      // Cache si la tech n'est pas débloquée
+      card.style.display = techOk ? '' : 'none';
+      if (!techOk) continue;
+      // Niveau du village permet cette unité ?
+      const lvlAllowsType = allowedAll ? true : (allowedList && allowedList.includes(u.id));
       const popCost = u.populationCost || 1;
       const popOk = (me.populationUsed || 0) + popCost <= (me.populationMax || 8);
       const manaOk  = !u.manaCost  || (me.mana  || 0) >= u.manaCost;
@@ -172,9 +200,7 @@ const VillagePanel = (() => {
       const lockNote = card.querySelector('[data-role="lock"]');
       if (lockNote) {
         if (!lvlAllowsType) {
-          lockNote.textContent = !allowedAll
-            ? `🔒 Village Lv 2+ requis`
-            : `🔒 ${u.requiresTech ? 'Tech ' + u.requiresTech : 'verrouillé'}`;
+          lockNote.textContent = `🔒 Village Lv 2+ requis`;
           lockNote.style.display = '';
         } else {
           lockNote.style.display = 'none';
@@ -189,19 +215,14 @@ const VillagePanel = (() => {
         const b = cfg.buildingTypes[card.dataset.buildingType];
         if (!b) continue;
         const unlocked   = !b.requiresTech || (me.unlockedTechs || []).includes(b.requiresTech);
+        // Cache complètement les bâtiments tech-locked
+        card.style.display = unlocked ? '' : 'none';
+        if (!unlocked) continue;
         const affordable = me.gold >= b.cost;
-        card.classList.toggle('locked', !unlocked);
-        card.classList.toggle('poor', unlocked && !affordable);
+        card.classList.remove('locked');
+        card.classList.toggle('poor', !affordable);
         const lockNote = card.querySelector('[data-role="lock"]');
-        if (lockNote) {
-          if (!unlocked) {
-            const t = cfg.techTree && cfg.techTree[b.requiresTech];
-            lockNote.textContent = `🔒 ${t ? t.name : b.requiresTech}`;
-            lockNote.style.display = '';
-          } else {
-            lockNote.style.display = 'none';
-          }
-        }
+        if (lockNote) lockNote.style.display = 'none';
       }
     }
   }

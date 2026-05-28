@@ -54,13 +54,29 @@ const Minimap = (() => {
       }
     }
 
-    // Villages (visibles dans state.villages)
-    for (const v of (state.villages || [])) {
+    // ── Sources de données ──
+    // Si le passif d'omniscience minimap est actif (tech 'renaissance'),
+    // le serveur envoie des positions BRUTES non filtrées par fog → on
+    // les utilise pour tout afficher en permanence sur la minimap.
+    const omni = state.omniscient;
+    const villages    = omni ? omni.villages : (state.villages || []);
+    const playersList = omni ? omni.players  : Object.values(state.players || {});
+    const unitsList   = omni ? omni.units    : Object.values(state.units   || {});
+    // Index couleur par ownerId (omniscient.players contient color)
+    const colorByPid = {};
+    if (omni) {
+      for (const p of omni.players) colorByPid[p.id] = p.color;
+    } else {
+      for (const p of playersList) colorByPid[p.id] = p.color;
+    }
+
+    // Villages
+    for (const v of villages) {
       const px = v.x * sx, py = v.y * sy;
-      const owner = v.ownerId && state.players[v.ownerId];
+      const ownerColor = v.ownerId ? colorByPid[v.ownerId] : null;
       ctx.beginPath();
       ctx.arc(px, py, 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = owner ? owner.color : '#cccccc';
+      ctx.fillStyle = ownerColor || '#cccccc';
       ctx.fill();
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 1;
@@ -68,9 +84,9 @@ const Minimap = (() => {
     }
 
     // HDV — gros carré coloré, le mien avec contour blanc
-    for (const p of Object.values(state.players || {})) {
+    for (const p of playersList) {
       const px = p.x * sx, py = p.y * sy;
-      ctx.fillStyle = p.color;
+      ctx.fillStyle = p.color || '#888';
       ctx.fillRect(px - 4, py - 4, 8, 8);
       if (p.id === myId) {
         ctx.strokeStyle = '#ffffff';
@@ -79,14 +95,23 @@ const Minimap = (() => {
       }
     }
 
-    // Unités (filtered → uniquement les miennes + ennemis visibles)
-    for (const u of Object.values(state.units || {})) {
-      const owner = state.players[u.ownerId];
-      if (!owner) continue;
-      ctx.fillStyle = owner.color;
+    // Unités
+    for (const u of unitsList) {
+      const ownerColor = colorByPid[u.ownerId];
+      if (!ownerColor) continue;
+      ctx.fillStyle = ownerColor;
       ctx.beginPath();
       ctx.arc(u.x * sx, u.y * sy, 1.5, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Indicateur "Omniscience active" : œil doré clignotant en haut-gauche
+    if (omni) {
+      const blink = 0.7 + 0.3 * Math.sin(Date.now() / 350);
+      ctx.fillStyle = `rgba(251, 191, 36, ${blink.toFixed(2)})`;
+      ctx.font = '700 12px Quicksand, sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText('👁', 4, 4);
     }
 
     // Viewport caméra (rectangle blanc) — clampé aux bornes de la mini-carte

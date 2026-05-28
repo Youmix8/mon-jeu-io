@@ -171,9 +171,9 @@ const TECH_TREE = {
   },
   renaissance: {
     id: 'renaissance', axis: 'science', tier: 6, name: 'Renaissance', icon: '🌟',
-    desc: 'END NODE. Débloque la Garde d\'Élite + révèle les techs des ennemis.',
+    desc: 'END NODE. Débloque la Garde d\'Élite + omniscience minimap : tu vois en permanence TOUS les mouvements ennemis (HDV, villages, unités, bâtiments) sur la mini-carte, même dans le fog of war.',
     cost: 250, requires: ['printing', 'citadel', 'gunpowder'],
-    unlocks: { units: ['elite_guard'], passives: ['reveal_enemy_techs'] },
+    unlocks: { units: ['elite_guard'], passives: ['minimap_omniscience'] },
     pos: pos('science', 6, 1),
   },
 

@@ -1361,6 +1361,28 @@ function buildFilteredState(viewerId) {
     if (vis.visible[idx]) filteredBuildings.push(b);
   }
 
+  // Passif 'minimap_omniscience' (renaissance, Science T6) : positions BRUTES
+  // de tous les joueurs / unités / villages / bâtiments, non filtrées par fog.
+  // Le client (Minimap) les utilise pour afficher tous les mouvements ennemis.
+  // Payload léger : juste les coords + ownerId + type, pas les stats complètes.
+  let omniscient = null;
+  if (hasTech(viewer, 'renaissance')) {
+    omniscient = {
+      players: Object.values(gameState.players).map(p => ({
+        id: p.id, x: p.x, y: p.y, color: p.color, eliminated: !!p.eliminated,
+      })),
+      villages: gameState.villages.map(v => ({
+        id: v.id, x: v.x, y: v.y, ownerId: v.ownerId || null, hp: v.hp,
+      })),
+      units: Object.values(gameState.units).map(u => ({
+        id: u.id, x: u.x, y: u.y, ownerId: u.ownerId, type: u.type,
+      })),
+      buildings: gameState.buildings.map(b => ({
+        id: b.id, x: b.x, y: b.y, ownerId: b.ownerId, type: b.type,
+      })),
+    };
+  }
+
   return {
     players: filteredPlayers,
     units: filteredUnits,
@@ -1370,6 +1392,7 @@ function buildFilteredState(viewerId) {
     winnerId: gameState.winnerId,
     matchStartTime: gameState.matchStartTime,
     playerSummary,
+    omniscient,
     fog: seeAll ? null : {
       visible:  Buffer.from(vis.visible.buffer, vis.visible.byteOffset, vis.visible.byteLength),
       explored: Buffer.from(vis.explored.buffer, vis.explored.byteOffset, vis.explored.byteLength),
