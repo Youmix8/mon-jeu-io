@@ -1203,12 +1203,21 @@ function unitTypeUnlocked(player, typeId) {
   return hasTech(player, def.requiresTech);
 }
 
-const FALLBACK_SPAWNS = [
-  { x: 500,  y: 500  },
-  { x: 4000, y: 500  },
-  { x: 500,  y: 4000 },
-  { x: 4000, y: 4000 },
-];
+// Fallback en coin DYNAMIQUE (relatif à la taille actuelle de la map).
+// Bug fix : auparavant hardcodé { x:500, y:500 }, { x:4000, y:500 }… ce qui
+// envoyait 3 HDV sur 4 HORS de la map quand celle-ci faisait 3000 (Petite).
+// `isWaterTile` retourne false pour les tiles hors-grille → la boucle de
+// correction "push vers le centre" ne se déclenchait pas, et le HDV du bot
+// finissait positionné à (4000, …) hors de la map 3000×3000.
+function fallbackSpawns() {
+  const m = SPAWN_MARGIN;
+  return [
+    { x: m,             y: m              },
+    { x: MAP_WIDTH - m, y: m              },
+    { x: m,             y: MAP_HEIGHT - m },
+    { x: MAP_WIDTH - m, y: MAP_HEIGHT - m },
+  ];
+}
 
 const COLORS = ['#ff6b6b', '#4dabf7', '#69db7c', '#ffd43b']; // rouge corail, bleu ciel, vert pomme, jaune solaire
 
@@ -1235,10 +1244,19 @@ function generateSpawns() {
   }
   if (spawns.length < MAX_PLAYERS) {
     console.warn(`generateSpawns: only placed ${spawns.length}/${MAX_PLAYERS} after ${attempts} tries, using fallback corners`);
-    // Fallback : utilise les coins mais vérifie qu'ils sont sur terre, sinon les pousse vers le centre
-    return FALLBACK_SPAWNS.map(s => {
+    // Fallback : utilise les coins mais vérifie qu'ils sont sur terre, sinon les pousse vers le centre.
+    // Les coins sont recalculés à partir de la taille de map ACTUELLE (cf. fallbackSpawns).
+    return fallbackSpawns().map(s => {
       let x = s.x, y = s.y;
-      while (isWaterAt(x, y)) { x += (MAP_WIDTH/2 - x) * 0.2; y += (MAP_HEIGHT/2 - y) * 0.2; }
+      // Clamp dans la map (sécurité supplémentaire)
+      x = Math.max(SPAWN_MARGIN, Math.min(MAP_WIDTH  - SPAWN_MARGIN, x));
+      y = Math.max(SPAWN_MARGIN, Math.min(MAP_HEIGHT - SPAWN_MARGIN, y));
+      // Évite l'eau : pousse vers le centre par pas de 20 %
+      let safety = 20;
+      while (isWaterAt(x, y) && safety-- > 0) {
+        x += (MAP_WIDTH/2 - x) * 0.2;
+        y += (MAP_HEIGHT/2 - y) * 0.2;
+      }
       return { x: Math.round(x), y: Math.round(y) };
     });
   }
