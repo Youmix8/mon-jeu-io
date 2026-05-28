@@ -719,7 +719,22 @@ function unitHpMult(player, typeId) {
   if (player && hasTech(player, 'illusion') && MAGIC_UNDEAD.has(typeId)) {
     mult *= 1.15;
   }
+  // Passif 'all_hp_regen' (blessing) : +10% HP max sur TOUTES les unités du joueur
+  if (player && hasTech(player, 'blessing')) {
+    mult *= 1.10;
+  }
   return mult;
+}
+
+// Rayon de vision d'une unité — boosté par le passif 'magic_speed_vision' (lightning)
+// pour les unités magie / undead : +30 %.
+function unitVisionRadius(unit) {
+  if (!unit) return VISION_UNIT;
+  const owner = gameState.players && gameState.players[unit.ownerId];
+  if (owner && MAGIC_UNDEAD.has(unit.type) && hasTech(owner, 'lightning')) {
+    return Math.round(VISION_UNIT * 1.30);
+  }
+  return VISION_UNIT;
 }
 
 // ────────── Bot IA ──────────
@@ -1284,7 +1299,7 @@ function computeVisibility(player) {
     } else {
       markCircle(vis.visible, player.x, player.y, player.vision || HDV_LEVELS[0].vision);
       for (const unit of Object.values(gameState.units)) {
-        if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, VISION_UNIT);
+        if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, unitVisionRadius(unit));
       }
       for (const v of gameState.villages) {
         if (v.ownerId !== player.id || v.destroyed) continue;
@@ -1308,7 +1323,14 @@ function buildFilteredState(viewerId) {
   const playerSummary   = [];
 
   for (const [pid, p] of Object.entries(gameState.players)) {
-    playerSummary.push({ id: p.id, name: p.name, color: p.color, eliminated: p.eliminated });
+    // Les techs débloquées sont PUBLIQUES (visibles par tous, indépendamment du fog)
+    // → permet d'afficher les effets visuels de passifs sur les unités/bâtiments
+    //   d'un joueur même quand son HDV est dans le brouillard. Robin a explicitement
+    //   demandé que les ennemis voient les passifs adverses.
+    playerSummary.push({
+      id: p.id, name: p.name, color: p.color, eliminated: p.eliminated,
+      unlockedTechs: Array.isArray(p.unlockedTechs) ? p.unlockedTechs.slice() : [],
+    });
     if (seeAll || pid === viewerId) { filteredPlayers[pid] = p; continue; }
     const idx = Math.floor(p.y / TILE_SIZE) * GRID_W + Math.floor(p.x / TILE_SIZE);
     // HDV : visible si tuile visible OU explorée (HDV statique = on garde la mémoire)

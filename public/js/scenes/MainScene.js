@@ -660,6 +660,12 @@ class MainScene extends Phaser.Scene {
 
     this._syncHDVs(state.players);
     this._syncUnits(state.units || {}, state.players);
+
+    // Indicateurs de passifs (badges + halos HDV) — visibles par TOUS les joueurs
+    if (typeof TechIndicators !== 'undefined') {
+      const visibleHdvPids = new Set(Object.keys(this.hdvSprites));
+      TechIndicators.sync(state.playerSummary || [], visibleHdvPids, state.players);
+    }
   }
 
   // ── Villages neutres ─────────────────────────────────────────────
@@ -1012,6 +1018,7 @@ class MainScene extends Phaser.Scene {
     if (typeof RadialMenu !== 'undefined') RadialMenu.init(this);
     if (typeof BuildMode !== 'undefined') BuildMode.init(this);
     if (typeof SpellCast !== 'undefined') SpellCast.init(this);
+    if (typeof TechIndicators !== 'undefined') TechIndicators.init(this);
     this.buildingSprites = {};
 
     this.mapBuilt = true;
