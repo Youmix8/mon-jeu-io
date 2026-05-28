@@ -768,10 +768,17 @@ class MainScene extends Phaser.Scene {
       const c = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
       s.hpFill.setFillStyle(c);
     }
-    // Cleanup
+    // Cleanup : bâtiment détruit → burst de debris (pierre + poussière) à sa
+    // position avant de détruire les sprites. Léger shake caméra pour le poids.
     for (const id of Object.keys(this.buildingSprites)) {
       if (!seen.has(id)) {
         const s = this.buildingSprites[id];
+        const bx = s.bg ? s.bg.x : 0;
+        const by = s.bg ? s.bg.y : 0;
+        const sz = s._finalSize || 50;
+        if (s.bg) this._spawnBuildingDebris(bx, by, sz);
+        // Shake subtil proportionnel à la taille (gros bâtiments → plus visible)
+        this.cameras.main.shake(180, Math.min(0.006, 0.0015 + sz / 12000));
         Object.values(s).forEach(o => o && o.destroy && o.destroy());
         delete this.buildingSprites[id];
       }
@@ -1230,6 +1237,12 @@ class MainScene extends Phaser.Scene {
         hdvObj.setPosition(player.x, player.y);
         const hdvShadow = this.hdvSprites[id][6];
         if (hdvShadow) { hdvShadow.setPosition(player.x, player.y + HDV_DISPLAY * 0.34); hdvShadow.setAlpha(destroyed ? 0.14 : 0.30); }
+        // Détection de la transition vivant → détruit : debris + shake (événement majeur)
+        if (destroyed && !hdvObj._wasDestroyed) {
+          this._spawnBuildingDebris(player.x, player.y, HDV_DISPLAY);
+          this.cameras.main.shake(280, 0.008);
+          hdvObj._wasDestroyed = true;
+        }
         const hdvTintU = destroyed ? 0x888888 : this._factionTint(colorInt);
         if (hdvObj.setTint) hdvObj.setTint(hdvTintU);
         hdvObj._factionColor = hdvTintU;
@@ -1275,6 +1288,11 @@ class MainScene extends Phaser.Scene {
           // L'ombre s'estompe avec le corps
           this.tweens.add({ targets: sprite._shadow, alpha: 0, duration: 300,
             onComplete: () => sprite._shadow && sprite._shadow.destroy() });
+        }
+        // Mort d'un boss (dragon arcane, god avatar) : shake caméra subtil
+        const _deadCfg = (sprite && typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[sprite._unitType] : null;
+        if (_deadCfg && _deadCfg.boss) {
+          this.cameras.main.shake(250, 0.006);
         }
         if (sprite && typeof Animations !== 'undefined') {
           Animations.animateUnitDeath(this, sprite);
@@ -1757,6 +1775,34 @@ class MainScene extends Phaser.Scene {
     });
     emitter.explode(10);
     this.time.delayedCall(700, () => emitter.destroy());
+  }
+
+  // Debris de destruction d'un bâtiment : éclats de pierre + bouffée de poussière
+  _spawnBuildingDebris(x, y, size) {
+    const chunks = Math.min(22, Math.max(10, Math.round(size / 5)));
+    const debris = this.add.particles(x, y, 'particle', {
+      tint: [0x6b5b4a, 0x4a3f33, 0x8a7960, 0xa6967c],
+      speed: { min: 80, max: 220 },
+      angle: { min: 0, max: 360 },
+      scale: { start: size / 38, end: 0.1 },
+      alpha: { start: 1, end: 0 },
+      lifespan: { min: 500, max: 850 },
+      gravityY: 320,
+      rotate: { start: 0, end: 720 },
+      emitting: false,
+    }).setDepth(70);
+    debris.explode(chunks);
+    const dust = this.add.particles(x, y, 'particle', {
+      tint: [0xd6c9b0, 0xb8a78c, 0xe5dcc7],
+      speed: { min: 40, max: 130 },
+      angle: { min: 180, max: 360 },
+      scale: { start: size / 32, end: 0 },
+      alpha: { start: 0.7, end: 0 },
+      lifespan: 700,
+      emitting: false,
+    }).setDepth(68);
+    dust.explode(Math.max(8, Math.round(chunks * 0.7)));
+    this.time.delayedCall(1100, () => { debris.destroy(); dust.destroy(); });
   }
 
   // Poussière de construction (apparition d'un bâtiment)
