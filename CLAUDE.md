@@ -232,7 +232,7 @@ Format multi-lignes via heredoc, avec :
 |---|---|---|
 | 1 | **Boats sans combat naval** : `damage: 0, range: 0` → pas d'attaque entre bateaux | Latent, non prioritaire |
 | 2 | ~~**IA bot ignore le naval**~~ | ✅ RÉSOLU (commit `976387c`) — voir botTick : construit port, spawn bateaux, wave navale (embarque/traverse/débarque) |
-| 3 | **Passifs tech décoratifs** | ✅ QUASI-RÉSOLU (commit `976387c`) — 6 passifs activés (martyr_explosion gaté, magic_slow_chance, magic_hp_boost, magic_curse_aura, religion_curse_aura, magic_atk_speed). **Reste UNIQUEMENT `reveal_enemy_techs`** (besoin UI client) |
+| 3 | ~~**Passifs tech décoratifs**~~ | ✅ RÉSOLU (commits `b47f69c` + `46f164c`) — 25/25 passifs actifs. Les 3 derniers ont été ajoutés : `blessing` (+10% HP max all units), `lightning` (vision +30% magie/undead), et `reveal_enemy_techs` remplacé par **omniscience minimap** (tech renaissance = vois tous les mouvements ennemis en permanence sur la mini-carte). Visualisation publique : chaque tech débloquée affiche un badge emoji autour du HDV + halo pulsant pour les passifs de zone (prayer/citadel/empire) — visibles par TOUS les joueurs (ennemis voient tes passifs dès qu'ils voient ton HDV). |
 | 4 | **Debug panel accessible en prod** (touche `` ` ``) | Cheat possible — à gater par env var |
 | 5 | **HUD double 👥 emoji** (pop + unit count) | UX mineur |
 | 6 | **Pas de feedback "port nécessite eau adjacente"** | UX |
@@ -277,7 +277,7 @@ créatifs.
 
 ## 🎯 Priorités actuelles (mise à jour session charming-black)
 
-État au dernier commit (`d4f9da1`, session optimistic-albattani) :
+État au dernier commit (`b35a48e`, session optimistic-albattani) :
 - ✅ Bugs critiques résolus : caméra dérive, projectiles, ange tremble, tech panel
   refresh, buildings cliquables, riposte auto
 - ✅ Système population implémenté
@@ -286,7 +286,15 @@ créatifs.
 - ✅ Boats transport (embark/disembark)
 - ✅ Village côtier garanti sur maps avec eau
 - ✅ **IA bot naval** : construit port, spawn bateaux, wave navale complète
-- ✅ **6 passifs tech activés** (cf. tableau bugs #3)
+- ✅ **25/25 PASSIFS TECH ACTIFS** (commits `b47f69c` + `46f164c`) — `blessing` +10% HP,
+  `lightning` vision +30%, `renaissance` transformée en **omniscience minimap**.
+  Visualisation publique : badges emoji + halos pulsants sur HDV (visibles par les ennemis).
+- ✅ **HDV / Village panels** cachent les unités tech-locked (commit `46f164c`) —
+  helper `_effectiveRequiredTech` qui résout aussi les techs indirectes via
+  `unlocks.units`, plus un set `SUMMONED_ONLY` pour skeleton/skeleton_knight.
+- ✅ **Bug fix HDV bot spawn hors map** (commit `b35a48e`) — `FALLBACK_SPAWNS`
+  hardcodé en (4000,…) était hors map sur Petite (3000). Remplacé par
+  `fallbackSpawns()` dynamique depuis MAP_WIDTH/HEIGHT + clamp.
 - ✅ **PASS POLISH VISUEL AAA — 6 phases** (commits `b241df2`→`d4f9da1`) :
   - Phase 1 — rig combat procédural (anticipation→lunge→recoil mêlée,
     draw→fire distance, channel→cast caster) + ombres + ring faction +
@@ -304,9 +312,15 @@ créatifs.
     game-over overlay avec entrée pop & halo doré
 
 À faire dans une prochaine session (par ordre d'impact estimé) :
-1. **Audio** (Web Audio / Howler) — SFX spawn/coup/mort/sort/capture + musique d'ambiance.
-   C'est la dernière brique du pass AAA non encore livrée.
-2. **🎨 ~~GROS PASS POLISH VISUEL AAA~~** ✅ TERMINÉ — résumé conservé ci-dessous :
+1. **🌍 GROS AJOUT GAMEPLAY PvE** (priorité #1, prévu par Robin) — vie sur la map :
+   options à choisir (cf. dernier prompt préparé) : villages barbares avec garnison +
+   raids dynamiques (A), camps de bandits (B), bosses errants (C), faune dispersée (D),
+   vagues PvE timed (E), villages évolutifs (F). Recommandation : A + D combinés.
+   Direction : intégration native dans le système villages existant, autorité serveur,
+   IA bot adaptée, équilibrage via AskUserQuestion.
+2. **Audio** (Web Audio / Howler) — SFX spawn/coup/mort/sort/capture + musique d'ambiance.
+   C'est la dernière brique du pass AAA visuel non encore livrée.
+3. **🎨 ~~GROS PASS POLISH VISUEL AAA~~** ✅ TERMINÉ — résumé conservé ci-dessous :
    - **Animations de coups** par type d'unité (mêlée : anticipation→lunge→recoil
      + arc d'arme ; distance : draw→fire ; caster : channel→cast)
    - **Redesign cohérent** de TOUTES les entités (unités, bâtiments, projectiles)
@@ -323,8 +337,8 @@ créatifs.
    - **Audio** (Web Audio/Howler) : SFX spawn/coup/mort/sort/capture + musique ambiance
    → Procéder PAR PHASES avec commit + vérif preview à chaque étape. 60 fps obligatoire
      (réutiliser les emitters). `AskUserQuestion` pour les choix créatifs (intensité shake, palette).
-2. **`reveal_enemy_techs`** (renaissance) : seul passif restant, besoin d'UI client
-3. **Combat naval** : donner damage aux bateaux ou unités navales dédiées
+2. ~~**`reveal_enemy_techs`** (renaissance)~~ ✅ FAIT (commit `46f164c`) — remplacé par omniscience minimap
+3. **Combat naval** : donner damage aux bateaux ou unités navales dédiées (bug latent #1)
 4. **Tutoriel intégré** (1ère partie : 3 tooltips guidés)
 5. **Touch controls mobile**
 
@@ -364,11 +378,14 @@ créatifs.
 
 ---
 
-**Dernière mise à jour** : commit `d4f9da1` (session optimistic-albattani) —
-Pass polish visuel AAA complet en 6 phases (rig combat unités + bâtiments &
-projectiles vivants + juice subtil + FX WebGL + eau & terrain + HUD glass).
-Direction artistique verrouillée par Robin : technique hybride (PNG intacts +
-rig procédural), style cinématique lisible, ambiance chaude + glow faction
-néon, intensité juice SUBTILE.
+**Dernière mise à jour** : commit `b35a48e` (session optimistic-albattani) —
+Pass polish visuel AAA complet (6 phases) + 25/25 passifs actifs + visualisation
+publique des passifs (badges/halos HDV) + HDV/Village panels cachent les unités
+tech-locked + bug spawn HDV hors map corrigé + renaissance transformée en
+omniscience minimap. Direction artistique verrouillée par Robin : technique
+hybride (PNG intacts + rig procédural), style cinématique lisible, ambiance
+chaude + glow faction néon, intensité juice SUBTILE.
+Prochain gros chantier (prompt préparé pour nouvelle conv) : ajout PvE sur
+la map (villages barbares + faune dispersée).
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier commit
 de ta session.
