@@ -274,6 +274,18 @@ class MainScene extends Phaser.Scene {
     pg.generateTexture('particle', 8, 8);
     pg.destroy();
 
+    // ── FX caméra : vignette + color grading chaud (ambiance verrouillée) ──
+    // API FX Phaser 3.90 : nécessite le renderer WebGL (pas Canvas).
+    if (this.cameras.main.postFX && this.game.renderer && this.game.renderer.type === Phaser.WEBGL) {
+      // Vignette douce : centre clair, bords assombris (subtil pour rester lisible)
+      this.cameras.main.postFX.addVignette(0.5, 0.5, 0.85, 0.45);
+      // Color grading chaud très léger : un peu de saturation + hue légèrement chaud
+      const cm = this.cameras.main.postFX.addColorMatrix();
+      if (cm.saturate) cm.saturate(0.08);
+      if (cm.hue)      cm.hue(-4);
+      if (cm.brightness) cm.brightness(1.01);
+    }
+
     // Recalcule la borne de zoom min si on redimensionne la fenêtre
     this.scale.on('resize', () => {
       if (!this.mapBuilt) return;
@@ -1401,6 +1413,14 @@ class MainScene extends Phaser.Scene {
           if (cfg && (cfg.boss || cfg.flying)) Animations.animateIdleAmbient(this, sprite, unit.type);
           if (unit.type === 'fire_elemental') Animations.animateIdleAmbient(this, sprite, unit.type);
         }
+        // Glow faction pour les boss (dragon arcane, god avatar) + fire elemental — aura tinted.
+        if (cfg && (cfg.boss || unit.type === 'fire_elemental') && sprite.postFX) {
+          const glowCol = (unit.type === 'fire_elemental') ? 0xff7b33
+                        : (unit.type === 'god_avatar')    ? 0xfde047
+                        : (unit.type === 'arcane_dragon') ? 0x8b5cf6
+                        : colorInt;
+          try { sprite.postFX.addGlow(glowCol, 6, 0, false, 0.1, 10); } catch (_) {}
+        }
 
         // Si l'asset PRIMAIRE était un placeholder (peu importe qu'on ait swappé
         // vers un fallback intelligent), superpose l'emoji du type pour
@@ -1470,7 +1490,12 @@ class MainScene extends Phaser.Scene {
       const ownerSprite = this.unitSprites[id][0];
       const ring = this.add.sprite(ownerSprite.x, ownerSprite.y, 'selection-ring');
       ring.setDepth(55); // au-dessus des unités, sous les barres de vie
-      ring.setTint(ownerSprite._factionRaw != null ? ownerSprite._factionRaw : 0xfbbf24);
+      const ringColor = ownerSprite._factionRaw != null ? ownerSprite._factionRaw : 0xfbbf24;
+      ring.setTint(ringColor);
+      // Glow néon faction (API FX Phaser 3.90) — fait ressortir la sélection
+      if (ring.postFX) {
+        try { ring.postFX.addGlow(ringColor, 4, 0, false, 0.1, 8); } catch (_) {}
+      }
       this.tweens.add({
         targets: ring,
         scaleX: { from: 0.85, to: 1.05 },
@@ -1903,6 +1928,10 @@ class MainScene extends Phaser.Scene {
 
     // Traînée : émetteur de particules qui suit le projectile (couleur du type).
     const trailColor = PROJECTILE_COLORS[projKey] || 0xffffff;
+    // Glow néon du projectile (API FX) — couleur thématique, halo discret
+    if (proj.postFX) {
+      try { proj.postFX.addGlow(trailColor, 4, 0, false, 0.1, 8); } catch (_) {}
+    }
     const heavy = HEAVY.has(projKey);
     const trail = this.add.particles(0, 0, 'particle', {
       follow: proj,

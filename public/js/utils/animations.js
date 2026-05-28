@@ -203,6 +203,16 @@ const Animations = (() => {
       .setDepth(75)
       .setAlpha(0)
       .setScale(scaleAnim.from);
+    // Glow néon du sort (API FX Phaser 3.90), couleur thématique
+    const spellGlowColor = (spellId === 'fireball')    ? 0xff7b33
+                         : (spellId === 'freeze')      ? 0x60a5fa
+                         : (spellId === 'portal')      ? 0x8b5cf6
+                         : (spellId === 'blessing')    ? 0xfde047
+                         : (spellId === 'holy_light' || spellId === 'purifying_light') ? 0xfef9c3
+                         : 0xffffff;
+    if (sprite.postFX) {
+      try { sprite.postFX.addGlow(spellGlowColor, 8, 0, false, 0.1, 12); } catch (_) {}
+    }
     scene.tweens.add({
       targets: sprite,
       scale: scaleAnim.to,
