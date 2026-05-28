@@ -953,9 +953,12 @@ class MainScene extends Phaser.Scene {
 
     // ── SOL (depth 0) : grass tileSprite si disponible, sinon rectangle vert ──
     if (this._hasAsset('grass')) {
+      // Tint crème vert très clair → désature le PNG d'herbe trop contrasté/saturé,
+      // les unités et bâtiments ressortent mieux sur ce fond plus doux.
       this.add.tileSprite(0, 0, this.MAP_W, this.MAP_H, 'grass')
         .setOrigin(0, 0)
-        .setDepth(0);
+        .setDepth(0)
+        .setTint(0xd9e8be);
     } else {
       this.add.rectangle(this.MAP_W / 2, this.MAP_H / 2, this.MAP_W, this.MAP_H, 0x9fdc7c).setDepth(0);
       // Patches d'herbe : effet visuel pour casser la monotonie
@@ -1033,6 +1036,7 @@ class MainScene extends Phaser.Scene {
     // Couleur "eau profonde" et "eau bord" (couleur plus claire si pas d'eau adjacente)
     const COL_DEEP = 0x1e4a72;
     const COL_SHALLOW = 0x2e6e9c;
+    const COL_FOAM = 0xbfe0f5;  // écume côtière (bleu très clair)
     for (let ty = 0; ty < gh; ty++) {
       for (let tx = 0; tx < gw; tx++) {
         if (waterTiles[ty * gw + tx] !== 1) continue;
@@ -1050,9 +1054,29 @@ class MainScene extends Phaser.Scene {
         g.fillRect(tx * ts, ty * ts, ts, ts);
       }
     }
-    // Subtile animation : un léger shimmer via tween global (oscillation alpha sur le bord)
-    // Pour l'instant simple : pas d'anim. À ajouter ultérieurement.
+
+    // ── Écume côtière : ligne claire sur chaque arête d'eau qui touche la terre ──
+    const foam = this.add.graphics().setDepth(2);
+    foam.lineStyle(3, COL_FOAM, 0.85);
+    const isWater = (tx, ty) => tx >= 0 && tx < gw && ty >= 0 && ty < gh && waterTiles[ty * gw + tx] === 1;
+    for (let ty = 0; ty < gh; ty++) {
+      for (let tx = 0; tx < gw; tx++) {
+        if (!isWater(tx, ty)) continue;
+        const X = tx * ts, Y = ty * ts;
+        if (!isWater(tx, ty - 1)) foam.lineBetween(X, Y, X + ts, Y);             // bord nord
+        if (!isWater(tx, ty + 1)) foam.lineBetween(X, Y + ts, X + ts, Y + ts);   // bord sud
+        if (!isWater(tx - 1, ty)) foam.lineBetween(X, Y, X, Y + ts);             // bord ouest
+        if (!isWater(tx + 1, ty)) foam.lineBetween(X + ts, Y, X + ts, Y + ts);   // bord est
+      }
+    }
+    // Respiration de l'écume (alpha qui pulse doucement = vagues qui viennent et vont)
+    this.tweens.add({ targets: foam, alpha: { from: 0.55, to: 1.0 }, duration: 1800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+    // Respiration subtile de la surface d'eau elle-même
+    this.tweens.add({ targets: g, alpha: { from: 0.92, to: 1.0 }, duration: 2400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
     this._waterGraphics = g;
+    this._foamGraphics  = foam;
   }
 
   _placeDecor() {
