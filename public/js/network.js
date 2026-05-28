@@ -27,6 +27,25 @@ const Network = (() => {
   let onInitReceivedCallback     = null;
   let initReceived = false;
 
+  // ── Bump animation pour les compteurs HUD (Phase 6 glassmorphism) ──
+  // Met à jour textContent et déclenche l'anim value-bump (gain doré) /
+  // value-down (perte rouge) seulement si la valeur a changé.
+  function _bumpVal(el, valueStr) {
+    if (!el) return;
+    const old = el.textContent;
+    if (old === valueStr) return;
+    el.textContent = valueStr;
+    // Direction : tente une comparaison numérique pour choisir l'anim
+    const a = parseFloat(old);
+    const b = parseFloat(valueStr);
+    const cls = (!isNaN(a) && !isNaN(b) && b < a) ? 'value-down' : 'value-bump';
+    el.classList.remove('value-bump', 'value-down');
+    // reflow pour redémarrer l'anim si elle était déjà en cours
+    // (lecture forcée d'offsetWidth)
+    void el.offsetWidth;
+    el.classList.add(cls);
+  }
+
   function init(playerName, mapOptions) {
     const auth = { name: playerName || '' };
     if (mapOptions && mapOptions.mapType) auth.mapType = mapOptions.mapType;
@@ -94,13 +113,13 @@ const Network = (() => {
         const elPr   = document.getElementById('my-pr');
         const elMana = document.getElementById('my-mana');
         const elFaith= document.getElementById('my-faith');
-        if (elGold) elGold.textContent = Math.floor(me.gold);
-        if (elPr)   elPr.textContent   = Math.floor(me.researchPoints || 0);
-        if (elMana) elMana.textContent = Math.floor(me.mana  || 0);
-        if (elFaith)elFaith.textContent= Math.floor(me.faith || 0);
+        if (elGold) _bumpVal(elGold, String(Math.floor(me.gold)));
+        if (elPr)   _bumpVal(elPr,   String(Math.floor(me.researchPoints || 0)));
+        if (elMana) _bumpVal(elMana, String(Math.floor(me.mana  || 0)));
+        if (elFaith)_bumpVal(elFaith,String(Math.floor(me.faith || 0)));
         const elPop    = document.getElementById('my-pop');
         const elPopMax = document.getElementById('my-pop-max');
-        if (elPop)    elPop.textContent    = Math.floor(me.populationUsed || 0);
+        if (elPop)    _bumpVal(elPop, String(Math.floor(me.populationUsed || 0)));
         if (elPopMax) elPopMax.textContent = Math.floor(me.populationMax || 8);
 
         // Affichage conditionnel mana/faith selon bâtiments possédés
@@ -133,7 +152,7 @@ const Network = (() => {
 
       const elUnits = document.getElementById('my-unit-count');
       if (elUnits && myId) {
-        elUnits.textContent = Object.values(state.units || {}).filter(u => u.ownerId === myId).length;
+        _bumpVal(elUnits, String(Object.values(state.units || {}).filter(u => u.ownerId === myId).length));
       }
 
       const elWaiting = document.getElementById('waiting-msg');

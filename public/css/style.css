@@ -777,3 +777,70 @@ hr {
   font-size: 12px;
   padding: 4px 0;
 }
+
+/* ─── Phase 6 — Glassmorphism + animations de compteurs ──────── */
+
+/* HUD plus glass : gradient interne + bordure haute lumière */
+#ui {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 35%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.82) 0%, rgba(15, 23, 42, 0.72) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 8px 28px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.10);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+}
+
+/* Compteurs de ressources : tween de bump quand la valeur change */
+@keyframes value-bump {
+  0%   { transform: scale(1.0); color: var(--gold); text-shadow: 0 0 0 rgba(251,191,36,0); }
+  35%  { transform: scale(1.22); color: #fde68a; text-shadow: 0 0 12px rgba(251,191,36,0.85); }
+  100% { transform: scale(1.0); color: inherit; text-shadow: 0 0 0 rgba(251,191,36,0); }
+}
+.value-bump {
+  display: inline-block;
+  animation: value-bump 360ms ease-out;
+}
+
+/* Variante "perte" (rouge) — pour quand une valeur baisse */
+@keyframes value-down {
+  0%   { transform: scale(1.0); color: var(--red); }
+  35%  { transform: scale(0.88); color: #fecaca; text-shadow: 0 0 10px rgba(239,68,68,0.7); }
+  100% { transform: scale(1.0); color: inherit; }
+}
+.value-down {
+  display: inline-block;
+  animation: value-down 320ms ease-out;
+}
+
+/* Panneaux HDV/Village/Building : glass cohérent */
+#hdv-panel, #village-panel, #building-info-panel {
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+/* Game-over overlay : entrée pop + bordure néon dorée */
+@keyframes overlay-pop {
+  from { transform: scale(0.88); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+#game-over-overlay .overlay-box,
+#match-ended-overlay .overlay-box {
+  animation: overlay-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(251, 191, 36, 0.18),
+    inset 0 1px 0 rgba(255,255,255,0.85);
+}
+#game-over-overlay .overlay-title {
+  text-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+
+/* Mini-carte : harmonisation glass */
+#minimap-wrap {
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+}
