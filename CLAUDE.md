@@ -238,7 +238,7 @@ Format multi-lignes via heredoc, avec :
 | 6 | **Pas de feedback "port nécessite eau adjacente"** | UX |
 | 7 | **Pas de tutoriel intégré** | Onboarding |
 | 8 | **Cold start free tier ~30s** | Limite Render — passer Starter ($7/mois) si besoin |
-| 9 | **Qualité visuelle en retrait** : sprites PNG statiques, pas d'anim de coup, pas de particules/FX/audio | 🎯 PRIORITÉ — gros pass polish AAA prévu (voir section Priorités) |
+| 9 | ~~**Qualité visuelle en retrait**~~ | ✅ RÉSOLU (session optimistic-albattani) — 6 phases du pass polish visuel AAA livrées : rig combat unités, bâtiments/projectiles vivants, juice subtil, FX WebGL, eau & terrain, HUD glass. Reste audio (Howler/Web Audio) et touch mobile. |
 
 ### Pièges techniques (gotchas)
 - `MAP_WIDTH/HEIGHT/GRID_W/GRID_H` sont `let`, recalculés dans `applyMapConfig()`. Si tu utilises ces vars dans une closure stockée, attention au moment de capture.
@@ -277,7 +277,7 @@ créatifs.
 
 ## 🎯 Priorités actuelles (mise à jour session charming-black)
 
-État au dernier commit (`976387c`) :
+État au dernier commit (`d4f9da1`, session optimistic-albattani) :
 - ✅ Bugs critiques résolus : caméra dérive, projectiles, ange tremble, tech panel
   refresh, buildings cliquables, riposte auto
 - ✅ Système population implémenté
@@ -287,9 +287,26 @@ créatifs.
 - ✅ Village côtier garanti sur maps avec eau
 - ✅ **IA bot naval** : construit port, spawn bateaux, wave navale complète
 - ✅ **6 passifs tech activés** (cf. tableau bugs #3)
+- ✅ **PASS POLISH VISUEL AAA — 6 phases** (commits `b241df2`→`d4f9da1`) :
+  - Phase 1 — rig combat procédural (anticipation→lunge→recoil mêlée,
+    draw→fire distance, channel→cast caster) + ombres + ring faction +
+    barres animées + tint adoucie + fix `_flashUnit` cassé
+  - Phase 2 — bâtiments vivants (ombres, pop construction, aura magie/religion)
+    + traînées projectiles colorées + impacts enrichis
+  - Phase 3 — game juice subtil : debris destruction bâtiment + shake caméra
+    sur événements majeurs (HDV détruit, boss mort)
+  - Phase 4 — FX WebGL Phaser 3.90 : vignette + color grading chaud +
+    glow néon faction sur sélection / projectiles / sorts / bosses
+  - Phase 5 — terrain adouci (tint crème vert) + eau vivante (écume côtière
+    qui respire + alpha breathing de la surface)
+  - Phase 6 — HUD glassmorphism (backdrop-filter blur + gradient highlight) +
+    compteurs ressources animés (value-bump doré / value-down rouge) +
+    game-over overlay avec entrée pop & halo doré
 
 À faire dans une prochaine session (par ordre d'impact estimé) :
-1. **🎨 GROS PASS POLISH VISUEL AAA** (priorité #1) — c'est le gros chantier en cours :
+1. **Audio** (Web Audio / Howler) — SFX spawn/coup/mort/sort/capture + musique d'ambiance.
+   C'est la dernière brique du pass AAA non encore livrée.
+2. **🎨 ~~GROS PASS POLISH VISUEL AAA~~** ✅ TERMINÉ — résumé conservé ci-dessous :
    - **Animations de coups** par type d'unité (mêlée : anticipation→lunge→recoil
      + arc d'arme ; distance : draw→fire ; caster : channel→cast)
    - **Redesign cohérent** de TOUTES les entités (unités, bâtiments, projectiles)
@@ -347,8 +364,11 @@ créatifs.
 
 ---
 
-**Dernière mise à jour** : commit `976387c` (session charming-black) — IA bot
-naval complète + 6 passifs tech activés. Prochain gros chantier : pass polish
-visuel AAA (animations de coups + redesign entités + juice + FX + audio).
+**Dernière mise à jour** : commit `d4f9da1` (session optimistic-albattani) —
+Pass polish visuel AAA complet en 6 phases (rig combat unités + bâtiments &
+projectiles vivants + juice subtil + FX WebGL + eau & terrain + HUD glass).
+Direction artistique verrouillée par Robin : technique hybride (PNG intacts +
+rig procédural), style cinématique lisible, ambiance chaude + glow faction
+néon, intensité juice SUBTILE.
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier commit
 de ta session.
