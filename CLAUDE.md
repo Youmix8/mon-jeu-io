@@ -312,12 +312,8 @@ créatifs.
     game-over overlay avec entrée pop & halo doré
 
 À faire dans une prochaine session (par ordre d'impact estimé) :
-1. **🌍 GROS AJOUT GAMEPLAY PvE** (priorité #1, prévu par Robin) — vie sur la map :
-   options à choisir (cf. dernier prompt préparé) : villages barbares avec garnison +
-   raids dynamiques (A), camps de bandits (B), bosses errants (C), faune dispersée (D),
-   vagues PvE timed (E), villages évolutifs (F). Recommandation : A + D combinés.
-   Direction : intégration native dans le système villages existant, autorité serveur,
-   IA bot adaptée, équilibrage via AskUserQuestion.
+1. ✅ **GROS AJOUT GAMEPLAY PvE** — LIVRÉ (session pve-on-main). A (villages barbares
+   garnison + raids) + B (camps de bandits) + D (faune dispersée). Détails ci-dessous.
 2. **Audio** (Web Audio / Howler) — SFX spawn/coup/mort/sort/capture + musique d'ambiance.
    C'est la dernière brique du pass AAA visuel non encore livrée.
 3. **🎨 ~~GROS PASS POLISH VISUEL AAA~~** ✅ TERMINÉ — résumé conservé ci-dessous :
@@ -378,14 +374,39 @@ créatifs.
 
 ---
 
-**Dernière mise à jour** : commit `b35a48e` (session optimistic-albattani) —
-Pass polish visuel AAA complet (6 phases) + 25/25 passifs actifs + visualisation
-publique des passifs (badges/halos HDV) + HDV/Village panels cachent les unités
-tech-locked + bug spawn HDV hors map corrigé + renaissance transformée en
-omniscience minimap. Direction artistique verrouillée par Robin : technique
-hybride (PNG intacts + rig procédural), style cinématique lisible, ambiance
+## 🌍 Système PvE (session pve-on-main)
+
+Factions neutres dans `gameState.units` via `ownerId` spécial (pas de canal séparé) :
+`neutral_barbarian` (gris 0x6b6b6b), `neutral_boss` (rouille 0x8b4513),
+`neutral_fauna` (boar/wolf, texture pré-colorée). Helper `sameSide(a,b)` : les
+neutres ne s'attaquent pas entre eux. `isNeutralOwner(id)`. Miroir client
+`NEUTRAL_FACTIONS` + `getOwnerDisplay()` (MainScene.js).
+
+- **A — Villages barbares** : garnison 2 soldats (HP50/dmg8) ; capture bloquée tant
+  qu'un défenseur vit (`garrisonAlive` dans la section 3.5 capture). Drop +8 gold.
+  Raids : village neutre > 5 min → 2 barbares/60s vers le joueur proche, cap 6 actifs.
+- **B — Camps de bandits** : 2 camps (5 mobs + 1 boss elite_guard HP400). `gameState.camps`
+  (broadcasté light, toujours visible minimap). Clear → +150 gold + 1 unité gratuite.
+- **D — Faune** : 10 paquets boar/wolf, mode `wander`, riposte si attaquée, drop +5 gold.
+- **IA bot** : menace barbare < 600px HDV → repli défensif 30s (`bot.botState.defenseUntil`).
+- **Reset** : `spawnAllVillageGarrisons()` + `spawnAllCampMobs()` + `spawnAllFauna()`
+  appelés après chaque `generateVillages`/`generateCamps` (init + 3 resets).
+- **Events** : `barbarianRaid`, `campCleared` (network.js → MainScene kill feed).
+- **Drops gold** centralisés dans `onNeutralUnitKilled()` (appelé aux 4 sites de kill :
+  combat ciblé, IDLE, tour, citadelle).
+
+⚠️ Valeurs d'équilibrage (garnison/raid/camp/faune) en constantes en tête de `server.js`
+(bloc « Faction neutre PvE »). Ajuster là.
+
+---
+
+**Dernière mise à jour** : commit `e5dfba7` (session pve-on-main) — Ajout PvE complet
+(A villages barbares + raids, B camps de bandits, D faune dispersée) sur le code à jour.
+Re-porté après divergence de worktree (base périmée). Direction artistique verrouillée :
+technique hybride (PNG intacts + rig procédural), style cinématique lisible, ambiance
 chaude + glow faction néon, intensité juice SUBTILE.
-Prochain gros chantier (prompt préparé pour nouvelle conv) : ajout PvE sur
-la map (villages barbares + faune dispersée).
+⚠️ Validation : serveur boote proprement avec toutes les entités PvE + ticks stables
+(testé via node direct). Rendu visuel client (tints, faune, minimap, kill feed) à
+confirmer en navigateur réel — non vérifiable en preview headless cette session.
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier commit
 de ta session.
