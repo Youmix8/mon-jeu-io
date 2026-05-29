@@ -83,6 +83,20 @@ const Minimap = (() => {
       ctx.stroke();
     }
 
+    // Camps de bandits — losange (rouge si actif, gris si nettoyé) : objectif PvE
+    for (const c of (state.camps || [])) {
+      const px = c.x * sx, py = c.y * sy;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = c.cleared ? '#555555' : '#8b2c2c';
+      ctx.fillRect(-4, -4, 8, 8);
+      ctx.strokeStyle = c.cleared ? '#333' : '#000';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-4, -4, 8, 8);
+      ctx.restore();
+    }
+
     // HDV — gros carré coloré, le mien avec contour blanc
     for (const p of playersList) {
       const px = p.x * sx, py = p.y * sy;
@@ -95,9 +109,11 @@ const Minimap = (() => {
       }
     }
 
-    // Unités
+    // Unités (joueurs + neutres PvE)
+    const neutralColors = (typeof NEUTRAL_FACTIONS !== 'undefined') ? NEUTRAL_FACTIONS : null;
     for (const u of unitsList) {
-      const ownerColor = colorByPid[u.ownerId];
+      let ownerColor = colorByPid[u.ownerId];
+      if (!ownerColor && neutralColors && neutralColors[u.ownerId]) ownerColor = neutralColors[u.ownerId].color;
       if (!ownerColor) continue;
       ctx.fillStyle = ownerColor;
       ctx.beginPath();

@@ -16,6 +16,43 @@ const SpriteFactory = {
     this._selectionRing(scene);
     this._arrow(scene);
     this._slash(scene);
+    this._boar(scene);
+    this._wolf(scene);
+  },
+
+  // ── Faune : sanglier (vu de dessus, brun) — texture pré-colorée, sans tint ──
+  _boar(scene) {
+    const S = 30; const g = scene.make.graphics({ add: false });
+    const cx = S / 2, cy = S / 2;
+    g.fillStyle(0x000000, 0.28); g.fillEllipse(cx, cy + 7, 20, 6);
+    g.fillStyle(0x6b4a2f, 1); g.fillEllipse(cx, cy, 18, 12);
+    g.lineStyle(1.5, 0x3b2716, 1); g.strokeEllipse(cx, cy, 18, 12);
+    g.fillStyle(0x4a3220, 1); g.fillEllipse(cx, cy - 2, 12, 3);
+    g.fillStyle(0x5a3d27, 1); g.fillEllipse(cx + 9, cy + 1, 6, 5);
+    g.fillStyle(0x2e1d10, 1); g.fillCircle(cx + 12, cy + 1, 1.6);
+    g.fillStyle(0xe8e0cf, 1); g.fillTriangle(cx + 10, cy + 2, cx + 13, cy + 4, cx + 10, cy + 4);
+    g.fillStyle(0x111111, 1); g.fillCircle(cx + 5, cy - 3, 1);
+    g.fillStyle(0x3b2716, 1); g.fillRect(cx - 8, cy + 6, 2.5, 4); g.fillRect(cx + 3, cy + 6, 2.5, 4);
+    g.generateTexture('fauna-boar', S, S); g.destroy();
+  },
+
+  // ── Faune : loup (vu de dessus, gris) ──
+  _wolf(scene) {
+    const S = 30; const g = scene.make.graphics({ add: false });
+    const cx = S / 2, cy = S / 2;
+    g.fillStyle(0x000000, 0.28); g.fillEllipse(cx, cy + 7, 18, 5);
+    g.fillStyle(0x6b7178, 1); g.fillTriangle(cx - 10, cy, cx - 16, cy - 3, cx - 10, cy + 3);
+    g.fillStyle(0x8c939b, 1); g.fillEllipse(cx, cy, 15, 9);
+    g.lineStyle(1.5, 0x4b5158, 1); g.strokeEllipse(cx, cy, 15, 9);
+    g.fillStyle(0x9aa1a9, 1); g.fillCircle(cx + 8, cy - 1, 5);
+    g.lineStyle(1.2, 0x4b5158, 1); g.strokeCircle(cx + 8, cy - 1, 5);
+    g.fillStyle(0x6b7178, 1);
+    g.fillTriangle(cx + 5, cy - 5, cx + 6, cy - 9, cx + 8, cy - 5);
+    g.fillTriangle(cx + 9, cy - 5, cx + 11, cy - 9, cx + 12, cy - 5);
+    g.fillTriangle(cx + 12, cy - 2, cx + 16, cy - 1, cx + 12, cy + 1);
+    g.fillStyle(0xfbbf24, 1); g.fillCircle(cx + 7, cy - 2, 0.9); g.fillCircle(cx + 10, cy - 2, 0.9);
+    g.fillStyle(0x4b5158, 1); g.fillRect(cx - 6, cy + 5, 2, 4); g.fillRect(cx + 2, cy + 5, 2, 4);
+    g.generateTexture('fauna-wolf', S, S); g.destroy();
   },
 
   // ── HDV : château vu de dessus (3 tours + drapeau) ───────────────

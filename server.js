@@ -323,6 +323,57 @@ const VILLAGE_LEVELS = [
 ];
 const MAX_VILLAGE_LEVEL = VILLAGE_LEVELS.length;
 
+// ────────── Faction neutre PvE (barbares, faune, mini-boss) ──────────
+const NEUTRAL_OWNER_BARBARIAN = 'neutral_barbarian';
+const NEUTRAL_OWNER_FAUNA     = 'neutral_fauna';
+const NEUTRAL_OWNER_BOSS      = 'neutral_boss';
+const NEUTRAL_OWNERS = new Set([NEUTRAL_OWNER_BARBARIAN, NEUTRAL_OWNER_FAUNA, NEUTRAL_OWNER_BOSS]);
+function isNeutralOwner(ownerId) { return NEUTRAL_OWNERS.has(ownerId); }
+// Même camp (ne s'attaquent pas) : identiques OU tous deux neutres (factions neutres alliées).
+function sameSide(a, b) {
+  if (a === b) return true;
+  return isNeutralOwner(a) && isNeutralOwner(b);
+}
+
+// A — Villages barbares : garnison défensive + raids agressifs après 5 min.
+const VILLAGE_GARRISON_SIZE          = 2;
+const VILLAGE_GARRISON_DEFEND_RADIUS = 120;
+const VILLAGE_GARRISON_HP            = 50;
+const VILLAGE_GARRISON_DMG           = 8;
+const NEUTRAL_GOLD_DROP_BARBARIAN    = 8;
+const RAID_DELAY_MS     = 5 * 60 * 1000;
+const RAID_INTERVAL_MS  = 60 * 1000;
+const RAID_UNITS_PER    = 2;
+const RAID_MAX_ACTIVE   = 6;
+const RAID_HP           = 60;
+const RAID_DMG          = 8;
+
+// B — Camps de bandits (mini-dungeons) : 5 mobs + 1 mini-boss.
+const CAMP_COUNT          = 2;
+const CAMP_MOB_COUNT      = 5;
+const CAMP_MOB_HP         = 55;
+const CAMP_MOB_DMG        = 9;
+const CAMP_BOSS_HP        = 400;
+const CAMP_BOSS_DMG       = 18;
+const CAMP_REWARD_GOLD    = 150;
+const CAMP_DEFEND_RADIUS  = 180;
+const CAMP_MIN_DIST_HDV     = 800;
+const CAMP_MIN_DIST_VILLAGE = 500;
+const CAMP_MIN_DIST_OTHER   = 1200;
+
+// D — Faune dispersée : paquets de bêtes faibles qui errent (passives, ripostent).
+const FAUNA_PACK_COUNT     = 10;
+const FAUNA_PER_PACK_MIN   = 2;
+const FAUNA_PER_PACK_MAX   = 3;
+const FAUNA_HP             = 15;
+const FAUNA_DMG            = 2;
+const FAUNA_SPEED          = 50;
+const FAUNA_GOLD_DROP      = 5;
+const FAUNA_WANDER_RADIUS  = 80;
+const FAUNA_WANDER_MS      = 8000;
+const FAUNA_MIN_DIST_HDV   = 400;
+const FAUNA_TYPES          = ['boar', 'wolf'];
+
 // ────────── Eau & génération de map ──────────────────────────────
 // gameState.waterTiles : Uint8Array de longueur GRID_W*GRID_H, 1 = eau, 0 = terre.
 // Types de map : 'no_water' | 'lakes' | 'continental' | 'island'.
@@ -583,6 +634,180 @@ function villageAllowsUnit(village, player, typeId) {
   if (village.level === 1) return typeId === 'soldier';
   // Level 2 : tout ce que le joueur a débloqué via l'arbre tech v2
   return !def.requiresTech || hasTech(player, def.requiresTech);
+}
+
+// ════════════ PvE : factions neutres (barbares / camps / faune) ════════════
+
+// Garnison d'un village neutre : 2 soldats barbares défensifs.
+function spawnVillageGarrison(village) {
+  if (!gameState || !village || village.ownerId !== null) return;
+  for (let i = 0; i < VILLAGE_GARRISON_SIZE; i++) {
+    const angle = (i / VILLAGE_GARRISON_SIZE) * Math.PI * 2 + Math.random() * 0.3;
+    const dist  = 40 + Math.random() * 20;
+    const unitId = `unit_${nextUnitId++}`;
+    gameState.units[unitId] = {
+      id: unitId, ownerId: NEUTRAL_OWNER_BARBARIAN,
+      x: Math.round(village.x + Math.cos(angle) * dist),
+      y: Math.round(village.y + Math.sin(angle) * dist),
+      type: 'soldier', hp: VILLAGE_GARRISON_HP, maxHp: VILLAGE_GARRISON_HP,
+      speed: 80, range: 35, damage: VILLAGE_GARRISON_DMG, cost: 0,
+      targetX: null, targetY: null, attackTargetId: null, attackTargetType: null,
+      lastAttackTime: 0,
+      mode: 'defend', defendX: village.x, defendY: village.y, defendRadius: VILLAGE_GARRISON_DEFEND_RADIUS,
+      neutralRole: 'garrison', neutralVillageId: village.id,
+    };
+  }
+}
+function spawnAllVillageGarrisons() {
+  let spawned = 0;
+  for (const v of gameState.villages) {
+    if (v.ownerId === null && v.hp > 0) { spawnVillageGarrison(v); spawned += VILLAGE_GARRISON_SIZE; }
+  }
+  console.log(`[PvE] Garnison barbare : ${spawned} unités sur ${gameState.villages.length} villages`);
+}
+
+// Raid barbare : 2 unités en 'move' vers un joueur cible.
+function spawnRaidFromVillage(village, targetPlayer) {
+  if (!village || !targetPlayer || targetPlayer.eliminated) return 0;
+  for (let i = 0; i < RAID_UNITS_PER; i++) {
+    const angle = (i / RAID_UNITS_PER) * Math.PI * 2 + Math.random() * 0.4;
+    const dist  = 50 + Math.random() * 20;
+    const unitId = `unit_${nextUnitId++}`;
+    gameState.units[unitId] = {
+      id: unitId, ownerId: NEUTRAL_OWNER_BARBARIAN,
+      x: Math.round(village.x + Math.cos(angle) * dist),
+      y: Math.round(village.y + Math.sin(angle) * dist),
+      type: 'soldier', hp: RAID_HP, maxHp: RAID_HP,
+      speed: 80, range: 35, damage: RAID_DMG, cost: 0,
+      targetX: targetPlayer.x + (Math.random() - 0.5) * 80,
+      targetY: targetPlayer.y + (Math.random() - 0.5) * 80,
+      attackTargetId: null, attackTargetType: null, lastAttackTime: 0,
+      mode: 'move', defendX: targetPlayer.x, defendY: targetPlayer.y, defendRadius: 0,
+      neutralRole: 'raid', neutralVillageId: village.id, raidTargetPlayerId: targetPlayer.id,
+    };
+  }
+  return RAID_UNITS_PER;
+}
+
+// Camps de bandits : génération des positions (loin HDV/villages/autres camps).
+function generateCamps(spawns, villages) {
+  const camps = [];
+  let attempts = 0, idCounter = 1;
+  while (camps.length < CAMP_COUNT && attempts < 1000) {
+    attempts++;
+    const x = 300 + Math.random() * (MAP_WIDTH  - 600);
+    const y = 300 + Math.random() * (MAP_HEIGHT - 600);
+    if (isWaterAt(x, y)) continue;
+    if (spawns.some(s => Math.hypot(s.x - x, s.y - y) < CAMP_MIN_DIST_HDV)) continue;
+    if (villages.some(v => Math.hypot(v.x - x, v.y - y) < CAMP_MIN_DIST_VILLAGE)) continue;
+    if (camps.some(c => Math.hypot(c.x - x, c.y - y) < CAMP_MIN_DIST_OTHER)) continue;
+    camps.push({ id: `camp_${idCounter++}`, x: Math.round(x), y: Math.round(y), cleared: false, mobsAlive: CAMP_MOB_COUNT + 1 });
+  }
+  console.log(`[PvE] Camps de bandits : ${camps.length} (${CAMP_COUNT} demandés)`);
+  return camps;
+}
+function spawnCampMobs(camp) {
+  if (!gameState || !camp) return;
+  for (let i = 0; i < CAMP_MOB_COUNT; i++) {
+    const angle = (i / CAMP_MOB_COUNT) * Math.PI * 2;
+    const dist  = 60 + Math.random() * 50;
+    const isArcher = i % 2 === 1;
+    const unitId = `unit_${nextUnitId++}`;
+    gameState.units[unitId] = {
+      id: unitId, ownerId: NEUTRAL_OWNER_BARBARIAN,
+      x: Math.round(camp.x + Math.cos(angle) * dist),
+      y: Math.round(camp.y + Math.sin(angle) * dist),
+      type: isArcher ? 'archer' : 'soldier', hp: CAMP_MOB_HP, maxHp: CAMP_MOB_HP,
+      speed: 80, range: isArcher ? 250 : 35, damage: CAMP_MOB_DMG, cost: 0,
+      targetX: null, targetY: null, attackTargetId: null, attackTargetType: null,
+      lastAttackTime: 0,
+      mode: 'defend', defendX: camp.x, defendY: camp.y, defendRadius: CAMP_DEFEND_RADIUS,
+      neutralRole: 'camp_mob', neutralCampId: camp.id,
+    };
+  }
+  const bossId = `unit_${nextUnitId++}`;
+  gameState.units[bossId] = {
+    id: bossId, ownerId: NEUTRAL_OWNER_BOSS,
+    x: camp.x, y: camp.y, type: 'elite_guard', hp: CAMP_BOSS_HP, maxHp: CAMP_BOSS_HP,
+    speed: 70, range: 35, damage: CAMP_BOSS_DMG, cost: 0,
+    targetX: null, targetY: null, attackTargetId: null, attackTargetType: null,
+    lastAttackTime: 0,
+    mode: 'defend', defendX: camp.x, defendY: camp.y, defendRadius: CAMP_DEFEND_RADIUS,
+    neutralRole: 'camp_boss', neutralCampId: camp.id,
+  };
+}
+function spawnAllCampMobs() {
+  for (const c of gameState.camps) if (!c.cleared) spawnCampMobs(c);
+}
+function rewardCampClear(camp, player) {
+  if (!camp || !player || player.eliminated) return;
+  player.gold += CAMP_REWARD_GOLD; player.totalGoldEarned += CAMP_REWARD_GOLD;
+  const freeType = unitTypeUnlocked(player, 'knight') ? 'knight' : 'soldier';
+  const def = UNIT_TYPES[freeType];
+  const pos = findFreeSpawnPos(player.x, player.y, 70 + Math.random() * 30, false);
+  const unitId = `unit_${nextUnitId++}`;
+  gameState.units[unitId] = {
+    id: unitId, ownerId: player.id, x: pos.x, y: pos.y, type: freeType,
+    hp: def.hp, maxHp: def.hp,
+    speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
+    targetX: null, targetY: null, attackTargetId: null, attackTargetType: null,
+    lastAttackTime: 0, mode: 'defend', defendX: player.x, defendY: player.y, defendRadius: 320,
+  };
+  player.unitsCreated++;
+  io.emit('campCleared', { campId: camp.id, x: camp.x, y: camp.y,
+    byPlayerId: player.id, byName: player.name, byColor: player.color,
+    rewardGold: CAMP_REWARD_GOLD, freeUnit: freeType });
+  console.log(`[PvE] Camp ${camp.id} nettoyé par ${player.name} (+${CAMP_REWARD_GOLD} gold, +1 ${freeType})`);
+}
+
+// Faune : paquets de bêtes faibles qui errent.
+function spawnAllFauna(spawns) {
+  let packs = 0, animals = 0, attempts = 0;
+  while (packs < FAUNA_PACK_COUNT && attempts < 800) {
+    attempts++;
+    const ox = 200 + Math.random() * (MAP_WIDTH  - 400);
+    const oy = 200 + Math.random() * (MAP_HEIGHT - 400);
+    if (isWaterAt(ox, oy)) continue;
+    if (spawns.some(s => Math.hypot(s.x - ox, s.y - oy) < FAUNA_MIN_DIST_HDV)) continue;
+    const packType = FAUNA_TYPES[Math.floor(Math.random() * FAUNA_TYPES.length)];
+    const n = FAUNA_PER_PACK_MIN + Math.floor(Math.random() * (FAUNA_PER_PACK_MAX - FAUNA_PER_PACK_MIN + 1));
+    for (let i = 0; i < n; i++) {
+      const ax = ox + (Math.random() - 0.5) * 60, ay = oy + (Math.random() - 0.5) * 60;
+      const unitId = `unit_${nextUnitId++}`;
+      gameState.units[unitId] = {
+        id: unitId, ownerId: NEUTRAL_OWNER_FAUNA,
+        x: Math.round(ax), y: Math.round(ay), type: packType,
+        hp: FAUNA_HP, maxHp: FAUNA_HP, speed: FAUNA_SPEED, range: 30, damage: FAUNA_DMG, cost: 0,
+        targetX: null, targetY: null, attackTargetId: null, attackTargetType: null,
+        lastAttackTime: 0, mode: 'wander',
+        wanderOriginX: Math.round(ox), wanderOriginY: Math.round(oy), wanderNextMs: 0,
+        neutralRole: 'fauna',
+      };
+      animals++;
+    }
+    packs++;
+  }
+  console.log(`[PvE] Faune : ${animals} animaux en ${packs} paquets`);
+}
+
+// Récompense gold + clear de camp quand un mob/boss neutre meurt (appelé sur chaque kill d'unité).
+function onNeutralUnitKilled(target, killerOwnerId, entry) {
+  const killer = gameState.players[killerOwnerId];
+  if (!killer || killer.eliminated) return;
+  if (target.ownerId === NEUTRAL_OWNER_BARBARIAN) {
+    killer.gold += NEUTRAL_GOLD_DROP_BARBARIAN; killer.totalGoldEarned += NEUTRAL_GOLD_DROP_BARBARIAN;
+    if (entry) entry.goldDrop = NEUTRAL_GOLD_DROP_BARBARIAN;
+  } else if (target.ownerId === NEUTRAL_OWNER_FAUNA) {
+    killer.gold += FAUNA_GOLD_DROP; killer.totalGoldEarned += FAUNA_GOLD_DROP;
+    if (entry) entry.goldDrop = FAUNA_GOLD_DROP;
+  }
+  if (target.neutralCampId) {
+    const camp = gameState.camps.find(c => c.id === target.neutralCampId);
+    if (camp && !camp.cleared) {
+      camp.mobsAlive = Math.max(0, camp.mobsAlive - 1);
+      if (camp.mobsAlive === 0) { camp.cleared = true; rewardCampClear(camp, killer); }
+    }
+  }
 }
 
 // Distance bord-à-bord entre une unité et un village (cercle vs AABB carré)
@@ -1024,6 +1249,26 @@ function botTick(bot) {
     && Math.hypot(u.x - bot.x, u.y - bot.y) < 400
   );
 
+  // 4.9. DÉFENSE PvE — menace barbare proche du HDV → repli défensif 30s ──────
+  // (la faune est ignorée ; seuls les barbares garnison/raid déclenchent l'alerte)
+  const BOT_RAID_ALERT = 600, BOT_DEFENSE_MS = 30000;
+  let threatNear = false;
+  for (const u of Object.values(gameState.units)) {
+    if (u.ownerId !== NEUTRAL_OWNER_BARBARIAN) continue;
+    if ((u.x - bot.x) ** 2 + (u.y - bot.y) ** 2 <= BOT_RAID_ALERT * BOT_RAID_ALERT) { threatNear = true; break; }
+  }
+  if (threatNear) bot.botState.defenseUntil = nowMs + BOT_DEFENSE_MS;
+  if ((bot.botState.defenseUntil || 0) > nowMs) {
+    // Rappel des unités offensives vers le HDV, pas de nouvelle offensive.
+    for (const u of myUnits) {
+      if (u.mode === 'move') {
+        u.mode = 'defend'; u.defendX = bot.x; u.defendY = bot.y; u.defendRadius = 360;
+        u.targetX = null; u.targetY = null;
+      }
+    }
+    return;
+  }
+
   // 5. CAPTURE VILLAGES NEUTRES ───────────────────────────────────
   // Envoie 3 unités vers le village neutre le plus proche tous les 8s
   if (armyAtBase.length >= 4 && nowMs - bot.botState.lastVillageScout > 8000) {
@@ -1268,6 +1513,7 @@ function generateSpawns() {
 applyMapConfig(DEFAULT_MAP_TYPE, DEFAULT_MAP_SIZE);
 let currentSpawns = generateSpawns();
 let initialVillages = generateVillages(currentSpawns);
+let initialCamps    = generateCamps(currentSpawns, initialVillages);
 
 // playerId → { explored: Uint8Array, visible: Uint8Array }
 const playerVisibility = {};
@@ -1401,10 +1647,14 @@ function buildFilteredState(viewerId) {
     };
   }
 
+  // Camps de bandits — toujours visibles sur la minimap (objectifs PvE connus).
+  const campsLite = gameState.camps.map(c => ({ id: c.id, x: c.x, y: c.y, cleared: c.cleared }));
+
   return {
     players: filteredPlayers,
     units: filteredUnits,
     villages: filteredVillages,
+    camps: campsLite,
     buildings: filteredBuildings,
     matchState: gameState.matchState,
     winnerId: gameState.winnerId,
@@ -1435,6 +1685,7 @@ const gameState = {
   players: {},
   units: {},
   villages: initialVillages,
+  camps: initialCamps,
   buildings: [],
   matchState: 'waiting',
   winnerId: null,
@@ -1444,6 +1695,11 @@ let nextBuildingId = 1;
 let nextUnitId = 1;
 let tickCount  = 0;
 let peakPlayerCount = 0;
+
+// Spawn initial des entités PvE neutres (gameState + nextUnitId existent maintenant)
+spawnAllVillageGarrisons();
+spawnAllCampMobs();
+spawnAllFauna(currentSpawns);
 
 app.use(express.static('public'));
 
@@ -1595,6 +1851,7 @@ function eliminatePlayer(player, toDelete) {
 function resetMatch() {
   currentSpawns = generateSpawns();
   gameState.villages = generateVillages(currentSpawns);
+  gameState.camps    = generateCamps(currentSpawns, gameState.villages);
   gameState.buildings = [];
   resetVisibilityAll();
   for (const p of Object.values(gameState.players)) {
@@ -1622,6 +1879,9 @@ function resetMatch() {
     p.y = spawn.y;
   }
   for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
+  spawnAllVillageGarrisons();
+  spawnAllCampMobs();
+  spawnAllFauna(currentSpawns);
   const playerCount        = Object.keys(gameState.players).length;
   peakPlayerCount          = playerCount;
   gameState.winnerId       = null;
@@ -1640,7 +1900,11 @@ io.on('connection', (socket) => {
     for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
     currentSpawns = generateSpawns();
     gameState.villages = generateVillages(currentSpawns);
+    gameState.camps    = generateCamps(currentSpawns, gameState.villages);
     gameState.buildings = [];
+    spawnAllVillageGarrisons();
+    spawnAllCampMobs();
+    spawnAllFauna(currentSpawns);
     console.log('Recovered zombie ended state on new connection');
   }
 
@@ -2423,7 +2687,11 @@ io.on('connection', (socket) => {
       peakPlayerCount          = 0;
       currentSpawns = generateSpawns();
       gameState.villages = generateVillages(currentSpawns);
+      gameState.camps    = generateCamps(currentSpawns, gameState.villages);
       gameState.buildings = [];
+      spawnAllVillageGarrisons();
+      spawnAllCampMobs();
+      spawnAllFauna(currentSpawns);
       console.log('No humans left, full reset (bots removed)');
     } else if (wasAlive) {
       checkMatchState();
@@ -2449,7 +2717,7 @@ setInterval(() => {
       // Cible prioritaire : la plus faible en HP dans le rayon (focus kill)
       // Score = hp + 0.5 * distance (ratio simple)
       for (const other of Object.values(gameState.units)) {
-        if (other.ownerId === unit.ownerId) continue;
+        if (sameSide(other.ownerId, unit.ownerId)) continue;
         const d = Math.hypot(other.x - cx, other.y - cy);
         if (d > radius) continue;
         const score = other.hp + d * 0.3;
@@ -2482,7 +2750,7 @@ setInterval(() => {
       const scanR = (unit.range || 80) + 40;
       let nearest = null, nearestDist = scanR;
       for (const other of Object.values(gameState.units)) {
-        if (other.ownerId === unit.ownerId) continue;
+        if (sameSide(other.ownerId, unit.ownerId)) continue;
         const d = Math.hypot(other.x - unit.x, other.y - unit.y);
         if (d < nearestDist) { nearest = other; nearestDist = d; }
       }
@@ -2490,6 +2758,17 @@ setInterval(() => {
         unit.attackTargetId = nearest.id;
         unit.attackTargetType = 'unit';
         // On garde targetX/targetY : après le kill, la cible est null et le pion reprend sa route
+      }
+    } else if (unit.mode === 'wander') {
+      // Faune : erre lentement autour de son origine. Passive (la riposte est gérée
+      // par le code de riposte générique à la prise de dégâts).
+      const nowW = Date.now();
+      if (unit.targetX === null && nowW >= (unit.wanderNextMs || 0)) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * FAUNA_WANDER_RADIUS;
+        unit.targetX = unit.wanderOriginX + Math.cos(a) * r;
+        unit.targetY = unit.wanderOriginY + Math.sin(a) * r;
+        unit.wanderNextMs = nowW + FAUNA_WANDER_MS + Math.random() * 2000;
       }
     }
     // mode === 'attack' ou non défini : aucune auto-cible (comportement existant)
@@ -2843,6 +3122,7 @@ setInterval(() => {
         attackEntry.killed = true;
         const killer = gameState.players[unit.ownerId];
         if (killer && !killer.eliminated) killer.kills++;
+        onNeutralUnitKilled(target, unit.ownerId, attackEntry);
         unit.attackTargetId = null; unit.attackTargetType = null;
       } else if (unit.attackTargetType === 'hdv' && target.hp <= 0) {
         eliminatePlayer(target, toDelete);
@@ -2871,7 +3151,7 @@ setInterval(() => {
       let best = null, bestDist = Infinity, bestType = null;
 
       for (const other of Object.values(gameState.units)) {
-        if (toDelete.has(other.id) || other.ownerId === unit.ownerId) continue;
+        if (toDelete.has(other.id) || sameSide(other.ownerId, unit.ownerId)) continue;
         const d = Math.hypot(other.x - unit.x, other.y - unit.y);
         if (d <= uRange && d < bestDist) { best = other; bestDist = d; bestType = 'unit'; }
       }
@@ -2910,6 +3190,7 @@ setInterval(() => {
         attackEntry.killed = true;
         const killer = gameState.players[unit.ownerId];
         if (killer && !killer.eliminated) killer.kills++;
+        onNeutralUnitKilled(best, unit.ownerId, attackEntry);
       } else if (bestType === 'hdv' && best.hp <= 0) {
         eliminatePlayer(best, toDelete);
       }
@@ -2949,6 +3230,7 @@ setInterval(() => {
         entry.killed = true;
         const owner = gameState.players[b.ownerId];
         if (owner && !owner.eliminated) owner.kills++;
+        onNeutralUnitKilled(bestTarget, b.ownerId, entry);
       }
       attacks.push(entry);
     }
@@ -2976,6 +3258,7 @@ setInterval(() => {
         toDelete.add(best.id);
         entry.killed = true;
         p.kills++;
+        onNeutralUnitKilled(best, p.id, entry);
       }
       attacks.push(entry);
     }
@@ -3094,9 +3377,21 @@ setInterval(() => {
   for (const v of gameState.villages) {
     const r2 = VILLAGE_RADIUS * VILLAGE_RADIUS;
     const ownersInside = new Set();
+    let garrisonAlive = false;
     for (const unit of Object.values(gameState.units)) {
+      if (unit.neutralVillageId === v.id && unit.neutralRole === 'garrison' && unit.hp > 0) garrisonAlive = true;
       const dx = unit.x - v.x, dy = unit.y - v.y;
-      if (dx * dx + dy * dy <= r2) ownersInside.add(unit.ownerId);
+      if (dx * dx + dy * dy > r2) continue;
+      if (isNeutralOwner(unit.ownerId)) continue; // les neutres bloquent (garrisonAlive) mais ne capturent pas
+      ownersInside.add(unit.ownerId);
+    }
+    // Tant que la garnison défend, le village neutre n'est pas capturable.
+    if (garrisonAlive && v.ownerId === null) {
+      if (v.captureProgress > 0) {
+        v.captureProgress = Math.max(0, v.captureProgress - 2);
+        if (v.captureProgress === 0) v.capturingPlayerId = null;
+      }
+      continue;
     }
     if (ownersInside.size === 1) {
       const claimer = [...ownersInside][0];
@@ -3188,6 +3483,41 @@ setInterval(() => {
   if (tickCount % 30 === 0) {
     for (const p of Object.values(gameState.players)) {
       if (p.isBot) botTick(p);
+    }
+  }
+
+  // 4.6. Raids barbares — toutes les 5s, villages neutres "fâchés" (> 5 min) → vague vers le joueur proche
+  if (tickCount % (5 * TICK_RATE) === 0 && gameState.matchState === 'playing') {
+    const nowR = Date.now();
+    let activeRaids = 0;
+    for (const u of Object.values(gameState.units)) {
+      if (u.ownerId === NEUTRAL_OWNER_BARBARIAN && u.neutralRole === 'raid' && u.hp > 0) activeRaids++;
+    }
+    if (activeRaids < RAID_MAX_ACTIVE) {
+      const alivePlayers = Object.values(gameState.players).filter(p => !p.eliminated && p.hp > 0);
+      if (alivePlayers.length > 0) {
+        for (const v of gameState.villages) {
+          if (v.ownerId !== null || v.hp <= 0) continue;
+          if (!v.neutralSince) v.neutralSince = nowR; // init paresseuse (villages créés sans le champ)
+          if (nowR - v.neutralSince < RAID_DELAY_MS) continue;
+          if (nowR - (v.raidLastSpawn || 0) < RAID_INTERVAL_MS) continue;
+          let best = null, bestD = Infinity;
+          for (const p of alivePlayers) {
+            const d = Math.hypot(p.x - v.x, p.y - v.y);
+            if (d < bestD) { bestD = d; best = p; }
+          }
+          if (!best) continue;
+          const spawned = spawnRaidFromVillage(v, best);
+          if (spawned > 0) {
+            v.raidLastSpawn = nowR;
+            activeRaids += spawned;
+            io.emit('barbarianRaid', { villageId: v.id, villageX: v.x, villageY: v.y,
+              targetPlayerId: best.id, targetName: best.name, targetColor: best.color, count: spawned });
+            console.log(`[PvE] Raid barbare : ${v.id} → ${best.name} (${spawned})`);
+            if (activeRaids >= RAID_MAX_ACTIVE) break;
+          }
+        }
+      }
     }
   }
 

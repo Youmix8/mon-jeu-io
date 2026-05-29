@@ -3,6 +3,23 @@ const BAR_W       = 30;
 const BAR_H       = 4;
 const BAR_Y       = -(UNIT_RADIUS + 8);
 
+// Factions neutres PvE — miroir des NEUTRAL_OWNER_* serveur.
+const NEUTRAL_FACTIONS = {
+  neutral_barbarian: { name: 'Barbares', color: '#6b6b6b', colorInt: 0x6b6b6b },
+  neutral_fauna:     { name: 'Faune',    color: '#8b6f47', colorInt: 0x8b6f47 },
+  neutral_boss:      { name: 'Boss',     color: '#8b4513', colorInt: 0x8b4513 },
+};
+function getOwnerDisplay(ownerId, players) {
+  if (players && players[ownerId]) {
+    return { name: players[ownerId].name, color: players[ownerId].color,
+             colorInt: Phaser.Display.Color.HexStringToColor(players[ownerId].color).color, isNeutral: false };
+  }
+  const n = NEUTRAL_FACTIONS[ownerId];
+  if (n) return { name: n.name, color: n.color, colorInt: n.colorInt, isNeutral: true };
+  return { name: 'Inconnu', color: '#ffffff', colorInt: 0xffffff, isNeutral: false };
+}
+function isFaunaType(t) { return t === 'boar' || t === 'wolf'; }
+
 // ════════════════════════════════════════════════════════════════════
 // CATALOGUE DES ASSETS — source de vérité pour le préchargement
 // Chaque entrée : { key, path, category }
@@ -364,6 +381,25 @@ class MainScene extends Phaser.Scene {
       this._addKillFeedEntry(`💥 ${attackerName} détruit un village`, attackerColor);
     });
 
+    Network.setOnBarbarianRaid((data) => {
+      const myId = Network.getMyId();
+      if (data.targetPlayerId === myId) {
+        this._addKillFeedEntry(`🔥 Un raid barbare arrive sur toi ! (${data.count})`, '#ff4444');
+      } else {
+        this._addKillFeedEntry(`⚠️ Raid barbare → ${data.targetName} (${data.count})`, data.targetColor || '#999999');
+      }
+    });
+
+    Network.setOnCampCleared((data) => {
+      const myId = Network.getMyId();
+      const unitName = data.freeUnit === 'knight' ? 'chevalier' : 'soldat';
+      if (data.byPlayerId === myId) {
+        this._addKillFeedEntry(`🏆 Camp nettoyé ! +${data.rewardGold}💰 +1 ${unitName}`, '#fbbf24');
+      } else {
+        this._addKillFeedEntry(`🏴 ${data.byName} a nettoyé un camp de bandits`, data.byColor || '#999999');
+      }
+    });
+
     Network.setOnGameOver((data) => {
       // network.js handles the overlay — nothing extra needed here
     });
@@ -387,11 +423,7 @@ class MainScene extends Phaser.Scene {
         else if (data.targetX != null) { tx = data.targetX; ty = data.targetY; }
         else return;
         if (data.killed && t) {
-          const owner = state.players[t.ownerId];
-          const colorInt = owner
-            ? Phaser.Display.Color.HexStringToColor(owner.color).color
-            : 0xffffff;
-          this._spawnDeathParticles(t.x, t.y, colorInt);
+          this._spawnDeathParticles(t.x, t.y, getOwnerDisplay(t.ownerId, state.players).colorInt);
         }
       } else if (data.targetType === 'village') {
         const v = (state.villages || []).find(vv => vv.id === data.targetId);
@@ -430,11 +462,19 @@ class MainScene extends Phaser.Scene {
         }
         if (!attacker) return;
         this._playAttackAnimation(attacker, tx, ty, data.attackerId);
-        // Kill feed unit→unit
+        // Kill feed unit→unit (différencie les kills PvE)
         if (data.killed && data.targetType === 'unit') {
-          const killerOwner = state.players[attacker.ownerId];
-          if (killerOwner) {
-            this._addKillFeedEntry(`⚔️ ${killerOwner.name} a tué une unité`, killerOwner.color);
+          const t = state.units && state.units[data.targetId];
+          const killerD = getOwnerDisplay(attacker.ownerId, state.players);
+          const targetD = t ? getOwnerDisplay(t.ownerId, state.players) : null;
+          if (!killerD.isNeutral && targetD && targetD.isNeutral) {
+            const drop = (data.goldDrop != null) ? ` (+${data.goldDrop}💰)` : '';
+            const beast = targetD.name.toLowerCase().replace(/s$/, '');
+            this._addKillFeedEntry(`⚔️ ${killerD.name} a tué un ${beast}${drop}`, killerD.color);
+          } else if (!killerD.isNeutral) {
+            this._addKillFeedEntry(`⚔️ ${killerD.name} a tué une unité`, killerD.color);
+          } else if (targetD && !targetD.isNeutral) {
+            this._addKillFeedEntry(`☠️ ${killerD.name} ont tué une unité de ${targetD.name}`, killerD.color);
           }
         }
       }
@@ -860,6 +900,13 @@ class MainScene extends Phaser.Scene {
         // Bordure carrée couleur équipe (depth 5) — visible UNIQUEMENT si possédé
         const zoneBorder = this.add.graphics().setDepth(5);
 
+        // Badge garnison barbare (⚔ N) — visible tant que la garnison défend
+        const garrisonBadge = this.add.text(v.x + 36, v.y - 38, '', {
+          fontSize: '14px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold',
+          color: '#e5e5e5', stroke: '#000000', strokeThickness: 3,
+          backgroundColor: 'rgba(40,40,40,0.85)', padding: { x: 4, y: 2 },
+        }).setOrigin(0.5, 0.5).setDepth(62).setVisible(false);
+
         // Click handler : si c'est MON village, ouvre le panel village
         if (useAsset && main.setInteractive) {
           main.setInteractive();
@@ -875,8 +922,23 @@ class MainScene extends Phaser.Scene {
           });
         }
 
-        sprite = { main, vShadow, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder };
+        sprite = { main, vShadow, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder, garrisonBadge };
         this.villageSprites[v.id] = sprite;
+      }
+
+      // Badge garnison : compte les barbares vivants attachés à ce village neutre
+      if (sprite.garrisonBadge) {
+        if (!owner && v.hp > 0) {
+          const allUnits = Network.getState().units || {};
+          let count = 0;
+          for (const u of Object.values(allUnits)) {
+            if (u.neutralVillageId === v.id && u.neutralRole === 'garrison' && u.hp > 0) count++;
+          }
+          sprite.garrisonBadge.setVisible(count > 0);
+          if (count > 0) { sprite.garrisonBadge.setPosition(v.x + 36, v.y - 38); sprite.garrisonBadge.setText(`⚔ ${count}`); }
+        } else {
+          sprite.garrisonBadge.setVisible(false);
+        }
       }
       if (sprite.vShadow) {
         sprite.vShadow.setPosition(v.x, v.y + VILLAGE_DISPLAY * 0.34);
@@ -1354,7 +1416,9 @@ class MainScene extends Phaser.Scene {
 
     for (const [id, unit] of Object.entries(units)) {
       const owner    = players[unit.ownerId];
-      const colorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0xffffff;
+      const _display = getOwnerDisplay(unit.ownerId, players);
+      const isFauna  = isFaunaType(unit.type);
+      const colorInt = _display.colorInt; // joueur OU faction neutre (gris/rouille)
       const prev     = this.unitServerPos[id];
       const paxCount = (unit.passengers && unit.passengers.length) || 0;
       const posChanged = !prev || prev.x !== unit.x || prev.y !== unit.y;
@@ -1379,15 +1443,18 @@ class MainScene extends Phaser.Scene {
             && !(this._placeholderKeys && this._placeholderKeys.has(cfg.fallbackAssetKey))) {
           assetKey = cfg.fallbackAssetKey;
         }
+        // Faune : textures procédurales pré-colorées (boar/wolf), rendues SANS tint d'équipe.
+        if (isFauna) { assetKey = unit.type === 'wolf' ? 'fauna-wolf' : 'fauna-boar'; }
         const useAsset  = this._hasAsset(assetKey);
 
-        const softTint = this._factionTint(colorInt);
+        // Neutres : tint de faction (gris cendré / rouille). Faune : pas de tint (texture colorée).
+        const softTint = isFauna ? 0xffffff : this._factionTint(colorInt);
         let sprite;
         if (useAsset) {
           sprite = this.add.sprite(unit.x, unit.y, assetKey)
             .setOrigin(0.5, 0.5)
-            .setDisplaySize(unitSize * scaleMult, unitSize * scaleMult)
-            .setDepth(50);
+            .setDisplaySize(isFauna ? 28 : unitSize * scaleMult, isFauna ? 28 : unitSize * scaleMult)
+            .setDepth(isFauna ? 48 : 50);
           sprite.setTint(softTint);
         } else {
           // Fallback SpriteFactory pour les 3 unités historiques
@@ -1432,8 +1499,9 @@ class MainScene extends Phaser.Scene {
         const barFill = this.add.rectangle(unit.x - BAR_W / 2, unit.y + BAR_Y, BAR_W * (unit.hp / unit.maxHp), BAR_H, 0x22c55e)
           .setOrigin(0, 0.5).setDepth(60);
 
-        const initBadgeTxt = (unit.type === 'boat' && paxCount > 0)
-          ? `🧍${paxCount}/4` : this._modeIcon(unit.mode);
+        const initBadgeTxt = isFauna ? ''
+          : (unit.type === 'boat' && paxCount > 0) ? `🧍${paxCount}/4`
+          : this._modeIcon(unit.mode);
         const badge = this.add.text(unit.x + 18, unit.y - 18, initBadgeTxt, {
           fontSize: '12px', fontFamily: '"Quicksand", sans-serif',
         }).setOrigin(0.5, 0.5).setDepth(70);
@@ -1480,13 +1548,14 @@ class MainScene extends Phaser.Scene {
 
       } else if (posChanged || hpChanged || paxChanged) {
         const [sprite, , barFill, badge] = this.unitSprites[id];
-        if (badge) {
+        if (badge && !isFauna) {
           // Boat avec passagers : montre "🧍N/4" au lieu du mode
           if (unit.type === 'boat' && paxCount > 0) badge.setText(`🧍${paxCount}/4`);
           else badge.setText(this._modeIcon(unit.mode));
         }
-        const softTint = this._factionTint(colorInt);
-        if (sprite.setTint && !sprite._attacking && !sprite._flashing) { sprite.setTint(softTint); }
+        // Faune : texture pré-colorée, pas de re-tint. Autres : tint de faction.
+        const softTint = isFauna ? 0xffffff : this._factionTint(colorInt);
+        if (!isFauna && sprite.setTint && !sprite._attacking && !sprite._flashing) { sprite.setTint(softTint); }
         sprite._factionColor = softTint;
         sprite._factionRaw   = colorInt;
 

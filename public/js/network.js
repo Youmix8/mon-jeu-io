@@ -23,6 +23,8 @@ const Network = (() => {
   let onMatchRestartedCallback   = null;
   let onVillageCapturedCallback  = null;
   let onVillageDestroyedCallback = null;
+  let onBarbarianRaidCallback    = null;
+  let onCampClearedCallback      = null;
   let onTechUnlockedCallback     = null;
   let onInitReceivedCallback     = null;
   let initReceived = false;
@@ -196,6 +198,14 @@ const Network = (() => {
       if (onVillageDestroyedCallback) onVillageDestroyedCallback(data);
     });
 
+    socket.on('barbarianRaid', (data) => {
+      if (onBarbarianRaidCallback) onBarbarianRaidCallback(data);
+    });
+
+    socket.on('campCleared', (data) => {
+      if (onCampClearedCallback) onCampClearedCallback(data);
+    });
+
     socket.on('techUnlocked', (data) => {
       // Update local state IMMÉDIATEMENT pour que refresh() voit la nouvelle tech
       // (sans attendre le prochain broadcast gameState — sinon décalage visible)
@@ -360,6 +370,8 @@ const Network = (() => {
   function setOnMatchRestarted(cb)   { onMatchRestartedCallback = cb; }
   function setOnVillageCaptured(cb)  { onVillageCapturedCallback = cb; }
   function setOnVillageDestroyed(cb) { onVillageDestroyedCallback = cb; }
+  function setOnBarbarianRaid(cb)    { onBarbarianRaidCallback = cb; }
+  function setOnCampCleared(cb)      { onCampClearedCallback = cb; }
   function setOnTechUnlocked(cb)     { onTechUnlockedCallback = cb; }
   function setOnInitReceived(cb)     { onInitReceivedCallback = cb; if (initReceived && cb) cb(); }
   function isInitReceived()          { return initReceived; }
@@ -376,7 +388,7 @@ const Network = (() => {
     embarkBoat, disembarkBoat, isWaterAt,
     debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,
-    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnInitReceived,
+    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnBarbarianRaid, setOnCampCleared, setOnInitReceived,
     isInitReceived,
   };
 })();
