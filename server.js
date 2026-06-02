@@ -334,6 +334,15 @@ function sameSide(a, b) {
   if (a === b) return true;
   return isNeutralOwner(a) && isNeutralOwner(b);
 }
+// Deux JOUEURS liés par un pacte de non-agression (traité diplomatique).
+function areAllied(a, b) {
+  if (a === b || isNeutralOwner(a) || isNeutralOwner(b)) return false;
+  const pa = gameState.players[a], pb = gameState.players[b];
+  if (!pa || !pb) return false;
+  return (pa.allies && pa.allies.includes(b)) || (pb.allies && pb.allies.includes(a));
+}
+// Ne doivent PAS s'attaquer : même camp OU alliés diplomatiques.
+function friendly(a, b) { return sameSide(a, b) || areAllied(a, b); }
 
 // Aggro de groupe : quand un combat s'engage près d'un groupe, les alliés LIBRES
 // proches (mode defend/attack, sans cible) convergent sur le même ennemi → la horde
@@ -1432,11 +1441,26 @@ function botTick(bot) {
   }
 }
 
+// Reverse-map unité → tech qui la débloque (via node.unlocks.units ou node.unitType).
+// Permet d'exiger la tech pour les unités boss (god_avatar, arcane_dragon, angel,
+// fire_elemental…) qui ont requiresTech:null dans UNIT_TYPES mais sont gatées par
+// des nœuds tier 5-6 dans l'arbre. Sans ça, elles étaient spawnables sans tech.
+const UNIT_UNLOCK_TECH = {};
+for (const [tid, node] of Object.entries(NEW_TECH_TREE)) {
+  if (node && node.unlocks && Array.isArray(node.unlocks.units)) {
+    for (const ut of node.unlocks.units) if (!UNIT_UNLOCK_TECH[ut]) UNIT_UNLOCK_TECH[ut] = tid;
+  }
+  if (node && node.unitType && !UNIT_UNLOCK_TECH[node.unitType]) UNIT_UNLOCK_TECH[node.unitType] = tid;
+}
+
 function unitTypeUnlocked(player, typeId) {
   const def = UNIT_TYPES[typeId];
   if (!def) return false;
-  if (!def.requiresTech) return true;
-  return hasTech(player, def.requiresTech);
+  if (def.requiresTech) return hasTech(player, def.requiresTech);
+  // Tech indirecte via l'arbre (unlocks.units) — ex. unités boss
+  const indirect = UNIT_UNLOCK_TECH[typeId];
+  if (indirect) return hasTech(player, indirect);
+  return true;
 }
 
 // Fallback en coin DYNAMIQUE (relatif à la taille actuelle de la map).
@@ -1923,7 +1947,15 @@ io.on('connection', (socket) => {
     applyMapConfig(reqMapType, reqMapSize);
     currentSpawns       = generateSpawns();
     gameState.villages  = generateVillages(currentSpawns);
+    gameState.camps     = generateCamps(currentSpawns, gameState.villages);
     gameState.buildings = [];
+    // Purge les neutres de l'ancienne map (sinon faune/mobs orphelins, parfois dans l'eau)
+    // et régénère camps + faune cohérents avec la nouvelle map.
+    for (const uid of Object.keys(gameState.units)) {
+      if (isNeutralOwner(gameState.units[uid].ownerId)) delete gameState.units[uid];
+    }
+    spawnAllCampMobs();
+    spawnAllFauna(currentSpawns);
   }
 
   const spawn  = currentSpawns[slot];
@@ -2478,6 +2510,7 @@ io.on('connection', (socket) => {
 
   // ── DEBUG : spawn instantané gratuit (à retirer après branchement arbre tech) ──
   socket.on('debugSpawn', ({ entityType, x, y } = {}) => {
+    if (process.env.NODE_ENV === 'production') return; // anti-cheat : debug désactivé en prod
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -2514,6 +2547,7 @@ io.on('connection', (socket) => {
 
   // ── DEBUG : portail de téléportation (cast direct, gratuit) ──
   socket.on('debugCastPortal', ({ unitIds, destX, destY } = {}) => {
+    if (process.env.NODE_ENV === 'production') return; // anti-cheat : debug désactivé en prod
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
     if (!Number.isFinite(destX) || !Number.isFinite(destY)) return;
@@ -2544,6 +2578,7 @@ io.on('connection', (socket) => {
   // L'event reste en place pour compat client mais ne fait rien.
   socket.on('castSpell', () => { /* no-op : sorts supprimés */ });
   socket.on('_legacyCastSpell_disabled', ({ spellId, x, y } = {}) => {
+    if (process.env.NODE_ENV === 'production') return; // surface morte en prod (sorts retirés)
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
     const spell = SPELLS[spellId];
@@ -2704,7 +2739,7 @@ setInterval(() => {
       // Cible prioritaire : la plus faible en HP dans le rayon (focus kill)
       // Score = hp + 0.5 * distance (ratio simple)
       for (const other of Object.values(gameState.units)) {
-        if (sameSide(other.ownerId, unit.ownerId)) continue;
+        if (friendly(other.ownerId, unit.ownerId)) continue;
         const d = Math.hypot(other.x - cx, other.y - cy);
         if (d > radius) continue;
         const score = other.hp + d * 0.3;
@@ -2712,6 +2747,7 @@ setInterval(() => {
       }
       for (const player of Object.values(gameState.players)) {
         if (player.id === unit.ownerId || player.hp <= 0 || player.eliminated) continue;
+        if (areAllied(player.id, unit.ownerId)) continue;
         const d = Math.hypot(player.x - cx, player.y - cy);
         if (d > radius + HDV_HALF_SIZE) continue;
         // HDVs : moins prioritaires (gros HP) mais reste cible si rien d'autre
@@ -2739,7 +2775,7 @@ setInterval(() => {
       const scanR = (unit.range || 80) + 40;
       let nearest = null, nearestDist = scanR;
       for (const other of Object.values(gameState.units)) {
-        if (sameSide(other.ownerId, unit.ownerId)) continue;
+        if (friendly(other.ownerId, unit.ownerId)) continue;
         const d = Math.hypot(other.x - unit.x, other.y - unit.y);
         if (d < nearestDist) { nearest = other; nearestDist = d; }
       }
@@ -3143,12 +3179,13 @@ setInterval(() => {
       let best = null, bestDist = Infinity, bestType = null;
 
       for (const other of Object.values(gameState.units)) {
-        if (toDelete.has(other.id) || sameSide(other.ownerId, unit.ownerId)) continue;
+        if (toDelete.has(other.id) || friendly(other.ownerId, unit.ownerId)) continue;
         const d = Math.hypot(other.x - unit.x, other.y - unit.y);
         if (d <= uRange && d < bestDist) { best = other; bestDist = d; bestType = 'unit'; }
       }
       for (const player of Object.values(gameState.players)) {
         if (player.id === unit.ownerId || player.hp <= 0) continue;
+        if (areAllied(player.id, unit.ownerId)) continue;
         const edgeDist = unitToHdvDist(unit, player);
         if (edgeDist <= effectiveRange && edgeDist < bestDist) {
           best = player; bestDist = edgeDist; bestType = 'hdv';
@@ -3283,11 +3320,20 @@ setInterval(() => {
     const center = u._aoeAroundTarget;
     u._aoeAroundTarget = null;
     for (const other of Object.values(gameState.units)) {
-      if (other.ownerId === u.ownerId || toDelete.has(other.id)) continue;
+      if (friendly(other.ownerId, u.ownerId) || toDelete.has(other.id)) continue;
       const d = Math.hypot(other.x - center.x, other.y - center.y);
       if (d > 0 && d <= 40) {
         other.hp = Math.max(0, other.hp - 15); // 15 dmg splash
-        if (other.hp <= 0) toDelete.add(other.id);
+        if (other.hp <= 0) {
+          // Crédite le kill + drops PvE + clear de camp (sinon camp jamais nettoyé si
+          // le mob final meurt par splash) + tag résurrection necro/lich.
+          other._killedByType  = u.type;
+          other._killedByOwner = u.ownerId;
+          toDelete.add(other.id);
+          const killer = gameState.players[u.ownerId];
+          if (killer && !killer.eliminated) killer.kills++;
+          onNeutralUnitKilled(other, u.ownerId, null);
+        }
       }
     }
   }

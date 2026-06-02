@@ -469,7 +469,11 @@ class MainScene extends Phaser.Scene {
           const targetD = t ? getOwnerDisplay(t.ownerId, state.players) : null;
           if (!killerD.isNeutral && targetD && targetD.isNeutral) {
             const drop = (data.goldDrop != null) ? ` (+${data.goldDrop}💰)` : '';
-            const beast = targetD.name.toLowerCase().replace(/s$/, '');
+            // Nom d'espèce si on connaît le type de la cible, sinon nom de faction
+            const NAMES = { boar: 'sanglier', wolf: 'loup', elite_guard: 'mini-boss' };
+            const beast = (t && NAMES[t.type]) ? NAMES[t.type]
+                        : (t && t.ownerId === 'neutral_barbarian') ? 'barbare'
+                        : 'créature';
             this._addKillFeedEntry(`⚔️ ${killerD.name} a tué un ${beast}${drop}`, killerD.color);
           } else if (!killerD.isNeutral) {
             this._addKillFeedEntry(`⚔️ ${killerD.name} a tué une unité`, killerD.color);
