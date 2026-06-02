@@ -335,11 +335,30 @@ function sameSide(a, b) {
   return isNeutralOwner(a) && isNeutralOwner(b);
 }
 
-// A — Villages barbares : garnison défensive + raids agressifs après 5 min.
-const VILLAGE_GARRISON_SIZE          = 2;
-const VILLAGE_GARRISON_DEFEND_RADIUS = 120;
-const VILLAGE_GARRISON_HP            = 50;
-const VILLAGE_GARRISON_DMG           = 8;
+// Aggro de groupe : quand un combat s'engage près d'un groupe, les alliés LIBRES
+// proches (mode defend/attack, sans cible) convergent sur le même ennemi → la horde
+// focus au lieu de laisser une seule unité se battre en 1v1.
+const RALLY_RADIUS = 220;
+function rallyNearbyAllies(originUnit, enemyId, enemyType) {
+  if (!originUnit || enemyId == null) return;
+  const r2 = RALLY_RADIUS * RALLY_RADIUS;
+  for (const ally of Object.values(gameState.units)) {
+    if (ally.id === originUnit.id) continue;
+    if (ally.attackTargetId !== null) continue;        // déjà engagé
+    if ((ally.damage || 0) <= 0) continue;             // non-combattant (pèlerin, colon, bateau)
+    if (ally.mode !== 'defend' && ally.mode !== 'attack') continue; // ne hijacke pas les ordres de déplacement / la faune
+    if (!sameSide(ally.ownerId, originUnit.ownerId)) continue;
+    const dx = ally.x - originUnit.x, dy = ally.y - originUnit.y;
+    if (dx * dx + dy * dy > r2) continue;
+    ally.attackTargetId   = enemyId;
+    ally.attackTargetType = enemyType || 'unit';
+    ally.targetX = null; ally.targetY = null;
+    if (ally.mode === 'defend') ally.mode = 'attack';
+  }
+}
+
+// A — Villages barbares : raids agressifs après 5 min (plus de garnison défensive —
+// les villages restent librement capturables, comme le modèle Polytopia).
 const NEUTRAL_GOLD_DROP_BARBARIAN    = 8;
 const RAID_DELAY_MS     = 5 * 60 * 1000;
 const RAID_INTERVAL_MS  = 60 * 1000;
@@ -353,7 +372,7 @@ const CAMP_COUNT          = 2;
 const CAMP_MOB_COUNT      = 5;
 const CAMP_MOB_HP         = 55;
 const CAMP_MOB_DMG        = 9;
-const CAMP_BOSS_HP        = 400;
+const CAMP_BOSS_HP        = 320;
 const CAMP_BOSS_DMG       = 18;
 const CAMP_REWARD_GOLD    = 150;
 const CAMP_DEFEND_RADIUS  = 180;
@@ -637,34 +656,6 @@ function villageAllowsUnit(village, player, typeId) {
 }
 
 // ════════════ PvE : factions neutres (barbares / camps / faune) ════════════
-
-// Garnison d'un village neutre : 2 soldats barbares défensifs.
-function spawnVillageGarrison(village) {
-  if (!gameState || !village || village.ownerId !== null) return;
-  for (let i = 0; i < VILLAGE_GARRISON_SIZE; i++) {
-    const angle = (i / VILLAGE_GARRISON_SIZE) * Math.PI * 2 + Math.random() * 0.3;
-    const dist  = 40 + Math.random() * 20;
-    const unitId = `unit_${nextUnitId++}`;
-    gameState.units[unitId] = {
-      id: unitId, ownerId: NEUTRAL_OWNER_BARBARIAN,
-      x: Math.round(village.x + Math.cos(angle) * dist),
-      y: Math.round(village.y + Math.sin(angle) * dist),
-      type: 'soldier', hp: VILLAGE_GARRISON_HP, maxHp: VILLAGE_GARRISON_HP,
-      speed: 80, range: 35, damage: VILLAGE_GARRISON_DMG, cost: 0,
-      targetX: null, targetY: null, attackTargetId: null, attackTargetType: null,
-      lastAttackTime: 0,
-      mode: 'defend', defendX: village.x, defendY: village.y, defendRadius: VILLAGE_GARRISON_DEFEND_RADIUS,
-      neutralRole: 'garrison', neutralVillageId: village.id,
-    };
-  }
-}
-function spawnAllVillageGarrisons() {
-  let spawned = 0;
-  for (const v of gameState.villages) {
-    if (v.ownerId === null && v.hp > 0) { spawnVillageGarrison(v); spawned += VILLAGE_GARRISON_SIZE; }
-  }
-  console.log(`[PvE] Garnison barbare : ${spawned} unités sur ${gameState.villages.length} villages`);
-}
 
 // Raid barbare : 2 unités en 'move' vers un joueur cible.
 function spawnRaidFromVillage(village, targetPlayer) {
@@ -1697,7 +1688,6 @@ let tickCount  = 0;
 let peakPlayerCount = 0;
 
 // Spawn initial des entités PvE neutres (gameState + nextUnitId existent maintenant)
-spawnAllVillageGarrisons();
 spawnAllCampMobs();
 spawnAllFauna(currentSpawns);
 
@@ -1879,7 +1869,6 @@ function resetMatch() {
     p.y = spawn.y;
   }
   for (const uid of Object.keys(gameState.units)) delete gameState.units[uid];
-  spawnAllVillageGarrisons();
   spawnAllCampMobs();
   spawnAllFauna(currentSpawns);
   const playerCount        = Object.keys(gameState.players).length;
@@ -1902,7 +1891,6 @@ io.on('connection', (socket) => {
     gameState.villages = generateVillages(currentSpawns);
     gameState.camps    = generateCamps(currentSpawns, gameState.villages);
     gameState.buildings = [];
-    spawnAllVillageGarrisons();
     spawnAllCampMobs();
     spawnAllFauna(currentSpawns);
     console.log('Recovered zombie ended state on new connection');
@@ -2689,7 +2677,6 @@ io.on('connection', (socket) => {
       gameState.villages = generateVillages(currentSpawns);
       gameState.camps    = generateCamps(currentSpawns, gameState.villages);
       gameState.buildings = [];
-      spawnAllVillageGarrisons();
       spawnAllCampMobs();
       spawnAllFauna(currentSpawns);
       console.log('No humans left, full reset (bots removed)');
@@ -2734,6 +2721,8 @@ setInterval(() => {
       if (best) {
         unit.attackTargetId = best.id;
         unit.attackTargetType = bestType;
+        // Aggro de groupe : les alliés libres proches focus le même ennemi
+        if (bestType === 'unit') rallyNearbyAllies(unit, best.id, 'unit');
       } else {
         // Pas d'ennemi en vue : retourne au point de défense si trop loin
         const dToCenter = Math.hypot(cx - unit.x, cy - unit.y);
@@ -2757,6 +2746,7 @@ setInterval(() => {
       if (nearest) {
         unit.attackTargetId = nearest.id;
         unit.attackTargetType = 'unit';
+        rallyNearbyAllies(unit, nearest.id, 'unit');
         // On garde targetX/targetY : après le kill, la cible est null et le pion reprend sa route
       }
     } else if (unit.mode === 'wander') {
@@ -3104,6 +3094,8 @@ setInterval(() => {
         target.attackTargetType = 'unit';
         target.targetX = null; target.targetY = null;
         if (target.mode === 'defend') target.mode = 'attack';
+        // Aggro de groupe : les alliés de la victime convergent sur l'agresseur
+        rallyNearbyAllies(target, unit.id, 'unit');
       }
 
       // Inclut attacker/target X/Y pour que le client puisse afficher le projectile
@@ -3377,21 +3369,11 @@ setInterval(() => {
   for (const v of gameState.villages) {
     const r2 = VILLAGE_RADIUS * VILLAGE_RADIUS;
     const ownersInside = new Set();
-    let garrisonAlive = false;
     for (const unit of Object.values(gameState.units)) {
-      if (unit.neutralVillageId === v.id && unit.neutralRole === 'garrison' && unit.hp > 0) garrisonAlive = true;
       const dx = unit.x - v.x, dy = unit.y - v.y;
       if (dx * dx + dy * dy > r2) continue;
-      if (isNeutralOwner(unit.ownerId)) continue; // les neutres bloquent (garrisonAlive) mais ne capturent pas
+      if (isNeutralOwner(unit.ownerId)) continue; // les mobs neutres de passage ne bloquent/capturent pas
       ownersInside.add(unit.ownerId);
-    }
-    // Tant que la garnison défend, le village neutre n'est pas capturable.
-    if (garrisonAlive && v.ownerId === null) {
-      if (v.captureProgress > 0) {
-        v.captureProgress = Math.max(0, v.captureProgress - 2);
-        if (v.captureProgress === 0) v.capturingPlayerId = null;
-      }
-      continue;
     }
     if (ownersInside.size === 1) {
       const claimer = [...ownersInside][0];

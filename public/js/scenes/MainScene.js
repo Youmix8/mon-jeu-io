@@ -900,13 +900,6 @@ class MainScene extends Phaser.Scene {
         // Bordure carrée couleur équipe (depth 5) — visible UNIQUEMENT si possédé
         const zoneBorder = this.add.graphics().setDepth(5);
 
-        // Badge garnison barbare (⚔ N) — visible tant que la garnison défend
-        const garrisonBadge = this.add.text(v.x + 36, v.y - 38, '', {
-          fontSize: '14px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold',
-          color: '#e5e5e5', stroke: '#000000', strokeThickness: 3,
-          backgroundColor: 'rgba(40,40,40,0.85)', padding: { x: 4, y: 2 },
-        }).setOrigin(0.5, 0.5).setDepth(62).setVisible(false);
-
         // Click handler : si c'est MON village, ouvre le panel village
         if (useAsset && main.setInteractive) {
           main.setInteractive();
@@ -922,24 +915,10 @@ class MainScene extends Phaser.Scene {
           });
         }
 
-        sprite = { main, vShadow, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder, garrisonBadge };
+        sprite = { main, vShadow, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder };
         this.villageSprites[v.id] = sprite;
       }
 
-      // Badge garnison : compte les barbares vivants attachés à ce village neutre
-      if (sprite.garrisonBadge) {
-        if (!owner && v.hp > 0) {
-          const allUnits = Network.getState().units || {};
-          let count = 0;
-          for (const u of Object.values(allUnits)) {
-            if (u.neutralVillageId === v.id && u.neutralRole === 'garrison' && u.hp > 0) count++;
-          }
-          sprite.garrisonBadge.setVisible(count > 0);
-          if (count > 0) { sprite.garrisonBadge.setPosition(v.x + 36, v.y - 38); sprite.garrisonBadge.setText(`⚔ ${count}`); }
-        } else {
-          sprite.garrisonBadge.setVisible(false);
-        }
-      }
       if (sprite.vShadow) {
         sprite.vShadow.setPosition(v.x, v.y + VILLAGE_DISPLAY * 0.34);
         sprite.vShadow.setAlpha(destroyed ? 0.12 : 0.26);
