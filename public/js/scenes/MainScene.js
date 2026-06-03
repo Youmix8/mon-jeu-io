@@ -26,27 +26,13 @@ class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    // Charge les assets PNG. Si un asset est manquant ou échoue, on log un
-    // warning et on bascule sur le placeholder (rectangle/cercle/SpriteFactory).
+    // Direction artistique néon : 100% procédural. Aucun PNG n'est chargé.
     this.assetMissing = {};
-    this.load.on('loaderror', (file) => {
-      console.warn(`[Assets] "${file.key}" non trouvé (${file.src}) — fallback sur placeholder`);
-      this.assetMissing[file.key] = true;
-    });
-    this.load.image('soldier', 'assets/soldier.png');
-    this.load.image('archer',  'assets/archer.png');
-    this.load.image('cavalry', 'assets/cavalry.png');
-    this.load.image('hdv',     'assets/hdv.png');
-    this.load.image('village', 'assets/village.png');
-    this.load.image('grass',   'assets/grass_tile.png');
-    this.load.image('tree',    'assets/tree.png');
-    this.load.image('rock',    'assets/rock.png');
-    this.load.image('bush',    'assets/bush.png');
-    this.load.image('flowers', 'assets/flowers.png');
   }
 
   _hasAsset(key) {
-    return !(this.assetMissing && this.assetMissing[key]) && this.textures.exists(key);
+    // Aucun asset PNG en mode néon — toujours faux pour forcer la voie procédurale.
+    return false;
   }
 
   create() {
@@ -468,109 +454,104 @@ class MainScene extends Phaser.Scene {
     const cfg = Network.getConfig();
     const CAP_TICKS = cfg.villageCaptureTicks || 200;
     const MAX_HP    = cfg.villageMaxHp || 300;
-    const RAD = cfg.villageRadius || 70;
     const seen = new Set();
-    const myId = Network.getMyId();
-    const useAsset = this._hasAsset('village');
 
-    const VILLAGE_DISPLAY = 110;
+    // Hexagone village rayon 20, displaySize selon ratio texture
+    const V_R = Theme.BASE.village.r;
+    const V_DISPLAY = V_R * 2 * (SpriteFactory.TEX_SIZE / SpriteFactory.TEX_R);
+    const HOLE_C = Phaser.Display.Color.HexStringToColor(Theme.BG.holePunch).color;
+    const BAR_W = V_R * 2.2;
+
     for (const v of villages) {
       seen.add(v.id);
       const owner = v.ownerId ? players[v.ownerId] : null;
-      const ownerColorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0xffffff;
+      const ownerColorInt = owner ? Theme.factionColorInt(v.ownerId) : Theme.NEUTRAL_INT;
       const destroyed = v.hp <= 0 && !v.ownerId;
 
       let sprite = this.villageSprites[v.id];
       if (!sprite) {
-        // Sprite principal village (plus de cercle séparé — tint sur le sprite)
-        let main;
-        if (useAsset) {
-          main = this.add.sprite(v.x, v.y, 'village')
-            .setOrigin(0.5, 0.5)
-            .setDisplaySize(VILLAGE_DISPLAY, VILLAGE_DISPLAY)
-            .setDepth(30);
-          // Tint d'équipe : neutre = blanc, capturé = couleur du joueur
-          main.setTint(owner ? ownerColorInt : 0xffffff);
-        } else {
-          main = this.add.rectangle(v.x, v.y, 50, 50, owner ? ownerColorInt : 0x8b7355)
-            .setStrokeStyle(3, 0x000000, 0.7)
-            .setDepth(30);
+        // ── Hexagone village ──
+        const main = this.add.sprite(v.x, v.y, 'sf-base-hex')
+          .setOrigin(0.5, 0.5)
+          .setDisplaySize(V_DISPLAY, V_DISPLAY)
+          .setDepth(30);
+        main.setTint(ownerColorInt);
+        if (main.preFX && main.preFX.addGlow) {
+          main.preFX.setPadding(10);
+          main.preFX.addGlow(ownerColorInt, Theme.GLOW.base.outer, Theme.GLOW.base.inner, false, Theme.GLOW.base.quality);
         }
+        main._baseScaleX = main.scaleX;
+        main._baseScaleY = main.scaleY;
 
-        // Label : niveau village (Lv 1 / Lv 2)
-        const label = this.add.text(v.x, v.y + 52, `Village Lv ${v.level || 1}`, {
-          fontSize: '13px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold',
-          color: '#ffffff', stroke: '#000000', strokeThickness: 3,
-        }).setOrigin(0.5, 0).setDepth(70);
+        // ── Trou central sombre + numéro de niveau ──
+        const hole = this.add.circle(v.x, v.y, V_R * 0.45, HOLE_C, 1).setDepth(31);
+        const label = this.add.text(v.x, v.y, String(v.level || 1), {
+          fontSize: '14px', fontFamily: '"Inter", system-ui, sans-serif', fontStyle: 'bold',
+          color: owner ? Theme.factionColorStr(v.ownerId) : Theme.NEUTRAL_STR,
+        }).setOrigin(0.5, 0.5).setDepth(32);
 
-        // Barre HP (au-dessus, depth 60)
-        const hpBarBg   = this.add.rectangle(v.x, v.y - 52, 90, 8, 0x111111, 0.9)
-          .setStrokeStyle(1.5, 0x000000, 0.6).setOrigin(0.5, 0.5).setDepth(60);
-        const hpBarFill = this.add.rectangle(v.x - 45, v.y - 52, 90 * (v.hp / MAX_HP), 8, 0x22c55e)
+        // ── Barre HP (au-dessus, vert) ──
+        const hpBarBg   = this.add.rectangle(v.x, v.y - V_R - 10, BAR_W, 4, Theme.HP.bg, 0.85)
+          .setOrigin(0.5, 0.5).setDepth(60);
+        const hpBarFill = this.add.rectangle(v.x - BAR_W / 2, v.y - V_R - 10, BAR_W * (v.hp / MAX_HP), 4, Theme.HP.base)
           .setOrigin(0, 0.5).setDepth(60);
 
-        // Barre de capture (en dessous de la barre HP, depth 60)
-        const capBarBg   = this.add.rectangle(v.x, v.y - 42, 90, 6, 0x222222, 0.9)
-          .setStrokeStyle(1, 0x000000, 0.5).setOrigin(0.5, 0.5).setDepth(60);
-        const capBarFill = this.add.rectangle(v.x - 45, v.y - 42, 0, 6, 0xfbbf24)
+        // ── Barre capture (dorée, sous le village) ──
+        const capBarBg   = this.add.rectangle(v.x, v.y + V_R + 4, V_R * 2, 3, 0x222222, 0.8)
+          .setOrigin(0.5, 0.5).setDepth(60);
+        const capBarFill = this.add.rectangle(v.x - V_R, v.y + V_R + 4, 0, 3, Theme.HP.capture)
           .setOrigin(0, 0.5).setDepth(60);
 
-        // Bordure carrée couleur équipe (depth 5) — visible UNIQUEMENT si possédé
+        // ── Zone constructible : cercle cyan alpha 0.12 ──
         const zoneBorder = this.add.graphics().setDepth(5);
 
-        // Click handler : si c'est MON village, ouvre le panel village
-        if (useAsset && main.setInteractive) {
-          main.setInteractive();
-          main.on('pointerover', () => {
-            if (v.ownerId === Network.getMyId()) this.input.setDefaultCursor('pointer');
-          });
-          main.on('pointerout', () => this.input.setDefaultCursor('default'));
-          main.on('pointerdown', () => {
-            const cur = Network.getState().villages.find(vv => vv.id === v.id);
-            if (cur && cur.ownerId === Network.getMyId() && typeof VillagePanel !== 'undefined') {
-              VillagePanel.open(v.id);
-            }
-          });
-        }
+        main.setInteractive();
+        main.on('pointerover', () => {
+          if (v.ownerId === Network.getMyId()) this.input.setDefaultCursor('pointer');
+        });
+        main.on('pointerout', () => this.input.setDefaultCursor('default'));
+        main.on('pointerdown', () => {
+          const cur = Network.getState().villages.find(vv => vv.id === v.id);
+          if (cur && cur.ownerId === Network.getMyId() && typeof VillagePanel !== 'undefined') {
+            VillagePanel.open(v.id);
+          }
+        });
 
-        sprite = { main, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder };
+        sprite = { main, label, hpBarBg, hpBarFill, capBarBg, capBarFill, zoneBorder, hole };
         this.villageSprites[v.id] = sprite;
       }
 
-      // Met à jour la bordure carrée si possédé (sinon cachée)
-      if (sprite.zoneBorder) {
-        sprite.zoneBorder.clear();
-        if (owner && !destroyed) {
-          const vLvls = cfg.villageLevels || [];
-          const lvl = vLvls[(v.level || 1) - 1] || vLvls[0] || {};
-          const buildR = lvl.buildRadius || 160;
-          sprite.zoneBorder.lineStyle(3, ownerColorInt, 0.55);
-          sprite.zoneBorder.strokeRect(v.x - buildR, v.y - buildR, buildR * 2, buildR * 2);
-        }
+      // ── Zone constructible : seulement si possédé ──
+      sprite.zoneBorder.clear();
+      if (owner && !destroyed) {
+        const vLvls = cfg.villageLevels || [];
+        const lvl = vLvls[(v.level || 1) - 1] || vLvls[0] || {};
+        const buildR = lvl.buildRadius || 160;
+        sprite.zoneBorder.fillStyle(ownerColorInt, 0.08);
+        sprite.zoneBorder.fillCircle(v.x, v.y, buildR);
+        sprite.zoneBorder.lineStyle(2, ownerColorInt, 0.4);
+        sprite.zoneBorder.strokeCircle(v.x, v.y, buildR);
       }
 
-      // Update : positions + tint + visibility
+      // ── Update : positions + tint + numéro ──
       sprite.main.setPosition(v.x, v.y);
       sprite.main.setAlpha(destroyed ? 0.35 : 1);
-      if (sprite.main.setTint) {
-        sprite.main.setTint(owner ? ownerColorInt : 0xffffff);
-      }
+      sprite.main.setTint(ownerColorInt);
 
-      sprite.label.setPosition(v.x, v.y + 52);
-      sprite.label.setText(destroyed ? '💥 Détruit' : `Village Lv ${v.level || 1}`);
-      sprite.label.setColor(destroyed ? '#ef4444' : '#ffffff');
+      if (sprite.hole) sprite.hole.setPosition(v.x, v.y);
+      sprite.label.setPosition(v.x, v.y);
+      sprite.label.setText(destroyed ? '💥' : String(v.level || 1));
+      sprite.label.setColor(destroyed ? '#ef4444' : (owner ? Theme.factionColorStr(v.ownerId) : Theme.NEUTRAL_STR));
 
-      // HP bar : visible si capturé
       const showHp = !!owner && v.hp > 0;
       sprite.hpBarBg.setVisible(showHp);
       sprite.hpBarFill.setVisible(showHp);
       if (showHp) {
-        sprite.hpBarBg.setPosition(v.x, v.y - 52);
-        sprite.hpBarFill.setPosition(v.x - 45, v.y - 52);
+        sprite.hpBarBg.setPosition(v.x, v.y - V_R - 10);
+        sprite.hpBarFill.setPosition(v.x - BAR_W / 2, v.y - V_R - 10);
         const hpRatio = v.hp / MAX_HP;
-        sprite.hpBarFill.width = 90 * hpRatio;
-        const c = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
-        sprite.hpBarFill.setFillStyle(c);
+        sprite.hpBarFill.width = BAR_W * hpRatio;
+        sprite.hpBarFill.setFillStyle(hpRatio > Theme.HP.threshold ? Theme.HP.base : Theme.HP.low);
       }
 
       const showCap = v.captureProgress > 0;
@@ -578,12 +559,11 @@ class MainScene extends Phaser.Scene {
       sprite.capBarBg.setVisible(showCap);
       sprite.capBarFill.setVisible(showCap);
       if (showCap) {
-        const capY = showHp ? v.y - 42 : v.y - 52;
-        sprite.capBarBg.setPosition(v.x, capY);
-        sprite.capBarFill.setPosition(v.x - 45, capY);
-        sprite.capBarFill.width = 90 * ratio;
+        sprite.capBarBg.setPosition(v.x, v.y + V_R + 4);
+        sprite.capBarFill.setPosition(v.x - V_R, v.y + V_R + 4);
+        sprite.capBarFill.width = (V_R * 2) * ratio;
         const capturer = v.capturingPlayerId ? players[v.capturingPlayerId] : null;
-        sprite.capBarFill.setFillStyle(capturer ? Phaser.Display.Color.HexStringToColor(capturer.color).color : 0xfbbf24);
+        sprite.capBarFill.setFillStyle(capturer ? Theme.factionColorInt(v.capturingPlayerId) : Theme.HP.capture);
       }
     }
 
@@ -766,55 +746,55 @@ class MainScene extends Phaser.Scene {
   // ── HDVs ──────────────────────────────────────────────────────────
 
   _syncHDVs(players) {
-    // HDV sprite tinté à la couleur de l'équipe (plus de cercle séparé).
-    // Le sprite lui-même est cliquable et plus gros pour englober l'ancienne zone (sprite + cercle).
-    const HDV_DISPLAY = 160;
-    const BAR_W_HDV = 110, BAR_H_HDV = 11;
-    const BAR_Y_OFF = -HDV_DISPLAY / 2 - 18;
+    // HDV néon : hexagone glow rayon 28, trou central #04121a, ★ centré couleur équipe.
+    const HDV_R = Theme.BASE.hdv.r;
+    const HDV_DISPLAY = HDV_R * 2 * (SpriteFactory.TEX_SIZE / SpriteFactory.TEX_R);
+    const BAR_W_HDV = HDV_R * 2.2, BAR_H_HDV = 4;
+    const BAR_Y_OFF = -HDV_R - 10;
     const myId = Network.getMyId();
-    const useAsset = this._hasAsset('hdv');
 
     for (const id of Object.keys(this.hdvSprites)) {
       if (!players[id]) { this.hdvSprites[id].forEach(o => o && o.destroy()); delete this.hdvSprites[id]; }
     }
 
     for (const [id, player] of Object.entries(players)) {
-      const colorInt  = Phaser.Display.Color.HexStringToColor(player.color).color;
+      const colorInt  = Theme.factionColorInt(id);
       const hpRatio   = Math.max(0, player.hp / player.maxHp);
       const destroyed = player.hp <= 0;
 
-      // Rayon de zone constructible selon le level HDV (récupéré depuis la config)
+      // Rayon de zone constructible selon le level HDV
       const cfgH = Network.getConfig();
       const hdvLvls = cfgH.hdvLevels || [];
       const lvl = hdvLvls[(player.hdvLevel || 1) - 1] || hdvLvls[0] || {};
       const buildR = lvl.buildRadius || 240;
 
       if (!this.hdvSprites[id]) {
-        // Bordure carrée permanente couleur équipe (depth 5, derrière tout le reste)
+        // ── Zone constructible : carré couleur équipe alpha 0.55 (depth 5) ──
         const zoneBorder = this.add.graphics().setDepth(5);
-        zoneBorder.lineStyle(3, colorInt, 0.55);
-        zoneBorder.strokeRect(player.x - buildR, player.y - buildR, buildR * 2, buildR * 2);
 
-        // HDV : sprite PNG tinté équipe, sinon fallback procédural
-        let hdvObj;
-        if (useAsset) {
-          hdvObj = this.add.sprite(player.x, player.y, 'hdv')
-            .setOrigin(0.5, 0.5)
-            .setDisplaySize(HDV_DISPLAY, HDV_DISPLAY)
-            .setDepth(30);
-          hdvObj.setTint(destroyed ? 0x888888 : colorInt);
-        } else if (this.textures.exists('hdv-castle')) {
-          hdvObj = this.add.sprite(player.x, player.y, 'hdv-castle')
-            .setOrigin(0.5, 0.85)
-            .setDisplaySize(HDV_DISPLAY + 30, HDV_DISPLAY + 40)
-            .setTint(destroyed ? 0x888888 : colorInt)
-            .setDepth(30);
-        } else {
-          hdvObj = this.add.rectangle(player.x, player.y, HDV_DISPLAY, HDV_DISPLAY, destroyed ? 0x888888 : colorInt)
-            .setStrokeStyle(4, 0x111111, 0.85)
-            .setDepth(30);
+        // ── Hexagone HDV (sf-base-hex) tinté équipe + glow ──
+        const hdvObj = this.add.sprite(player.x, player.y, 'sf-base-hex')
+          .setOrigin(0.5, 0.5)
+          .setDisplaySize(HDV_DISPLAY, HDV_DISPLAY)
+          .setDepth(30);
+        hdvObj.setTint(destroyed ? 0x888888 : colorInt);
+        if (hdvObj.preFX && hdvObj.preFX.addGlow) {
+          hdvObj.preFX.setPadding(12);
+          hdvObj.preFX.addGlow(destroyed ? 0x888888 : colorInt, Theme.GLOW.base.outer, Theme.GLOW.base.inner, false, Theme.GLOW.base.quality);
         }
         if (destroyed) hdvObj.setAlpha(0.45);
+        hdvObj._baseScaleX = hdvObj.scaleX;
+        hdvObj._baseScaleY = hdvObj.scaleY;
+
+        // ── Trou central sombre (rayon r*0.45) ──
+        const hole = this.add.circle(player.x, player.y, HDV_R * 0.45,
+          Phaser.Display.Color.HexStringToColor(Theme.BG.holePunch).color, 1).setDepth(31);
+
+        // ── Glyphe ★ couleur équipe ──
+        const glyph = this.add.text(player.x, player.y, Theme.BASE.hdv.glyph, {
+          fontSize: '20px', fontFamily: '"Inter", system-ui, sans-serif', fontStyle: 'bold',
+          color: destroyed ? '#888888' : Theme.factionColorStr(id),
+        }).setOrigin(0.5, 0.5).setDepth(32);
 
         if (id === myId) {
           hdvObj.setInteractive();
@@ -823,51 +803,58 @@ class MainScene extends Phaser.Scene {
           hdvObj.on('pointerdown', () => HdvPanel.toggle());
         }
 
-        const barBg    = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, 0x431407, 0.95)
-          .setStrokeStyle(1.5, 0x000000, 0.7).setOrigin(0.5, 0.5).setDepth(60);
-        const barFill  = this.add.rectangle(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF, BAR_W_HDV * hpRatio, BAR_H_HDV, 0x22c55e)
+        // ── Barre HP base : fond noir, vert plein ──
+        const barBg   = this.add.rectangle(player.x, player.y + BAR_Y_OFF, BAR_W_HDV, BAR_H_HDV, Theme.HP.bg, 0.85)
+          .setOrigin(0.5, 0.5).setDepth(60);
+        const barFill = this.add.rectangle(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF, BAR_W_HDV * hpRatio, BAR_H_HDV, Theme.HP.base)
           .setOrigin(0, 0.5).setDepth(60);
-        const nameLabel = this.add.text(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 8, player.name,
-          { fontSize: '16px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: player.color, stroke: '#000000', strokeThickness: 4 }
-        ).setOrigin(0.5, 1).setDepth(70);
-        const hpLabel = this.add.text(player.x, player.y + HDV_DISPLAY / 2 + 8, `${player.hp}/${player.maxHp}`,
-          { fontSize: '13px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }
-        ).setOrigin(0.5, 0).setDepth(70);
 
-        // [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder]
-        this.hdvSprites[id] = [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder];
-        this.hdvSprites[id]._currentBuildR = buildR; // mémorise pour détecter les changements de level
+        const nameLabel = this.add.text(player.x, player.y + BAR_Y_OFF - 10, player.name, {
+          fontSize: '14px', fontFamily: '"Inter", system-ui, sans-serif', fontStyle: '600',
+          color: Theme.factionColorStr(id),
+        }).setOrigin(0.5, 1).setDepth(70);
+        const hpLabel = this.add.text(player.x, player.y + HDV_R + 8, `${player.hp}/${player.maxHp}`, {
+          fontSize: '11px', fontFamily: '"Inter", system-ui, sans-serif',
+          color: '#e2e8f0',
+        }).setOrigin(0.5, 0).setDepth(70);
 
-      } else {
-        const [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder] = this.hdvSprites[id];
-
-        hdvObj.setPosition(player.x, player.y);
-        if (hdvObj.setTint) hdvObj.setTint(destroyed ? 0x888888 : colorInt);
-        hdvObj.setAlpha(destroyed ? 0.45 : 1);
-
-        if (!destroyed && hpRatio < 0.3) {
-          hdvObj.setAlpha(0.9 + 0.1 * Math.sin(Date.now() / 200));
-        }
-
-        // Update zone border si le level a changé (rayon différent) ou si le HDV bouge
-        if (zoneBorder && (this.hdvSprites[id]._currentBuildR !== buildR || true)) {
-          zoneBorder.clear();
-          zoneBorder.lineStyle(3, colorInt, destroyed ? 0.15 : 0.55);
-          zoneBorder.strokeRect(player.x - buildR, player.y - buildR, buildR * 2, buildR * 2);
-          this.hdvSprites[id]._currentBuildR = buildR;
-        }
-
-        barBg.setPosition(player.x, player.y + BAR_Y_OFF);
-        barFill.setPosition(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF);
-        barFill.width = BAR_W_HDV * hpRatio;
-        const barColor = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
-        barFill.setFillStyle(barColor);
-
-        nameLabel.setPosition(player.x, player.y + BAR_Y_OFF - BAR_H_HDV - 8)
-          .setText(player.eliminated ? '💀 ÉLIMINÉ' : player.name)
-          .setColor(player.eliminated ? '#ef4444' : player.color);
-        hpLabel.setPosition(player.x, player.y + HDV_DISPLAY / 2 + 8).setText(`${player.hp}/${player.maxHp}`);
+        this.hdvSprites[id] = [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder, hole, glyph];
+        this.hdvSprites[id]._currentBuildR = buildR;
       }
+
+      // ── Update (positions + tint + barre PV) ──
+      const [hdvObj, barBg, barFill, nameLabel, hpLabel, zoneBorder, hole, glyph] = this.hdvSprites[id];
+
+      hdvObj.setPosition(player.x, player.y);
+      if (hdvObj.setTint) hdvObj.setTint(destroyed ? 0x888888 : colorInt);
+      hdvObj.setAlpha(destroyed ? 0.45 : 1);
+      if (!destroyed && hpRatio < 0.3) {
+        hdvObj.setAlpha(0.9 + 0.1 * Math.sin(Date.now() / 200));
+      }
+
+      if (hole) hole.setPosition(player.x, player.y);
+      if (glyph) {
+        glyph.setPosition(player.x, player.y);
+        glyph.setColor(destroyed ? '#888888' : Theme.factionColorStr(id));
+      }
+
+      // Zone constructible : redraw à chaque tick (peu coûteux)
+      zoneBorder.clear();
+      zoneBorder.fillStyle(Theme.GRID.buildZone, destroyed ? 0.04 : Theme.GRID.buildZoneA);
+      zoneBorder.fillCircle(player.x, player.y, buildR);
+      zoneBorder.lineStyle(2, Theme.GRID.buildZone, destroyed ? 0.18 : 0.5);
+      zoneBorder.strokeCircle(player.x, player.y, buildR);
+      this.hdvSprites[id]._currentBuildR = buildR;
+
+      barBg.setPosition(player.x, player.y + BAR_Y_OFF);
+      barFill.setPosition(player.x - BAR_W_HDV / 2, player.y + BAR_Y_OFF);
+      barFill.width = BAR_W_HDV * hpRatio;
+      barFill.setFillStyle(hpRatio > Theme.HP.threshold ? Theme.HP.base : Theme.HP.low);
+
+      nameLabel.setPosition(player.x, player.y + BAR_Y_OFF - 10)
+        .setText(player.eliminated ? '💀 ÉLIMINÉ' : player.name)
+        .setColor(player.eliminated ? '#ef4444' : Theme.factionColorStr(id));
+      hpLabel.setPosition(player.x, player.y + HDV_R + 8).setText(`${player.hp}/${player.maxHp}`);
     }
   }
 
@@ -888,36 +875,37 @@ class MainScene extends Phaser.Scene {
     }
 
     for (const [id, unit] of Object.entries(units)) {
-      const owner    = players[unit.ownerId];
-      const colorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0xffffff;
+      const colorInt = Theme.factionColorInt(unit.ownerId);
+      const shape    = Theme.unitShape(unit.type);
+      const isBoss   = shape.sh === 'boss';
+      const isBeast  = !!Theme.BEAST[unit.type];
       const prev     = this.unitServerPos[id];
       const posChanged = !prev || prev.x !== unit.x || prev.y !== unit.y;
       const hpChanged  = !prev || prev.hp !== unit.hp;
       this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp };
 
       if (!this.unitSprites[id]) {
-        // Chaque type d'unité a son propre sprite PNG, tinté par la couleur de l'équipe
-        const assetKey = unit.type === 'archer'  ? 'archer'
-                       : unit.type === 'knight'  ? 'cavalry'
-                       : 'soldier';
-        const useAsset = this._hasAsset(assetKey);
-        const unitSize = unit.type === 'knight' ? 48 : 40;
-
-        let sprite;
-        if (useAsset) {
-          sprite = this.add.sprite(unit.x, unit.y, assetKey)
-            .setOrigin(0.5, 0.5)
-            .setDisplaySize(unitSize, unitSize)
-            .setDepth(50);
-          sprite.setTint(colorInt); // filtre couleur d'équipe direct sur le PNG
-        } else {
-          const texKey = unit.type === 'archer' ? 'unit-archer'
-                      : unit.type === 'knight' ? 'unit-knight'
-                      : 'unit-soldier';
-          sprite = this.add.sprite(unit.x, unit.y, texKey).setTint(colorInt).setDepth(50);
+        // ── Forme principale (texture sf-{sh}) tintée couleur équipe ──
+        const texKey = 'sf-' + shape.sh;
+        const sz = shape.sz;
+        // La texture mesure SpriteFactory.TEX_SIZE ; la forme à l'intérieur a un rayon TEX_R.
+        // Pour avoir la forme à `sz` à l'écran, on étire la texture entière à sz * (TEX_SIZE/TEX_R).
+        const displaySize = sz * (SpriteFactory.TEX_SIZE / SpriteFactory.TEX_R);
+        const sprite = this.add.sprite(unit.x, unit.y, texKey)
+          .setOrigin(0.5, 0.5)
+          .setDisplaySize(displaySize, displaySize)
+          .setDepth(50);
+        // Couleur : faction pour joueur, couleur propre pour bête
+        const tintColor = isBeast ? Theme.BEAST[unit.type].color : colorInt;
+        sprite.setTint(tintColor);
+        // Glow néon via preFX (postFX désactivé dans ce build Phaser)
+        const gp = isBoss ? Theme.GLOW.unitBoss : Theme.GLOW.unit;
+        if (sprite.preFX && sprite.preFX.addGlow) {
+          sprite.preFX.setPadding(8);
+          sprite.preFX.addGlow(tintColor, gp.outer, gp.inner, false, gp.quality);
         }
 
-        // Mémorise les scales APRÈS setDisplaySize → le wobble ne casse pas la taille
+        // Mémorise baseScale APRÈS setDisplaySize → wobble = multiplicateur
         sprite._baseScaleX = sprite.scaleX;
         sprite._baseScaleY = sprite.scaleY;
         sprite._unitId      = id;
@@ -925,33 +913,58 @@ class MainScene extends Phaser.Scene {
         sprite._unitType    = unit.type;
         sprite._idlePhase   = Math.random() * Math.PI * 2;
 
+        // ── Pastille d'axe (sci/mag/rel) : disque coloré au centre ──
+        // Bêtes : pas de pastille. Boss : disque blanc central (au lieu de pastille axe).
+        let axisDot = null;
+        if (!isBeast) {
+          if (isBoss) {
+            // Disque blanc central rayon sz*0.4
+            axisDot = this.add.circle(unit.x, unit.y, sz * 0.4, 0xffffff, 1).setDepth(51);
+          } else {
+            const axColor = Theme.AXC_INT[shape.ax] || 0xffffff;
+            const dotR = Math.max(1.5, sz * 0.28);
+            axisDot = this.add.circle(unit.x, unit.y, dotR, axColor, 1).setDepth(51);
+          }
+        }
+
         if (unit.ownerId === myId) {
-          sprite.setInteractive(new Phaser.Geom.Circle(sprite.width / 2, sprite.height / 2, 30), Phaser.Geom.Circle.Contains);
+          sprite.setInteractive(
+            new Phaser.Geom.Circle(sprite.width / 2, sprite.height / 2, 30),
+            Phaser.Geom.Circle.Contains
+          );
           sprite.on('pointerover', () => this.input.setDefaultCursor('pointer'));
           sprite.on('pointerout',  () => this.input.setDefaultCursor('default'));
         }
 
-        const barBg   = this.add.rectangle(unit.x, unit.y + BAR_Y, BAR_W, BAR_H, 0x111111, 0.85)
-          .setStrokeStyle(1, 0x000000, 0.7).setOrigin(0.5, 0.5).setDepth(60);
-        const barFill = this.add.rectangle(unit.x - BAR_W / 2, unit.y + BAR_Y, BAR_W * (unit.hp / unit.maxHp), BAR_H, 0x22c55e)
+        // ── Barre de vie (au-dessus du sprite, à sz+6 px) ──
+        const barW = sz * 2;
+        const barY = -(sz + 6);
+        const barBg   = this.add.rectangle(unit.x, unit.y + barY, barW, 3, Theme.HP.bg, 0.85)
+          .setOrigin(0.5, 0.5).setDepth(60);
+        const barFill = this.add.rectangle(unit.x - barW / 2, unit.y + barY, barW * (unit.hp / unit.maxHp), 3, Theme.HP.full)
           .setOrigin(0, 0.5).setDepth(60);
+        barFill._barW = barW;
+        barFill._barY = barY;
+        barBg._barY   = barY;
 
-        const badge = this.add.text(unit.x + 18, unit.y - 18, this._modeIcon(unit.mode), {
-          fontSize: '12px', fontFamily: '"Quicksand", sans-serif',
+        const badge = this.add.text(unit.x + sz + 8, unit.y - sz - 6, this._modeIcon(unit.mode), {
+          fontSize: '11px', fontFamily: '"Inter", system-ui, sans-serif',
         }).setOrigin(0.5, 0.5).setDepth(70);
 
-        // [sprite, barBg, barFill, badge] — plus de cocarde, tint sur le sprite
-        this.unitSprites[id] = [sprite, barBg, barFill, badge];
+        // ── Effet gel (créé à la demande dans _updateUnitBarPositions) ──
+        const freeze = null;
+
+        this.unitSprites[id] = [sprite, barBg, barFill, badge, axisDot, freeze];
 
       } else if (posChanged || hpChanged) {
         const [sprite, , barFill, badge] = this.unitSprites[id];
         if (badge) badge.setText(this._modeIcon(unit.mode));
-        if (sprite.setTint) sprite.setTint(colorInt);
 
         if (hpChanged) {
           const ratio = unit.hp / unit.maxHp;
-          barFill.width = Math.max(0, BAR_W * ratio);
-          const c = ratio > 0.6 ? 0x22c55e : ratio > 0.3 ? 0xf59e0b : 0xef4444;
+          const barW = barFill._barW || 18;
+          barFill.width = Math.max(0, barW * ratio);
+          const c = ratio > Theme.HP.threshold ? Theme.HP.full : Theme.HP.low;
           barFill.setFillStyle(c);
         }
         if (posChanged) {
@@ -974,18 +987,21 @@ class MainScene extends Phaser.Scene {
     }
     for (const id of this.selectedUnitIds) {
       if (this.selectionRings[id] || !this.unitSprites[id]) continue;
-      // Sprite-based ring with pulse tween
-      const ring = this.add.sprite(this.unitSprites[id][0].x, this.unitSprites[id][0].y, 'selection-ring');
-      ring.setDepth(55); // au-dessus des unités, sous les barres de vie
+      const unitSprite = this.unitSprites[id][0];
+      const sz = (Theme.unitShape(unitSprite._unitType) || { sz: 9 }).sz;
+      // Anneau cyan ; on dimensionne pour qu'il dépasse l'unité de SELECTION.ringOffset
+      const targetDiameter = (sz + Theme.SELECTION.ringOffset) * 2;
+      const ring = this.add.sprite(unitSprite.x, unitSprite.y, 'sf-selection')
+        .setDisplaySize(targetDiameter, targetDiameter)
+        .setDepth(55);
+      ring._baseScaleX = ring.scaleX;
+      ring._baseScaleY = ring.scaleY;
       this.tweens.add({
         targets: ring,
-        scaleX: { from: 0.85, to: 1.05 },
-        scaleY: { from: 0.85, to: 1.05 },
-        alpha:  { from: 1.0,  to: 0.6 },
-        duration: 700,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut',
+        scaleX: { from: ring._baseScaleX * 0.92, to: ring._baseScaleX * 1.08 },
+        scaleY: { from: ring._baseScaleY * 0.92, to: ring._baseScaleY * 1.08 },
+        alpha:  { from: 1.0, to: 0.55 },
+        duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
       });
       this.selectionRings[id] = ring;
     }
@@ -1001,22 +1017,41 @@ class MainScene extends Phaser.Scene {
   }
 
   _updateUnitBarPositions() {
-    // Wobble idle : oscillation verticale TRÈS subtile via le scale,
-    // PRÉSERVE le baseScale du sprite (sinon le PNG natif s'affiche à sa taille brute).
+    // Wobble idle TRÈS subtil via multiplicateur sur baseScale.
     const t = Date.now() / 420;
-    for (const [, sprites] of Object.entries(this.unitSprites)) {
+    const stateUnits = Network.getState().units || {};
+    for (const [id, sprites] of Object.entries(this.unitSprites)) {
       if (sprites.length < 3) continue;
-      const [sprite, barBg, barFill, badge] = sprites;
+      const [sprite, barBg, barFill, badge, axisDot] = sprites;
       const phase = (sprite._idlePhase || 0);
-      const wobble = Math.sin(t + phase); // [-1, 1]
-      barBg.setPosition(sprite.x, sprite.y + BAR_Y - 4);
-      barFill.setPosition(sprite.x - BAR_W / 2, sprite.y + BAR_Y - 4);
-      if (badge) badge.setPosition(sprite.x + 22, sprite.y - 22);
-      // Multiplie le baseScale (pas setScale absolu) pour garder la taille définie par setDisplaySize
+      const wobble = Math.sin(t + phase);
+      const barY = (barFill && barFill._barY) || -16;
+      const barW = (barFill && barFill._barW) || 18;
+      barBg.setPosition(sprite.x, sprite.y + barY);
+      barFill.setPosition(sprite.x - barW / 2, sprite.y + barY);
+      if (axisDot) axisDot.setPosition(sprite.x, sprite.y);
+      if (badge) {
+        const sz = (Theme.unitShape(sprite._unitType) || { sz: 9 }).sz;
+        badge.setPosition(sprite.x + sz + 8, sprite.y - sz - 6);
+      }
       const bx = sprite._baseScaleX || sprite.scaleX;
       const by = sprite._baseScaleY || sprite.scaleY;
-      if (bx && by) {
-        sprite.setScale(bx, by * (1 + wobble * 0.025));
+      if (bx && by) sprite.setScale(bx, by * (1 + wobble * 0.025));
+
+      // Effet gel : disque cyan semi-transparent autour de l'unité si freeze > 0
+      const u = stateUnits[id];
+      const isFrozen = u && u.freeze && u.freeze > 0;
+      let freezeObj = sprites[5];
+      if (isFrozen) {
+        const sz = (Theme.unitShape(sprite._unitType) || { sz: 9 }).sz;
+        if (!freezeObj) {
+          freezeObj = this.add.circle(sprite.x, sprite.y, sz + 2, Theme.FREEZE_COLOR, Theme.FREEZE_ALPHA).setDepth(52);
+          sprites[5] = freezeObj;
+        }
+        freezeObj.setPosition(sprite.x, sprite.y);
+      } else if (freezeObj) {
+        freezeObj.destroy();
+        sprites[5] = null;
       }
     }
   }
@@ -1148,22 +1183,24 @@ class MainScene extends Phaser.Scene {
   _flashUnit(unitId) {
     const sprites = this.unitSprites[unitId];
     if (!sprites) return;
-    const [circle] = sprites;
-    const origColor = circle.fillColor;
-    circle.setFillStyle(0xffffff);
+    const sprite = sprites[0];
+    if (!sprite || !sprite.setTintFill) return;
+    const baseTint = sprite.tintTopLeft || 0xffffff;
+    sprite.setTintFill(0xffffff);
     this.time.delayedCall(80, () => {
-      if (this.unitSprites[unitId]) circle.setFillStyle(origColor);
+      if (this.unitSprites[unitId] && sprite.setTint) sprite.setTint(baseTint);
     });
   }
 
   _flashHdv(playerId) {
     const sprites = this.hdvSprites[playerId];
     if (!sprites) return;
-    const [rect] = sprites;
-    const origColor = rect.fillColor;
-    rect.setFillStyle(0xffffff);
+    const sprite = sprites[0];
+    if (!sprite || !sprite.setTintFill) return;
+    const baseTint = sprite.tintTopLeft || 0xffffff;
+    sprite.setTintFill(0xffffff);
     this.time.delayedCall(80, () => {
-      if (this.hdvSprites[playerId]) rect.setFillStyle(origColor);
+      if (this.hdvSprites[playerId] && sprite.setTint) sprite.setTint(baseTint);
     });
   }
 
