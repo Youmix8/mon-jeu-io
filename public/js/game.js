@@ -6,7 +6,7 @@ const config = {
   parent: 'game',
   width: window.innerWidth,
   height: window.innerHeight,
-  backgroundColor: '#1a1a2e',
+  backgroundColor: Theme.BG.canvas,
   scene: [MainScene],
 };
 

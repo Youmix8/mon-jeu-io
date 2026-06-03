@@ -368,10 +368,13 @@ class MainScene extends Phaser.Scene {
 
     const state = Network.getState();
 
+    // Synchronise le slot couleur du joueur local (cyan)
+    const myId = Network.getMyId();
+    if (myId) Theme.setMyId(myId);
+
     // Recentre la caméra une fois sur mon HDV (spawn aléatoire)
     if (!this.cameraCentered) {
-      const myId = Network.getMyId();
-      const me   = myId && state.players[myId];
+      const me = myId && state.players[myId];
       if (me) {
         this.cameras.main.centerOn(me.x, me.y);
         this.cameraCentered = true;
@@ -608,32 +611,24 @@ class MainScene extends Phaser.Scene {
     this.MAP_W = info.mapWidth;
     this.MAP_H = info.mapHeight;
 
-    // ── SOL (depth 0) : grass tileSprite si disponible, sinon rectangle vert ──
-    if (this._hasAsset('grass')) {
-      this.add.tileSprite(0, 0, this.MAP_W, this.MAP_H, 'grass')
-        .setOrigin(0, 0)
-        .setDepth(0);
-    } else {
-      this.add.rectangle(this.MAP_W / 2, this.MAP_H / 2, this.MAP_W, this.MAP_H, 0x9fdc7c).setDepth(0);
-      // Patches d'herbe : effet visuel pour casser la monotonie
-      const patches = this.add.graphics();
-      patches.fillStyle(0x7ab560, 0.55);
-      for (let i = 0; i < 80; i++) {
-        const px = Math.random() * this.MAP_W;
-        const py = Math.random() * this.MAP_H;
-        const pr = 50 + Math.random() * 90;
-        patches.fillCircle(px, py, pr);
-      }
-      patches.setDepth(0);
-    }
+    // ── SOL OBSIDIENNE (depth 0) ──
+    this.add.rectangle(
+      this.MAP_W / 2, this.MAP_H / 2,
+      this.MAP_W, this.MAP_H,
+      Phaser.Display.Color.HexStringToColor(Theme.BG.terrain).color
+    ).setDepth(0);
 
-    // Bordure de la map
-    const border = this.add.graphics().setDepth(0);
-    border.lineStyle(8, 0x4d6b3e, 0.95);
+    // ── GRILLE NÉON discrète (depth 1) ──
+    const grid = this.add.graphics().setDepth(1);
+    grid.lineStyle(1, Theme.GRID.color, Theme.GRID.alpha);
+    const step = Theme.GRID.step;
+    for (let x = step; x < this.MAP_W; x += step) grid.lineBetween(x, 0, x, this.MAP_H);
+    for (let y = step; y < this.MAP_H; y += step) grid.lineBetween(0, y, this.MAP_W, y);
+
+    // ── BORDURE CYAN (depth 2) ──
+    const border = this.add.graphics().setDepth(2);
+    border.lineStyle(4, Theme.GRID.border, Theme.GRID.borderA);
     border.strokeRect(0, 0, this.MAP_W, this.MAP_H);
-
-    // ── DECOR PROCÉDURAL (depth 10) : arbres, rochers, buissons, fleurs ──
-    this._placeDecor();
 
     // Génère les textures procédurales (fallback si assets manquants)
     if (typeof SpriteFactory !== 'undefined') SpriteFactory.generateAll(this);
@@ -669,11 +664,8 @@ class MainScene extends Phaser.Scene {
     console.log(`Map built: ${this.MAP_W}×${this.MAP_H}, grid ${info.gridW}×${info.gridH}, minZoom ${this.minZoom.toFixed(3)}`);
   }
 
-  // ── Décor procédural ──────────────────────────────────────────
-  // Place ~40-60 éléments de décor (arbres, rochers, buissons, fleurs)
-  // de manière déterministe (seedé par position). Évite la zone autour
-  // des spawns HDV pour ne pas cacher les bases au démarrage.
-  _placeDecor() {
+  // ── Décor procédural — DÉSACTIVÉ (look néon, terrain plat) ──
+  _placeDecor_DEPRECATED() {
     const cfg = Network.getConfig();
     const spawns = (cfg.spawnPositions || []);
     const SAFE_RADIUS = 220; // évite ce rayon autour des spawns
