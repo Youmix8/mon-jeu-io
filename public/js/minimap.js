@@ -29,16 +29,15 @@ const Minimap = (() => {
     const state = Network.getState();
     const myId  = Network.getMyId();
     if (!myId) return;
-    const me = state.players[myId];
 
     const W = info.mapWidth, H = info.mapHeight;
     const sx = SIZE / W, sy = SIZE / H;
 
-    // Background — pelouse
-    ctx.fillStyle = '#6f9a64';
+    // Background — obsidienne (#06101a)
+    ctx.fillStyle = '#06101a';
     ctx.fillRect(0, 0, SIZE, SIZE);
 
-    // Fog : explored = gris foncé, unexplored = noir, visible = transparent
+    // Fog : exploré = alpha 0.55, jamais vu = alpha 0.96, visible = transparent.
     if (state.fog && state.fog.visible && state.fog.explored) {
       const gw = state.fog.gridW || info.gridW;
       const gh = state.fog.gridH || info.gridH;
@@ -47,49 +46,41 @@ const Minimap = (() => {
       for (let ty = 0; ty < gh; ty++) {
         for (let tx = 0; tx < gw; tx++) {
           const i = ty * gw + tx;
-          if (vis[i]) continue; // visible : laisse passer le fond
-          ctx.fillStyle = exp[i] ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.95)';
+          if (vis[i]) continue;
+          ctx.fillStyle = exp[i] ? 'rgba(4,8,12,0.55)' : 'rgba(2,5,8,0.96)';
           ctx.fillRect(tx * (info.tileSize * sx), ty * (info.tileSize * sy), ts + 0.5, ts + 0.5);
         }
       }
     }
 
-    // Villages (visibles dans state.villages)
+    const fcol = (pid) => {
+      if (typeof Theme === 'undefined') return '#94a3b8';
+      return pid ? Theme.factionColorStr(pid) : Theme.NEUTRAL_STR;
+    };
+
+    // Villages (carré 4×4)
     for (const v of (state.villages || [])) {
       const px = v.x * sx, py = v.y * sy;
-      const owner = v.ownerId && state.players[v.ownerId];
-      ctx.beginPath();
-      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = owner ? owner.color : '#cccccc';
-      ctx.fill();
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      ctx.fillStyle = v.ownerId ? fcol(v.ownerId) : '#64748b';
+      ctx.fillRect(px - 2, py - 2, 4, 4);
     }
 
-    // HDV — gros carré coloré, le mien avec contour blanc
+    // HDV (carré 6×6 couleur équipe)
     for (const p of Object.values(state.players || {})) {
       const px = p.x * sx, py = p.y * sy;
-      ctx.fillStyle = p.color;
-      ctx.fillRect(px - 4, py - 4, 8, 8);
-      if (p.id === myId) {
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(px - 4, py - 4, 8, 8);
-      }
+      ctx.fillStyle = fcol(p.id);
+      ctx.fillRect(px - 3, py - 3, 6, 6);
     }
 
-    // Unités (filtered → uniquement les miennes + ennemis visibles)
+    // Unités (carré 2×2)
     for (const u of Object.values(state.units || {})) {
       const owner = state.players[u.ownerId];
       if (!owner) continue;
-      ctx.fillStyle = owner.color;
-      ctx.beginPath();
-      ctx.arc(u.x * sx, u.y * sy, 1.5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = fcol(u.ownerId);
+      ctx.fillRect(u.x * sx - 1, u.y * sy - 1, 2, 2);
     }
 
-    // Viewport caméra (rectangle blanc) — clampé aux bornes de la mini-carte
+    // Viewport caméra (cyan)
     if (phaserCamera) {
       const cam = phaserCamera;
       const x1 = Math.max(0,    cam.worldView.x * sx);
@@ -97,8 +88,8 @@ const Minimap = (() => {
       const x2 = Math.min(SIZE, (cam.worldView.x + cam.worldView.width)  * sx);
       const y2 = Math.min(SIZE, (cam.worldView.y + cam.worldView.height) * sy);
       if (x2 > x1 && y2 > y1) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = 1;
         ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
       }
     }

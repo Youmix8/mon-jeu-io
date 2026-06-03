@@ -645,7 +645,7 @@ class MainScene extends Phaser.Scene {
     this.fogImage = this.add.image(0, 0, 'fog-texture').setOrigin(0, 0);
     this.fogImage.setDisplaySize(this.MAP_W, this.MAP_H);
     this.fogImage.setDepth(100);
-    this.textures.get('fog-texture').setFilter(Phaser.Textures.FilterMode.LINEAR);
+    this.textures.get('fog-texture').setFilter(Phaser.Textures.FilterMode.NEAREST);
 
     // Mini-carte
     if (typeof Minimap !== 'undefined') Minimap.init(this.cameras.main);
@@ -735,16 +735,16 @@ class MainScene extends Phaser.Scene {
     const img = ctx.getImageData(0, 0, gw, gh);
     const data = img.data;
     const vis = fog.visible, exp = fog.explored;
+    // Spec : exploré rgba(4,8,12,0.55) ; jamais vu rgba(2,5,8,0.96)
     for (let i = 0; i < vis.length; i++) {
-      let a;
-      if (vis[i]) a = 0;          // visible : transparent
-      else if (exp[i]) a = 140;   // exploré : noir 55 %
-      else a = 255;               // jamais vu : noir plein
       const j = i * 4;
-      data[j]   = 0;
-      data[j+1] = 0;
-      data[j+2] = 0;
-      data[j+3] = a;
+      if (vis[i]) {
+        data[j] = data[j+1] = data[j+2] = data[j+3] = 0;
+      } else if (exp[i]) {
+        data[j]=4;   data[j+1]=8;   data[j+2]=12;  data[j+3]=140; // 0.55
+      } else {
+        data[j]=2;   data[j+1]=5;   data[j+2]=8;   data[j+3]=245; // 0.96
+      }
     }
     ctx.putImageData(img, 0, 0);
     this.textures.get('fog-texture').refresh();
