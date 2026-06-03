@@ -54,11 +54,11 @@ class MainScene extends Phaser.Scene {
     this.input.mouse.disableContextMenu();
     this.attackGraphics = this.add.graphics();
 
-    // Particle texture for unit death burst
+    // Texture 'particle' = carré blanc 3×3 (spec néon). Tintée à l'usage.
     const pg = this.make.graphics({ add: false });
     pg.fillStyle(0xffffff, 1);
-    pg.fillCircle(4, 4, 4);
-    pg.generateTexture('particle', 8, 8);
+    pg.fillRect(0, 0, 3, 3);
+    pg.generateTexture('particle', 3, 3);
     pg.destroy();
 
     // Recalcule la borne de zoom min si on redimensionne la fenêtre
@@ -124,15 +124,14 @@ class MainScene extends Phaser.Scene {
     });
 
     Network.setOnVillageCaptured((data) => {
-      this._addKillFeedEntry(`🏘 ${data.ownerName} capture un village`, data.ownerColor);
+      this._addKillFeedEntry(`🏘 ${data.ownerName} capture un village`, Theme.factionColorStr(data.ownerId));
     });
 
     Network.setOnVillageDestroyed((data) => {
       const state = Network.getState();
       const attacker = state.players[data.byPlayerId];
       const attackerName = attacker ? attacker.name : 'Quelqu\'un';
-      const attackerColor = attacker ? attacker.color : '#ef4444';
-      this._addKillFeedEntry(`💥 ${attackerName} détruit un village`, attackerColor);
+      this._addKillFeedEntry(`💥 ${attackerName} détruit un village`, Theme.factionColorStr(data.byPlayerId));
     });
 
     Network.setOnGameOver((data) => {
@@ -156,11 +155,7 @@ class MainScene extends Phaser.Scene {
         tx = t.x; ty = t.y;
         this._flashUnit(data.targetId);
         if (data.killed) {
-          const owner = state.players[t.ownerId];
-          const colorInt = owner
-            ? Phaser.Display.Color.HexStringToColor(owner.color).color
-            : 0xffffff;
-          this._spawnDeathParticles(t.x, t.y, colorInt);
+          this._spawnDeathParticles(t.x, t.y, Theme.factionColorInt(t.ownerId));
         }
       } else if (data.targetType === 'village') {
         const v = (state.villages || []).find(vv => vv.id === data.targetId);
@@ -178,23 +173,31 @@ class MainScene extends Phaser.Scene {
       }
 
       // ── Résoudre l'attaquant (unité OU bâtiment) ──
+      let attackerColorInt = 0xffffff;
       if (data.attackerType === 'building') {
-        // Flèche depuis le bâtiment (les coords sont fournies en bx, by)
+        // Beam depuis le bâtiment (les coords sont fournies en bx, by)
         const ax = (data.bx != null) ? data.bx : tx;
         const ay = (data.by != null) ? data.by : ty;
-        this._playArrowAnimation(ax, ay, tx, ty);
+        // ownerId du bâtiment, si dispo, donne la couleur d'équipe pour le beam
+        const b = (state.buildings || []).find(bb => bb.id === data.attackerId);
+        if (b && b.ownerId) attackerColorInt = Theme.factionColorInt(b.ownerId);
+        else attackerColorInt = Theme.BEAM.ranged;
+        this._drawBeam(ax, ay, tx, ty, attackerColorInt);
       } else {
         const attacker = state.units && state.units[data.attackerId];
         if (!attacker) return;
+        attackerColorInt = Theme.factionColorInt(attacker.ownerId);
         this._playAttackAnimation(attacker, tx, ty);
-        // Kill feed unit→unit
         if (data.killed && data.targetType === 'unit') {
           const killerOwner = state.players[attacker.ownerId];
           if (killerOwner) {
-            this._addKillFeedEntry(`⚔️ ${killerOwner.name} a tué une unité`, killerOwner.color);
+            this._addKillFeedEntry(`⚔️ ${killerOwner.name} a tué une unité`, Theme.factionColorStr(attacker.ownerId));
           }
         }
       }
+
+      // Particule d'impact (couleur équipe attaquante) à chaque coup porté.
+      this._spawnImpactParticles(tx, ty, attackerColorInt);
     });
 
     // ── Input ─────────────────────────────────────────────────────
@@ -389,35 +392,48 @@ class MainScene extends Phaser.Scene {
   _syncBuildings(buildings, players) {
     if (!this.buildingSprites) this.buildingSprites = {};
     const cfg = Network.getConfig();
-    const myId = Network.getMyId();
     const seen = new Set();
+    const BSZ = Theme.BUILDING.size;
+    const BTEX_SCALE = SpriteFactory.TEX_SIZE / SpriteFactory.TEX_R;
+    // Le carré sf-square est dessiné avec demi-côté = TEX_R, donc côté = 2*TEX_R.
+    // Pour avoir un carré de BSZ px à l'écran, displaySize = BSZ * (TEX_SIZE / (2*TEX_R)).
+    const BDISPLAY = BSZ * BTEX_SCALE / 2;
     for (const b of buildings) {
       seen.add(b.id);
       const def = (cfg.buildingTypes || {})[b.type] || {};
-      const owner = players[b.ownerId];
-      const colorInt = owner ? Phaser.Display.Color.HexStringToColor(owner.color).color : 0xffffff;
+      // Rempart : couleur fixe gris. Sinon : faction.
+      const isRampart = b.type === 'rampart';
+      const tintColor = isRampart ? Theme.BUILDING.rampart : Theme.factionColorInt(b.ownerId);
       let s = this.buildingSprites[b.id];
-      const SIZE = (def.halfSize || 22) * 2;
       if (!s) {
-        // Placeholder visuel : icône emoji sur un fond carré tinté équipe
-        const bg = this.add.rectangle(b.x, b.y, SIZE, SIZE, colorInt, 0.85)
-          .setStrokeStyle(2.5, 0x111111, 0.9).setDepth(28);
-        const icon = this.add.text(b.x, b.y, def.icon || '🏗', {
-          fontSize: (SIZE * 0.7) + 'px',
-        }).setOrigin(0.5, 0.5).setDepth(29);
-        const hpBg   = this.add.rectangle(b.x, b.y - SIZE / 2 - 8, SIZE + 10, 5, 0x111111, 0.85)
-          .setStrokeStyle(1, 0x000000, 0.7).setOrigin(0.5, 0.5).setDepth(60);
-        const hpFill = this.add.rectangle(b.x - (SIZE + 10) / 2, b.y - SIZE / 2 - 8, (SIZE + 10), 5, 0x22c55e)
+        // Carré tinté équipe + glow
+        const bg = this.add.sprite(b.x, b.y, 'sf-square')
+          .setOrigin(0.5, 0.5)
+          .setDisplaySize(BDISPLAY, BDISPLAY)
+          .setDepth(28);
+        bg.setTint(tintColor);
+        if (bg.preFX && bg.preFX.addGlow) {
+          bg.preFX.setPadding(6);
+          bg.preFX.addGlow(tintColor, Theme.GLOW.building.outer, Theme.GLOW.building.inner, false, Theme.GLOW.building.quality);
+        }
+        // Petit glyphe au centre (différencie tour/sanctum/etc.) — alpha bas pour discrétion
+        const icon = this.add.text(b.x, b.y, def.icon || '', {
+          fontSize: '10px', fontFamily: '"Inter", system-ui, sans-serif',
+        }).setOrigin(0.5, 0.5).setDepth(29).setAlpha(0.85);
+        // Barre HP : 22×3 à y-16
+        const hpBg   = this.add.rectangle(b.x, b.y - BSZ / 2 - 6, BSZ + 2, 3, Theme.HP.bg, 0.85)
+          .setOrigin(0.5, 0.5).setDepth(60);
+        const hpFill = this.add.rectangle(b.x - (BSZ + 2) / 2, b.y - BSZ / 2 - 6, BSZ + 2, 3, Theme.HP.base)
           .setOrigin(0, 0.5).setDepth(60);
 
-        // Click handler : sur une tour → affiche le cercle de portée 2.5s
+        // Click sur tour : affiche cercle de portée 2.5s (cyan)
         if (b.type === 'tower' && def.range) {
           bg.setInteractive();
           bg.on('pointerdown', () => {
             const ring = this.add.graphics().setDepth(90);
-            ring.lineStyle(2, 0xfbbf24, 0.85);
+            ring.lineStyle(2, Theme.GRID.border, 0.85);
             ring.strokeCircle(b.x, b.y, def.range);
-            ring.fillStyle(0xfbbf24, 0.05);
+            ring.fillStyle(Theme.GRID.border, 0.06);
             ring.fillCircle(b.x, b.y, def.range);
             this.tweens.add({
               targets: ring, alpha: { from: 1, to: 0 },
@@ -426,19 +442,17 @@ class MainScene extends Phaser.Scene {
             });
           });
         }
-
         s = { bg, icon, hpBg, hpFill };
         this.buildingSprites[b.id] = s;
       }
       s.bg.setPosition(b.x, b.y);
-      s.bg.setFillStyle(colorInt, 0.85);
+      s.bg.setTint(tintColor);
       s.icon.setPosition(b.x, b.y);
-      s.hpBg.setPosition(b.x, b.y - SIZE / 2 - 8);
-      s.hpFill.setPosition(b.x - (SIZE + 10) / 2, b.y - SIZE / 2 - 8);
+      s.hpBg.setPosition(b.x, b.y - BSZ / 2 - 6);
+      s.hpFill.setPosition(b.x - (BSZ + 2) / 2, b.y - BSZ / 2 - 6);
       const hpRatio = b.hp / b.maxHp;
-      s.hpFill.width = (SIZE + 10) * hpRatio;
-      const c = hpRatio > 0.6 ? 0x22c55e : hpRatio > 0.3 ? 0xf59e0b : 0xef4444;
-      s.hpFill.setFillStyle(c);
+      s.hpFill.width = (BSZ + 2) * hpRatio;
+      s.hpFill.setFillStyle(hpRatio > Theme.HP.threshold ? Theme.HP.base : Theme.HP.low);
     }
     // Cleanup
     for (const id of Object.keys(this.buildingSprites)) {
@@ -1204,85 +1218,100 @@ class MainScene extends Phaser.Scene {
     });
   }
 
+  _spawnImpactParticles(x, y, colorInt) {
+    const emitter = this.add.particles(x, y, 'particle', {
+      tint: colorInt,
+      speed: { min: Theme.PARTICLE.speedImpact.min, max: Theme.PARTICLE.speedImpact.max },
+      scale: { start: 1.0, end: 0 },
+      alpha: { start: 1, end: 0 },
+      lifespan: Theme.PARTICLE.impactLife,
+      blendMode: Phaser.BlendModes.ADD,
+      emitting: false,
+    });
+    emitter.explode(Theme.PARTICLE.impactCount);
+    this.time.delayedCall(Theme.PARTICLE.impactLife + 50, () => emitter.destroy());
+  }
+
   _spawnDeathParticles(x, y, colorInt) {
     const emitter = this.add.particles(x, y, 'particle', {
       tint: colorInt,
-      speed: { min: 50, max: 150 },
-      scale: { start: 1, end: 0 },
+      speed: { min: Theme.PARTICLE.speedDeath.min, max: Theme.PARTICLE.speedDeath.max },
+      scale: { start: 1.2, end: 0 },
       alpha: { start: 1, end: 0 },
-      lifespan: 500,
-      gravityY: 200,
+      lifespan: Theme.PARTICLE.deathLife,
+      blendMode: Phaser.BlendModes.ADD,
       emitting: false,
     });
-    emitter.explode(10);
-    this.time.delayedCall(700, () => emitter.destroy());
+    emitter.explode(Theme.PARTICLE.deathCount);
+    this.time.delayedCall(Theme.PARTICLE.deathLife + 100, () => emitter.destroy());
   }
 
-  // Flèche générique (pour les tours et autres attaquants distants)
-  _playArrowAnimation(ax, ay, tx, ty) {
-    const angle = Math.atan2(ty - ay, tx - ax);
-    const arrow = this.add.sprite(ax, ay, 'arrow')
-      .setRotation(angle)
-      .setDepth(55);
+  // ── Beam de tir (Graphics ligne) : segment lumineux qui fade en 120 ms ──
+  _drawBeam(x0, y0, x1, y1, color) {
+    const g = this.add.graphics().setDepth(55);
+    g.setBlendMode(Phaser.BlendModes.ADD);
+    g.lineStyle(Theme.BEAM.width, color, 1);
+    g.lineBetween(x0, y0, x1, y1);
+    // Petit halo : 2e ligne plus fine plus claire
+    g.lineStyle(1, 0xffffff, 0.7);
+    g.lineBetween(x0, y0, x1, y1);
     this.tweens.add({
-      targets: arrow,
-      x: tx, y: ty,
-      duration: 220,
+      targets: g,
+      alpha: { from: 1, to: 0 },
+      duration: Theme.BEAM.duration,
       ease: 'Quad.easeOut',
-      onComplete: () => arrow.destroy(),
+      onComplete: () => g.destroy(),
     });
+    return g;
   }
 
-  // ── Animations d'attaque selon le type d'unité ──────────────────
+  // ── Animation déclenchée par un bâtiment (tour, etc.) : beam couleur équipe ──
+  _playArrowAnimation(ax, ay, tx, ty) {
+    // En néon : un beam droit, couleur d'équipe du bâtiment attaquant.
+    // L'attaquant.ownerId arrive depuis le serveur via data.attackerOwnerId, mais
+    // l'API setOnAttack ne fournit pas l'ownerId direct pour les bâtiments — on utilise
+    // une couleur ranged (blanc cassé) par défaut. Pour les tours, c'est très proche
+    // visuellement, et la couleur d'équipe sera idéalement injectée plus tard.
+    const color = Theme.BEAM.ranged;
+    this._drawBeam(ax, ay, tx, ty, color);
+  }
+
+  // ── Animations d'attaque pour les unités : beam si distance, sinon flash mêlée ──
   _playAttackAnimation(attacker, tx, ty) {
-    const dx = tx - attacker.x, dy = ty - attacker.y;
-    const angle = Math.atan2(dy, dx);
-    if (attacker.type === 'archer') {
-      // Flèche qui vole de l'archer à la cible
-      const arrow = this.add.sprite(attacker.x, attacker.y, 'arrow')
-        .setRotation(angle)
-        .setDepth(55);
+    const dist = Math.hypot(tx - attacker.x, ty - attacker.y);
+    const category = Theme.BEAM_BY_TYPE[attacker.type] || 'melee';
+
+    if (category === 'melee' || dist <= 50) {
+      // Mêlée : pas de beam — flash blanc au point d'impact (l'effet de particules
+      // d'impact vient de l'event 'attack' via _spawnImpactParticles).
+      const flash = this.add.circle(tx, ty, 8, 0xffffff, 0.7).setDepth(54);
+      flash.setBlendMode(Phaser.BlendModes.ADD);
       this.tweens.add({
-        targets: arrow,
-        x: tx, y: ty,
-        duration: 220,
-        ease: 'Quad.easeOut',
-        onComplete: () => arrow.destroy(),
+        targets: flash,
+        scale: { from: 0.4, to: 1.6 },
+        alpha: { from: 0.7, to: 0 },
+        duration: 180, ease: 'Cubic.easeOut',
+        onComplete: () => flash.destroy(),
       });
-    } else {
-      // Soldat / Chevalier : arc de slash blanc apparaissant sur la cible
-      const slash = this.add.sprite(tx, ty, 'slash')
-        .setRotation(angle)
-        .setDepth(55)
-        .setScale(0.5);
-      this.tweens.add({
-        targets: slash,
-        scale: { from: 0.7, to: 1.15 },
-        alpha: { from: 1, to: 0 },
-        duration: 220,
-        ease: 'Cubic.easeOut',
-        onComplete: () => slash.destroy(),
-      });
-      // Chevalier : impact flash doré supplémentaire
-      if (attacker.type === 'knight') {
-        const flash = this.add.circle(tx, ty, 18, 0xfbbf24, 0.55).setDepth(54);
-        this.tweens.add({
-          targets: flash,
-          scale: { from: 0.6, to: 1.8 },
-          alpha: { from: 0.6, to: 0 },
-          duration: 250,
-          onComplete: () => flash.destroy(),
-        });
-      }
+      return;
     }
+
+    // Beam distant : couleur dépend de la catégorie
+    let color;
+    if (category === 'magic') color = Theme.BEAM.magic;
+    else if (category === 'holy') color = Theme.BEAM.holy;
+    else color = Theme.BEAM.ranged;
+    this._drawBeam(attacker.x, attacker.y, tx, ty, color);
   }
 
   _showMoveIndicator(x, y, isAttack = false) {
-    const g = this.add.graphics();
-    g.lineStyle(2, isAttack ? 0xe74c3c : 0xffffff, 1);
+    const color = isAttack ? Theme.HP.low : Theme.GRID.border;
+    const g = this.add.graphics().setDepth(56);
+    g.setBlendMode(Phaser.BlendModes.ADD);
+    g.lineStyle(2, color, 1);
     g.strokeCircle(0, 0, 12);
     g.setPosition(x, y);
-    this.tweens.add({ targets: g, alpha: 0, duration: 300, ease: 'Power2', onComplete: () => g.destroy() });
+    this.tweens.add({ targets: g, alpha: 0, scale: 1.4, duration: 300, ease: 'Quad.easeOut', onComplete: () => g.destroy() });
   }
 
   // ── Kill feed ─────────────────────────────────────────────────────
