@@ -3,133 +3,6 @@ const BAR_W       = 30;
 const BAR_H       = 4;
 const BAR_Y       = -(UNIT_RADIUS + 8);
 
-// Factions neutres PvE — miroir des NEUTRAL_OWNER_* serveur.
-const NEUTRAL_FACTIONS = {
-  neutral_barbarian: { name: 'Barbares', color: '#6b6b6b', colorInt: 0x6b6b6b },
-  neutral_fauna:     { name: 'Faune',    color: '#8b6f47', colorInt: 0x8b6f47 },
-  neutral_boss:      { name: 'Boss',     color: '#8b4513', colorInt: 0x8b4513 },
-};
-function getOwnerDisplay(ownerId, players) {
-  if (players && players[ownerId]) {
-    return { name: players[ownerId].name, color: players[ownerId].color,
-             colorInt: Phaser.Display.Color.HexStringToColor(players[ownerId].color).color, isNeutral: false };
-  }
-  const n = NEUTRAL_FACTIONS[ownerId];
-  if (n) return { name: n.name, color: n.color, colorInt: n.colorInt, isNeutral: true };
-  return { name: 'Inconnu', color: '#ffffff', colorInt: 0xffffff, isNeutral: false };
-}
-function isFaunaType(t) { return t === 'boar' || t === 'wolf'; }
-
-// ════════════════════════════════════════════════════════════════════
-// CATALOGUE DES ASSETS — source de vérité pour le préchargement
-// Chaque entrée : { key, path, category }
-// category → couleur du placeholder si le fichier PNG est absent
-// ════════════════════════════════════════════════════════════════════
-const ASSET_CATALOG = {
-  UNITS_NEW: [
-    { key: 'crossbowman',     path: 'assets/crossbowman.png',     category: 'science'  },
-    { key: 'heavy_knight',    path: 'assets/heavy_knight.png',    category: 'science'  },
-    { key: 'catapult',        path: 'assets/catapult.png',        category: 'science'  },
-    { key: 'cannon',          path: 'assets/cannon.png',          category: 'science'  },
-    { key: 'general',         path: 'assets/general.png',         category: 'science'  },
-    { key: 'elite_guard',     path: 'assets/elite_guard.png',     category: 'science'  },
-    { key: 'mage',            path: 'assets/mage.png',            category: 'magic'    },
-    { key: 'necromancer',     path: 'assets/necromancer.png',     category: 'magic'    },
-    { key: 'skeleton',        path: 'assets/skeleton.png',        category: 'magic'    },
-    { key: 'lich',            path: 'assets/lich.png',            category: 'magic'    },
-    { key: 'skeleton_knight', path: 'assets/skeleton_knight.png', category: 'magic'    },
-    { key: 'fire_elemental',  path: 'assets/fire_elemental.png',  category: 'magic'    },
-    { key: 'arcane_dragon',   path: 'assets/arcane_dragon.png',   category: 'magic'    },
-    { key: 'pilgrim',         path: 'assets/pilgrim.png',         category: 'religion' },
-    { key: 'inquisitor',      path: 'assets/inquisitor.png',      category: 'religion' },
-    { key: 'paladin',         path: 'assets/paladin.png',         category: 'religion' },
-    { key: 'angel',           path: 'assets/angel.png',           category: 'religion' },
-    { key: 'god_avatar',      path: 'assets/god_avatar.png',      category: 'religion' },
-  ],
-  BUILDINGS_NEW: [
-    { key: 'boat',            path: 'assets/boat.png',            category: 'science'  },
-    { key: 'port',            path: 'assets/port.png',            category: 'science'  },
-    { key: 'tower_archer',    path: 'assets/tower_archer.png',    category: 'science'  },
-    { key: 'bombard_tower',   path: 'assets/bombard_tower.png',   category: 'science'  },
-    { key: 'citadel',         path: 'assets/citadel.png',         category: 'science'  },
-    { key: 'tower_mage',      path: 'assets/tower_mage.png',      category: 'magic'    },
-    { key: 'sanctum',         path: 'assets/sanctum.png',         category: 'magic'    },
-    { key: 'altar',           path: 'assets/altar.png',           category: 'religion' },
-    { key: 'temple',          path: 'assets/temple.png',          category: 'religion' },
-    { key: 'cathedral',       path: 'assets/cathedral.png',       category: 'religion' },
-    { key: 'path_tile',       path: 'assets/path_tile.png',       category: 'science', isTile: true },
-  ],
-  SPELLS_FX: [
-    { key: 'spell_portal',      path: 'assets/spell_portal.png',      category: 'magic'    },
-    { key: 'spell_fireball',    path: 'assets/spell_fireball.png',     category: 'magic'    },
-    { key: 'spell_freeze',      path: 'assets/spell_freeze.png',       category: 'magic'    },
-    { key: 'spell_blessing',    path: 'assets/spell_blessing.png',     category: 'religion' },
-    { key: 'spell_holy_light',  path: 'assets/spell_holy_light.png',   category: 'religion' },
-  ],
-  PROJECTILES: [
-    { key: 'proj_arrow',             path: 'assets/proj_arrow.png',             category: 'projectile' },
-    { key: 'proj_crossbow_bolt',     path: 'assets/proj_crossbow_bolt.png',     category: 'projectile' },
-    { key: 'proj_catapult_rock',     path: 'assets/proj_catapult_rock.png',     category: 'projectile' },
-    { key: 'proj_cannonball',        path: 'assets/proj_cannonball.png',        category: 'projectile' },
-    { key: 'proj_throwing_spear',    path: 'assets/proj_throwing_spear.png',    category: 'projectile' },
-    { key: 'proj_magic_bolt',        path: 'assets/proj_magic_bolt.png',        category: 'projectile' },
-    { key: 'proj_fireball_small',    path: 'assets/proj_fireball_small.png',    category: 'projectile' },
-    { key: 'proj_lightning',         path: 'assets/proj_lightning.png',         category: 'projectile' },
-    { key: 'proj_ice_shard',         path: 'assets/proj_ice_shard.png',         category: 'projectile' },
-    { key: 'proj_dark_orb',          path: 'assets/proj_dark_orb.png',          category: 'projectile' },
-    { key: 'proj_dragon_breath',     path: 'assets/proj_dragon_breath.png',     category: 'projectile' },
-    { key: 'proj_holy_bolt',         path: 'assets/proj_holy_bolt.png',         category: 'projectile' },
-    { key: 'proj_inquisitor_hammer', path: 'assets/proj_inquisitor_hammer.png', category: 'projectile' },
-    { key: 'proj_divine_beam',       path: 'assets/proj_divine_beam.png',       category: 'projectile' },
-  ],
-  UI_ICONS: [
-    { key: 'icon_research', path: 'assets/icon_research.png', category: 'ui' },
-    { key: 'icon_mana',     path: 'assets/icon_mana.png',     category: 'ui' },
-    { key: 'icon_faith',    path: 'assets/icon_faith.png',    category: 'ui' },
-    { key: 'icon_favor',    path: 'assets/icon_favor.png',    category: 'ui' },
-    { key: 'axis_science',  path: 'assets/axis_science.png',  category: 'ui' },
-    { key: 'axis_magic',    path: 'assets/axis_magic.png',    category: 'ui' },
-    { key: 'axis_religion', path: 'assets/axis_religion.png', category: 'ui' },
-  ],
-};
-
-// Couleur du rectangle placeholder généré pour chaque catégorie (0xRRGGBB)
-const PLACEHOLDER_COLORS = {
-  science:    0x6b7280,  // gris ardoise
-  magic:      0x9333ea,  // violet
-  religion:   0xf59e0b,  // doré
-  projectile: 0xf97316,  // orange
-  ui:         0x3b82f6,  // bleu
-};
-
-// Dimensions du placeholder par catalogue
-// Projectiles : 28x10 pour bien visibles en vol (avant : 14x6 c'était trop petit)
-const PLACEHOLDER_SIZES = {
-  UNITS_NEW:     { w: 32, h: 32 },
-  BUILDINGS_NEW: { w: 44, h: 44 },
-  SPELLS_FX:     { w: 48, h: 48 },
-  PROJECTILES:   { w: 28, h: 10 },
-  UI_ICONS:      { w: 22, h: 22 },
-};
-
-// Couleurs spécifiques par clé de projectile pour distinguer les types en vol
-const PROJECTILE_COLORS = {
-  proj_arrow:             0xd97706,  // bois/ambre
-  proj_crossbow_bolt:     0x92400e,  // bois foncé
-  proj_catapult_rock:     0x6b7280,  // pierre grise
-  proj_cannonball:        0x1f2937,  // boulet noir
-  proj_throwing_spear:    0xa16207,  // lance bois
-  proj_magic_bolt:        0x8b5cf6,  // violet magique
-  proj_fireball_small:    0xf97316,  // orange feu
-  proj_lightning:         0xfbbf24,  // jaune éclair
-  proj_ice_shard:         0x60a5fa,  // bleu glace
-  proj_dark_orb:          0x4c1d95,  // pourpre sombre
-  proj_dragon_breath:     0xdc2626,  // rouge dragon
-  proj_holy_bolt:         0xfde047,  // jaune sacré
-  proj_inquisitor_hammer: 0x78350f,  // marron marteau
-  proj_divine_beam:       0xfef9c3,  // lumière divine
-};
-
 class MainScene extends Phaser.Scene {
   constructor() {
     super({ key: 'MainScene' });
@@ -162,66 +35,7 @@ class MainScene extends Phaser.Scene {
     return false;
   }
 
-  // Génère une texture Phaser colorée pour chaque asset manquant, puis retire
-  // la clé de this.assetMissing afin que _hasAsset() retourne true.
-  // Appelé au début de create(), avant toute création de sprite.
-  _generateMissingPlaceholders() {
-    this._placeholderKeys = this._placeholderKeys || new Set();
-    const missingKeys = Object.keys(this.assetMissing || {});
-    if (missingKeys.length === 0) {
-      console.log('[ASSETS] Tous les assets chargés avec succès.');
-      return;
-    }
-
-    const meta    = this._assetMeta || {};
-
-    for (const key of missingKeys) {
-      const info  = meta[key] || { category: 'science', group: 'UNITS_NEW' };
-      const color = (info.group === 'PROJECTILES' && PROJECTILE_COLORS[key])
-                  ? PROJECTILE_COLORS[key]
-                  : (PLACEHOLDER_COLORS[info.category] || 0x888888);
-      const size  = PLACEHOLDER_SIZES[info.group] || { w: 32, h: 32 };
-
-      const g = this.make.graphics({ add: false });
-      g.fillStyle(color, 1);
-      // Forme adaptée par catégorie : projectile = forme allongée pointue
-      if (info.group === 'PROJECTILES') {
-        // Corps : rectangle plein + pointe triangulaire à droite (sens du tir)
-        g.fillRect(0, 0, size.w - 6, size.h);
-        g.fillTriangle(size.w - 6, 0, size.w, size.h / 2, size.w - 6, size.h);
-        g.lineStyle(1.5, 0xffffff, 0.9);
-        g.strokeRect(0, 0, size.w - 6, size.h);
-      } else {
-        g.fillRect(0, 0, size.w, size.h);
-        g.lineStyle(1.5, 0xffffff, 0.65);
-        g.strokeRect(1, 1, size.w - 2, size.h - 2);
-        // Croix centrale pour identifier les placeholders unités/bâtiments
-        const cx = size.w / 2, cy = size.h / 2, r = Math.min(cx, cy) * 0.45;
-        g.lineStyle(1.5, 0xffffff, 0.55);
-        g.lineBetween(cx - r, cy, cx + r, cy);
-        g.lineBetween(cx, cy - r, cx, cy + r);
-      }
-      g.generateTexture(key, size.w, size.h);
-      g.destroy();
-
-      // Mémorise que cette clé est un placeholder (utilisé pour superposer l'emoji)
-      this._placeholderKeys.add(key);
-      // Retire de assetMissing → _hasAsset() retournera true pour ce placeholder
-      delete this.assetMissing[key];
-    }
-
-    console.warn(
-      `[ASSETS MANQUANTS — ${missingKeys.length}] Placeholders colorés générés :\n` +
-      `  ${missingKeys.join(', ')}\n` +
-      `  → Copiez les PNG dans public/assets/ pour les remplacer sans rechargement du code.`
-    );
-  }
-
   create() {
-    // Génère des textures placeholder pour tous les assets qui ont échoué au chargement.
-    // Doit être appelé en PREMIER dans create() avant toute création de sprite.
-    this._generateMissingPlaceholders();
-
     // IMPORTANT : ne pas construire la map ici car Network.init() n'a pas
     // encore reçu la taille réelle du serveur. On construit la map UNIQUEMENT
     // après réception de l'event 'init'. Voir _buildMap() plus bas.
@@ -237,17 +51,6 @@ class MainScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     });
 
-    // Reset toutes les touches caméra si la fenêtre perd le focus (raccourci nav, alt-tab…).
-    // Sans ça, isDown reste true et la caméra dérive en continu.
-    const resetCamKeys = () => {
-      [this.cursors.left, this.cursors.right, this.cursors.up, this.cursors.down,
-       this.wasd.left, this.wasd.right, this.wasd.up, this.wasd.down].forEach(k => {
-        if (k && typeof k.reset === 'function') k.reset();
-      });
-    };
-    window.addEventListener('blur', resetCamKeys);
-    document.addEventListener('visibilitychange', () => { if (document.hidden) resetCamKeys(); });
-
     this.input.mouse.disableContextMenu();
     this.attackGraphics = this.add.graphics();
 
@@ -257,18 +60,6 @@ class MainScene extends Phaser.Scene {
     pg.fillRect(0, 0, 3, 3);
     pg.generateTexture('particle', 3, 3);
     pg.destroy();
-
-    // ── FX caméra : vignette + color grading chaud (ambiance verrouillée) ──
-    // API FX Phaser 3.90 : nécessite le renderer WebGL (pas Canvas).
-    if (this.cameras.main.postFX && this.game.renderer && this.game.renderer.type === Phaser.WEBGL) {
-      // Vignette douce : centre clair, bords assombris (subtil pour rester lisible)
-      this.cameras.main.postFX.addVignette(0.5, 0.5, 0.85, 0.45);
-      // Color grading chaud très léger : un peu de saturation + hue légèrement chaud
-      const cm = this.cameras.main.postFX.addColorMatrix();
-      if (cm.saturate) cm.saturate(0.08);
-      if (cm.hue)      cm.hue(-4);
-      if (cm.brightness) cm.brightness(1.01);
-    }
 
     // Recalcule la borne de zoom min si on redimensionne la fenêtre
     this.scale.on('resize', () => {
@@ -302,10 +93,6 @@ class MainScene extends Phaser.Scene {
       cam.zoom = this.minZoom;
       cam.centerOn(this.MAP_W / 2, this.MAP_H / 2);
     });
-
-    // Raccourcis sorts F/G/H/J/1-5 SUPPRIMÉS (sorts désactivés en phase 4).
-    // Les ressources mana/foi servent maintenant à PRODUIRE les unités magie/religion
-    // depuis le panel HDV/village (au lieu de caster des sorts).
 
     // ── Ctrl+A — select all own units ────────────────────────────
     this.input.keyboard.on('keydown-A', (event) => {
@@ -347,25 +134,6 @@ class MainScene extends Phaser.Scene {
       this._addKillFeedEntry(`💥 ${attackerName} détruit un village`, Theme.factionColorStr(data.byPlayerId));
     });
 
-    Network.setOnBarbarianRaid((data) => {
-      const myId = Network.getMyId();
-      if (data.targetPlayerId === myId) {
-        this._addKillFeedEntry(`🔥 Un raid barbare arrive sur toi ! (${data.count})`, '#ff4444');
-      } else {
-        this._addKillFeedEntry(`⚠️ Raid barbare → ${data.targetName} (${data.count})`, data.targetColor || '#999999');
-      }
-    });
-
-    Network.setOnCampCleared((data) => {
-      const myId = Network.getMyId();
-      const unitName = data.freeUnit === 'knight' ? 'chevalier' : 'soldat';
-      if (data.byPlayerId === myId) {
-        this._addKillFeedEntry(`🏆 Camp nettoyé ! +${data.rewardGold}💰 +1 ${unitName}`, '#fbbf24');
-      } else {
-        this._addKillFeedEntry(`🏴 ${data.byName} a nettoyé un camp de bandits`, data.byColor || '#999999');
-      }
-    });
-
     Network.setOnGameOver((data) => {
       // network.js handles the overlay — nothing extra needed here
     });
@@ -380,8 +148,6 @@ class MainScene extends Phaser.Scene {
       const state = Network.getState();
 
       // ── Résoudre la position de la cible ──
-      // Si la cible est filtrée par fog → fallback sur data.targetX/Y serveur
-      // → permet de voir les projectiles même quand la cible n'est pas visible localement
       let tx, ty;
       if (data.targetType === 'unit') {
         const t = state.units && state.units[data.targetId];
@@ -418,11 +184,7 @@ class MainScene extends Phaser.Scene {
         else attackerColorInt = Theme.BEAM.ranged;
         this._drawBeam(ax, ay, tx, ty, attackerColorInt);
       } else {
-        // L'attaquant peut être filtré par fog → fallback sur attackerX/Y serveur
-        let attacker = state.units && state.units[data.attackerId];
-        if (!attacker && data.attackerX != null) {
-          attacker = { x: data.attackerX, y: data.attackerY, type: data.attackerType || 'soldier' };
-        }
+        const attacker = state.units && state.units[data.attackerId];
         if (!attacker) return;
         attackerColorInt = Theme.factionColorInt(attacker.ownerId);
         this._playAttackAnimation(attacker, tx, ty);
@@ -441,13 +203,6 @@ class MainScene extends Phaser.Scene {
     // ── Input ─────────────────────────────────────────────────────
 
     this.input.on('pointerdown', (pointer, currentlyOver) => {
-      // Ferme BuildingInfoPanel si on clique ailleurs que sur un bâtiment
-      // (le sprite bâtiment ré-ouvrira son panel s'il est cliqué)
-      if (typeof BuildingInfoPanel !== 'undefined' && BuildingInfoPanel.isVisible
-          && BuildingInfoPanel.isVisible()) {
-        const clickedBuilding = currentlyOver.find(go => go._buildingId);
-        if (!clickedBuilding) BuildingInfoPanel.close();
-      }
       // Mode build prioritaire sur tous les autres clics
       if (typeof BuildMode !== 'undefined' && BuildMode.isActive()) {
         if (pointer.button === 0) {
@@ -465,22 +220,6 @@ class MainScene extends Phaser.Scene {
           SpellCast.cancel();
         }
         return;
-      }
-      // DEBUG : panneau debug intercepte le clic en mode TUNING ou SPAWN-pending
-      if (pointer.button === 0 && typeof DebugPanel !== 'undefined') {
-        // Mode SPAWN avec spawn en attente → place sur la map
-        if (DebugPanel.getMode && DebugPanel.getMode() === 'spawn' && DebugPanel.hasPendingSpawn && DebugPanel.hasPendingSpawn()) {
-          DebugPanel.tryHandleMapClick(pointer.worldX, pointer.worldY);
-          return;
-        }
-        // Mode TUNING : si clic sur un sprite avec _unitType, ouvre le slider
-        if (DebugPanel.getMode && DebugPanel.getMode() === 'tuning') {
-          const hit = currentlyOver.find(go => go._unitType);
-          if (hit) {
-            DebugPanel.tryHandleSpriteClick(hit._unitType, pointer.x, pointer.y);
-            return;
-          }
-        }
       }
       if (pointer.button === 0) {
         const myId   = Network.getMyId();
@@ -579,25 +318,10 @@ class MainScene extends Phaser.Scene {
     if (!this.mapBuilt) return; // pas avant que l'event 'init' n'arrive
     const cam = this.cameras.main;
     const SPEED = 12 / cam.zoom;
-
-    // ── Scroll caméra UNIQUEMENT si aucun panel HTML ne capture le focus ──
-    // (Sinon, les raccourcis Chrome type Ctrl+Shift+D peuvent rendre une touche
-    //  stuck en isDown=true → caméra dérive à l'infini)
-    const anyPanelOpen =
-      (typeof HdvPanel       !== 'undefined' && HdvPanel.isVisible       && HdvPanel.isVisible()) ||
-      (typeof VillagePanel   !== 'undefined' && VillagePanel.isVisible   && VillagePanel.isVisible()) ||
-      (typeof TechTreeOverlay!== 'undefined' && TechTreeOverlay.isOpen   && TechTreeOverlay.isOpen()) ||
-      (typeof DebugPanel     !== 'undefined' && DebugPanel.isOpen        && DebugPanel.isOpen());
-    // Focus sur un élément interactif HTML ? → skip scroll (sécurité supplémentaire)
-    const ae = document.activeElement;
-    const focusOnUi = ae && ae !== document.body && (ae.tagName === 'INPUT' || ae.tagName === 'BUTTON' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT');
-
-    if (!anyPanelOpen && !focusOnUi) {
-      if (this.cursors.left.isDown  || this.wasd.left.isDown)  cam.scrollX -= SPEED;
-      if (this.cursors.right.isDown || this.wasd.right.isDown) cam.scrollX += SPEED;
-      if (this.cursors.up.isDown    || this.wasd.up.isDown)    cam.scrollY -= SPEED;
-      if (this.cursors.down.isDown  || this.wasd.down.isDown)  cam.scrollY += SPEED;
-    }
+    if (this.cursors.left.isDown  || this.wasd.left.isDown)  cam.scrollX -= SPEED;
+    if (this.cursors.right.isDown || this.wasd.right.isDown) cam.scrollX += SPEED;
+    if (this.cursors.up.isDown    || this.wasd.up.isDown)    cam.scrollY -= SPEED;
+    if (this.cursors.down.isDown  || this.wasd.down.isDown)  cam.scrollY += SPEED;
 
     this._updateRingPositions();
     this._updateUnitBarPositions();
@@ -661,12 +385,6 @@ class MainScene extends Phaser.Scene {
 
     this._syncHDVs(state.players);
     this._syncUnits(state.units || {}, state.players);
-
-    // Indicateurs de passifs (badges + halos HDV) — visibles par TOUS les joueurs
-    if (typeof TechIndicators !== 'undefined') {
-      const visibleHdvPids = new Set(Object.keys(this.hdvSprites));
-      TechIndicators.sync(state.playerSummary || [], visibleHdvPids, state.players);
-    }
   }
 
   // ── Villages neutres ─────────────────────────────────────────────
@@ -727,8 +445,6 @@ class MainScene extends Phaser.Scene {
         s = { bg, icon, hpBg, hpFill };
         this.buildingSprites[b.id] = s;
       }
-
-      const sz = s._finalSize;
       s.bg.setPosition(b.x, b.y);
       s.bg.setTint(tintColor);
       s.icon.setPosition(b.x, b.y);
@@ -738,18 +454,11 @@ class MainScene extends Phaser.Scene {
       s.hpFill.width = (BSZ + 2) * hpRatio;
       s.hpFill.setFillStyle(hpRatio > Theme.HP.threshold ? Theme.HP.base : Theme.HP.low);
     }
-    // Cleanup : bâtiment détruit → burst de debris (pierre + poussière) à sa
-    // position avant de détruire les sprites. Léger shake caméra pour le poids.
+    // Cleanup
     for (const id of Object.keys(this.buildingSprites)) {
       if (!seen.has(id)) {
         const s = this.buildingSprites[id];
-        const bx = s.bg ? s.bg.x : 0;
-        const by = s.bg ? s.bg.y : 0;
-        const sz = s._finalSize || 50;
-        if (s.bg) this._spawnBuildingDebris(bx, by, sz);
-        // Shake subtil proportionnel à la taille (gros bâtiments → plus visible)
-        this.cameras.main.shake(180, Math.min(0.006, 0.0015 + sz / 12000));
-        Object.values(s).forEach(o => o && o.destroy && o.destroy());
+        Object.values(s).forEach(o => o && o.destroy());
         delete this.buildingSprites[id];
       }
     }
@@ -943,7 +652,6 @@ class MainScene extends Phaser.Scene {
     if (typeof RadialMenu !== 'undefined') RadialMenu.init(this);
     if (typeof BuildMode !== 'undefined') BuildMode.init(this);
     if (typeof SpellCast !== 'undefined') SpellCast.init(this);
-    if (typeof TechIndicators !== 'undefined') TechIndicators.init(this);
     this.buildingSprites = {};
 
     this.mapBuilt = true;
@@ -986,15 +694,6 @@ class MainScene extends Phaser.Scene {
           if (Math.hypot(s.x - x, s.y - y) < SAFE_RADIUS) { nearSpawn = true; break; }
         }
         if (nearSpawn) continue;
-
-        // Évite les water tiles (pas d'arbres sur l'eau)
-        const wt = Network.getWaterTiles && Network.getWaterTiles();
-        if (wt) {
-          const info = Network.getMapInfo();
-          const ts = info.tileSize || 50, gw = info.gridW;
-          const tx = Math.floor(x / ts), ty = Math.floor(y / ts);
-          if (tx >= 0 && ty >= 0 && tx < info.gridW && ty < info.gridH && wt[ty * gw + tx] === 1) continue;
-        }
 
         // Choix du type pondéré
         const r = seedRand(gx, gy, 3);
@@ -1180,26 +879,7 @@ class MainScene extends Phaser.Scene {
 
     for (const id of Object.keys(this.unitSprites)) {
       if (!units[id]) {
-        // Animation de mort sur le sprite principal (fade + scale → destroy)
-        const arr = this.unitSprites[id];
-        const sprite = arr && arr[0];
-        if (sprite && sprite._shadow) {
-          // L'ombre s'estompe avec le corps
-          this.tweens.add({ targets: sprite._shadow, alpha: 0, duration: 300,
-            onComplete: () => sprite._shadow && sprite._shadow.destroy() });
-        }
-        // Mort d'un boss (dragon arcane, god avatar) : shake caméra subtil
-        const _deadCfg = (sprite && typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[sprite._unitType] : null;
-        if (_deadCfg && _deadCfg.boss) {
-          this.cameras.main.shake(250, 0.006);
-        }
-        if (sprite && typeof Animations !== 'undefined') {
-          Animations.animateUnitDeath(this, sprite);
-          // Détruire les autres éléments immédiatement (barres, badge)
-          for (let i = 1; i < arr.length; i++) if (arr[i]) arr[i].destroy();
-        } else if (arr) {
-          arr.forEach(o => { if (o) o.destroy(); });
-        }
+        this.unitSprites[id].forEach(o => { if (o) o.destroy(); });
         delete this.unitSprites[id];
         if (this.unitTweens[id])    { this.unitTweens[id].stop(); delete this.unitTweens[id]; }
         delete this.unitServerPos[id];
@@ -1214,11 +894,9 @@ class MainScene extends Phaser.Scene {
       const isBoss   = shape.sh === 'boss';
       const isBeast  = !!Theme.BEAST[unit.type];
       const prev     = this.unitServerPos[id];
-      const paxCount = (unit.passengers && unit.passengers.length) || 0;
       const posChanged = !prev || prev.x !== unit.x || prev.y !== unit.y;
       const hpChanged  = !prev || prev.hp !== unit.hp;
-      const paxChanged = unit.type === 'boat' && (!prev || prev.pax !== paxCount);
-      this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp, pax: paxCount };
+      this.unitServerPos[id] = { x: unit.x, y: unit.y, hp: unit.hp };
 
       if (!this.unitSprites[id]) {
         // ── Forme principale (texture sf-{sh}) tintée couleur équipe ──
@@ -1248,20 +926,6 @@ class MainScene extends Phaser.Scene {
         sprite._unitOwnerId = unit.ownerId;
         sprite._unitType    = unit.type;
         sprite._idlePhase   = Math.random() * Math.PI * 2;
-        sprite._factionColor = softTint;   // teinte affichée (restaurée après flash)
-        sprite._factionRaw   = colorInt;    // couleur brute vive (ring de sélection)
-        // Multiplicateurs de scale d'attaque (squash&stretch) lus par le wobble
-        sprite._atkScaleX = 1;
-        sprite._atkScaleY = 1;
-
-        // Ombre portée elliptique sous l'unité (depth 48, sous le sprite 50).
-        // Plus petite/diffuse pour les volants (suggère la hauteur).
-        const shW = unitSize * scaleMult * (cfg && cfg.flying ? 0.40 : 0.58);
-        const shadow = this.add.ellipse(unit.x, unit.y, shW, shW * 0.40, 0x000000,
-          cfg && cfg.flying ? 0.16 : 0.26).setDepth(48);
-        sprite._shadow = shadow;
-        // Offset abaissé : l'ombre se pose sous les pieds (était un peu haute)
-        sprite._shadowOffsetY = unitSize * scaleMult * (cfg && cfg.flying ? 0.62 : 0.46);
 
         // ── Pastille d'axe (sci/mag/rel) : disque coloré au centre ──
         // Bêtes : pas de pastille. Boss : disque blanc central (au lieu de pastille axe).
@@ -1306,32 +970,7 @@ class MainScene extends Phaser.Scene {
 
         this.unitSprites[id] = [sprite, barBg, barFill, badge, axisDot, freeze];
 
-        // Si l'asset PRIMAIRE était un placeholder (peu importe qu'on ait swappé
-        // vers un fallback intelligent), superpose l'emoji du type pour
-        // distinguer visuellement les unités qui partagent le même sprite.
-        // → soldier/archer/knight (vrais sprites) : pas d'emoji
-        // → heavy_knight / paladin / inquisitor / etc. : emoji sur sprite hérité
-        let iconOverlay = null;
-        if (isPrimaryPlaceholder) {
-          const ut = (Network.getConfig().unitTypes || {})[unit.type] || {};
-          const icon = ut.icon || '❓';
-          // Position : en haut à droite du sprite (badge "type"), pas centré
-          const offsetX = unitSize * 0.35 * scaleMult;
-          const offsetY = -unitSize * 0.35 * scaleMult;
-          iconOverlay = this.add.text(unit.x + offsetX, unit.y + offsetY, icon, {
-            fontSize: Math.floor(unitSize * 0.38 * scaleMult) + 'px',
-            stroke: '#000', strokeThickness: 3,
-          }).setOrigin(0.5, 0.5).setDepth(52);
-          iconOverlay._iconOffsetX = offsetX;
-          iconOverlay._iconOffsetY = offsetY;
-        }
-
-        // [sprite, barBg, barFill, badge, iconOverlay?] — l'overlay est optionnel
-        this.unitSprites[id] = iconOverlay
-          ? [sprite, barBg, barFill, badge, iconOverlay]
-          : [sprite, barBg, barFill, badge];
-
-      } else if (posChanged || hpChanged || paxChanged) {
+      } else if (posChanged || hpChanged) {
         const [sprite, , barFill, badge] = this.unitSprites[id];
         if (badge) badge.setText(this._modeIcon(unit.mode));
 
@@ -1341,10 +980,8 @@ class MainScene extends Phaser.Scene {
           barFill.width = Math.max(0, barW * ratio);
           const c = ratio > Theme.HP.threshold ? Theme.HP.full : Theme.HP.low;
           barFill.setFillStyle(c);
-          // Barre de vie animée (tween de la largeur, subtil)
-          this.tweens.add({ targets: barFill, width: BAR_W * ratio, duration: 120, ease: 'Quad.easeOut' });
         }
-        if (posChanged && !sprite._attacking) {
+        if (posChanged) {
           if (this.unitTweens[id]) this.unitTweens[id].stop();
           this.unitTweens[id] = this.tweens.add({
             targets: sprite, x: unit.x, y: unit.y,
@@ -1445,38 +1082,6 @@ class MainScene extends Phaser.Scene {
     const myId  = Network.getMyId();
     const state = Network.getState();
 
-    // ── Boat embark/disembark (avant le reste) ───────────────────────
-    const selUnits = Array.from(this.selectedUnitIds)
-      .map(id => (state.units || {})[id]).filter(Boolean);
-    const myBoats = selUnits.filter(u => u.type === 'boat' && u.ownerId === myId);
-    const myGroundSel = selUnits.filter(u => u.ownerId === myId && u.type !== 'boat');
-    const isOnWater = Network.isWaterAt && Network.isWaterAt(wx, wy);
-
-    // DISEMBARK : sélection contient un boat avec passagers + clic tile terre
-    if (myBoats.length > 0 && !isOnWater) {
-      const boatsWithPax = myBoats.filter(b => b.passengers && b.passengers.length > 0);
-      if (boatsWithPax.length > 0) {
-        for (const b of boatsWithPax) Network.disembarkBoat(b.id, wx, wy);
-        this._showMoveIndicator(wx, wy, false);
-        return;
-      }
-    }
-
-    // EMBARK : clic droit sur own boat + unités terrestres sélectionnées proches
-    let hitOwnBoat = null;
-    for (const [uid, unit] of Object.entries(state.units || {})) {
-      if (unit.ownerId !== myId || unit.type !== 'boat') continue;
-      if (Math.hypot(wx - unit.x, wy - unit.y) <= 35) { hitOwnBoat = unit; break; }
-    }
-    if (hitOwnBoat && myGroundSel.length > 0) {
-      const close = myGroundSel.filter(u => Math.hypot(u.x - hitOwnBoat.x, u.y - hitOwnBoat.y) <= 100);
-      if (close.length > 0) {
-        Network.embarkBoat(hitOwnBoat.id, close.map(u => u.id));
-        this._showMoveIndicator(hitOwnBoat.x, hitOwnBoat.y, false);
-        return;
-      }
-    }
-
     let hitEnemyUnit = null;
     for (const [uid, unit] of Object.entries(state.units || {})) {
       if (unit.ownerId === myId) continue;
@@ -1499,17 +1104,11 @@ class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Bâtiment ennemi → attaque (tolérance basée sur la taille visuelle réelle du bâtiment)
-    const cfg = Network.getConfig();
+    // Bâtiment ennemi → attaque
     let hitEnemyBuilding = null;
     for (const b of (state.buildings || [])) {
       if (b.ownerId === myId) continue;
-      const def = (cfg.buildingTypes || {})[b.type] || {};
-      const eCfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[b.type] : null;
-      const scaleMult = (eCfg && eCfg.scale) || 2.0;
-      // Tolérance = halfSize × scaleMult avec minimum 40px (clic généreux)
-      const tol = Math.max(40, ((def.halfSize || 22) * scaleMult));
-      if (Math.abs(wx - b.x) <= tol && Math.abs(wy - b.y) <= tol) { hitEnemyBuilding = b.id; break; }
+      if (Math.abs(wx - b.x) <= 30 && Math.abs(wy - b.y) <= 30) { hitEnemyBuilding = b.id; break; }
     }
     if (hitEnemyBuilding) {
       Network.attackTarget(Array.from(this.selectedUnitIds), hitEnemyBuilding, 'building');
@@ -1595,20 +1194,6 @@ class MainScene extends Phaser.Scene {
 
   // ── Visual effects ────────────────────────────────────────────────
 
-  // Teinte de faction ADOUCIE : mélange la couleur vers le blanc pour que le
-  // tint multiplicatif n'assombrisse pas le PNG (une couleur saturée comme le
-  // rouge écrase les canaux verts/bleus). On garde le hue de l'équipe, en plus clair.
-  _factionTint(colorInt) {
-    const c = Phaser.Display.Color.IntegerToColor(colorInt);
-    const m = 0.55; // 55 % vers le blanc
-    const r = Math.round(c.red   + (255 - c.red)   * m);
-    const g = Math.round(c.green + (255 - c.green) * m);
-    const b = Math.round(c.blue  + (255 - c.blue)  * m);
-    return (r << 16) | (g << 8) | b;
-  }
-
-  // Flash de coup encaissé : silhouette blanche brève (setTintFill) puis retour
-  // à la teinte de faction. (Anciennement setFillStyle → cassé sur les Sprites.)
   _flashUnit(unitId) {
     const sprites = this.unitSprites[unitId];
     if (!sprites) return;
