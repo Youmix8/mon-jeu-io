@@ -104,6 +104,24 @@ const Theme = (() => {
     wolf: { sh:'tri', sz: 9, color: 0x64748b },
   };
 
+  // ── PvE neutres (barbares, camps, boss) — palette §11.9 du spec ──
+  // ownerId reconnaissable : préfixe 'neutral_'.
+  const NEUTRAL_OWNERS = {
+    neutral_barbarian: { color: 0xef4444, glowMul: 1.0 },   // rouge sang
+    neutral_fauna:     { color: null,    glowMul: 1.0 },    // utilise BEAST color
+    neutral_boss:      { color: 0xdc2626, glowMul: 1.5 },   // rouge plus saturé, glow renforcé
+  };
+  function isNeutralOwner(ownerId) {
+    return typeof ownerId === 'string' && (ownerId.startsWith('neutral_') || NEUTRAL_OWNERS[ownerId]);
+  }
+  function neutralColor(ownerId, unitType) {
+    const def = NEUTRAL_OWNERS[ownerId];
+    if (!def) return NEUTRAL_INT;
+    if (def.color != null) return def.color;
+    if (unitType && BEAST[unitType]) return BEAST[unitType].color;
+    return NEUTRAL_INT;
+  }
+
   // ── Bases : HDV + village (forme hex) ──
   const BASE = {
     hdv:     { r: 28, glow: 14, glyph: '★' },
@@ -218,13 +236,18 @@ const Theme = (() => {
     return i;
   }
 
-  function factionColorInt(pid) {
+  function factionColorInt(pid, unitType) {
     if (!pid) return NEUTRAL_INT;
+    if (isNeutralOwner(pid)) return neutralColor(pid, unitType);
     const s = slotOf(pid);
     return s >= 0 ? FCOL_INT[s] : NEUTRAL_INT;
   }
-  function factionColorStr(pid) {
+  function factionColorStr(pid, unitType) {
     if (!pid) return NEUTRAL_STR;
+    if (isNeutralOwner(pid)) {
+      const c = neutralColor(pid, unitType);
+      return '#' + c.toString(16).padStart(6, '0');
+    }
     const s = slotOf(pid);
     return s >= 0 ? FCOL_STR[s] : NEUTRAL_STR;
   }
@@ -246,11 +269,11 @@ const Theme = (() => {
   return {
     BG, GRID, FCOL_STR, FCOL_INT, NEUTRAL_STR, NEUTRAL_INT,
     AXC_STR, AXC_INT, RES, HP,
-    AXIS, UNIT_SHAPES, BEAST,
+    AXIS, UNIT_SHAPES, BEAST, NEUTRAL_OWNERS,
     BASE, BUILDING, GLOW, BEAM, BEAM_BY_TYPE,
     PARTICLE, SELECTION, FREEZE_COLOR, FREEZE_ALPHA,
     setMyId, slotOf, factionColorInt, factionColorStr,
-    unitShape, beamColor,
+    unitShape, beamColor, isNeutralOwner, neutralColor,
   };
 })();
 

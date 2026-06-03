@@ -54,16 +54,16 @@ const BuildMode = (() => {
     const baseObj = _baseObj();
     if (!baseObj) { cancel(); return; }
 
-    // Zone carrée — strokeRect + remplissage léger
+    // Zone carrée — bordure cyan néon (palette spec)
     zoneRect = scene.add.graphics().setDepth(45);
-    zoneRect.lineStyle(3, 0xfbbf24, 0.7);
+    zoneRect.lineStyle(2, 0x22d3ee, 0.65);
     zoneRect.strokeRect(baseObj.x - r, baseObj.y - r, r * 2, r * 2);
-    zoneRect.fillStyle(0xfbbf24, 0.06);
+    zoneRect.fillStyle(0x22d3ee, 0.05);
     zoneRect.fillRect(baseObj.x - r, baseObj.y - r, r * 2, r * 2);
 
     // Quadrillage léger à l'intérieur
     gridOverlay = scene.add.graphics().setDepth(46);
-    gridOverlay.lineStyle(1, 0xfbbf24, 0.20);
+    gridOverlay.lineStyle(1, 0x22d3ee, 0.18);
     const g = _grid();
     const startX = baseObj.x - r, endX = baseObj.x + r;
     const startY = baseObj.y - r, endY = baseObj.y + r;
@@ -88,7 +88,7 @@ const BuildMode = (() => {
     const def = cfg.buildingTypes[buildingType];
     const snap = snapToGrid(wx, wy);
     const ghost = scene.add.text(snap.x, snap.y, def.icon, {
-      fontSize: '32px', fontFamily: '"Quicksand", sans-serif',
+      fontSize: '32px', fontFamily: '"Inter", system-ui, sans-serif',
     }).setOrigin(0.5, 0.5).setDepth(110).setAlpha(0.85);
     const mark = scene.add.circle(snap.x, snap.y, 22, 0x22c55e, 0.25)
       .setStrokeStyle(2, 0x22c55e, 0.9).setDepth(108);
@@ -145,8 +145,8 @@ const BuildMode = (() => {
         validMarks[i].setPosition(c.x, c.y);
         const ok = _isPlacementValid(c.x, c.y);
         if (!ok) allValid = false;
-        validMarks[i].setFillStyle(ok ? 0x22c55e : 0xef4444, 0.25);
-        validMarks[i].setStrokeStyle(2, ok ? 0x22c55e : 0xef4444, 0.9);
+        validMarks[i].setFillStyle(ok ? 0x22c55e : 0xfb7185, 0.25);
+        validMarks[i].setStrokeStyle(2, ok ? 0x22c55e : 0xfb7185, 0.9);
         ghosts[i].setAlpha(ok ? 0.85 : 0.4);
       }
       // Toast compteur de coût
@@ -167,8 +167,8 @@ const BuildMode = (() => {
     ghost.setPosition(snap.x, snap.y);
     mark.setPosition(snap.x, snap.y);
     const ok = _isPlacementValid(snap.x, snap.y);
-    mark.setFillStyle(ok ? 0x22c55e : 0xef4444, 0.25);
-    mark.setStrokeStyle(2, ok ? 0x22c55e : 0xef4444, 0.9);
+    mark.setFillStyle(ok ? 0x22c55e : 0xfb7185, 0.25);
+    mark.setStrokeStyle(2, ok ? 0x22c55e : 0xfb7185, 0.9);
     ghost.setAlpha(ok ? 0.85 : 0.4);
   }
 
@@ -275,7 +275,7 @@ const BuildMode = (() => {
       el.style.cssText = `
         position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
         background: rgba(15,23,42,0.95); color: #fff;
-        font-family: 'Quicksand', sans-serif; font-weight: 600; font-size: 14px;
+        font-family: 'Inter', sans-serif; font-weight: 600; font-size: 14px;
         padding: 10px 18px; border-radius: 10px;
         border: 1.5px solid rgba(251,191,36,0.6);
         z-index: 950; pointer-events: none;

@@ -26,9 +26,9 @@ const TechTreeOverlay = (() => {
     root.id = 'tech-tree-overlay';
     root.style.cssText = `
       position: fixed; inset: 0; z-index: 1500;
-      background: radial-gradient(circle at center, rgba(15,23,42,0.96) 0%, rgba(2,6,23,0.99) 100%);
+      background: radial-gradient(circle at center, rgba(4,8,12,0.96) 0%, rgba(7,13,17,0.99) 100%);
       display: none; overflow: hidden;
-      font-family: 'Quicksand', sans-serif; color: #f1f5f9;
+      font-family: 'Inter', system-ui, sans-serif; color: #e2e8f0;
     `;
 
     // Header
@@ -47,7 +47,7 @@ const TechTreeOverlay = (() => {
         <span>🔬 <span id="tt-pr">0</span> PR</span>
         <span style="color:#a855f7;">🔮 <span id="tt-mana">0</span></span>
         <span style="color:#f59e0b;">🙏 <span id="tt-faith">0</span></span>
-        <button id="tt-close" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#fff; padding:6px 14px; border-radius:6px; cursor:pointer; font-family:inherit; font-weight:700;">✕</button>
+        <button id="tt-close" style="background:rgba(15,30,42,0.9); border:1px solid #2a4d5c; color:#e2e8f0; padding:6px 14px; border-radius:6px; cursor:pointer; font-family:inherit; font-weight:600;">✕</button>
       </div>
     `;
     root.appendChild(header);
@@ -66,9 +66,9 @@ const TechTreeOverlay = (() => {
     info.id = 'tt-tooltip';
     info.style.cssText = `
       position: absolute; pointer-events: none; display: none;
-      background: rgba(15,23,42,0.97); border: 1.5px solid rgba(255,255,255,0.2);
+      background: rgba(10,18,26,0.95); border: 1px solid #1e3a45;
       padding: 12px 14px; border-radius: 10px; max-width: 280px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 20;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 0 24px rgba(34,211,238,0.12); z-index: 20;
       font-size: 13px; line-height: 1.5;
     `;
     root.appendChild(info);
@@ -391,7 +391,7 @@ const TechTreeOverlay = (() => {
     t.setAttribute('text-anchor', 'middle');
     t.setAttribute('font-size', size || 14);
     if (color) t.setAttribute('fill', color);
-    t.style.fontFamily = '"Quicksand", sans-serif';
+    t.style.fontFamily = '"Inter", system-ui, sans-serif';
     t.textContent = content;
     return t;
   }

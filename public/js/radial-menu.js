@@ -17,9 +17,9 @@ const RadialMenu = (() => {
   // 3 segments : Attaquer (haut), Déplacer (bas-gauche), Défendre (bas-droite)
   // Angles : haut = -π/2, bas-gauche = π/2 + π/3, bas-droite = π/2 - π/3
   const OPTIONS = [
-    { id: 'attack', label: 'Attaquer', icon: '⚔', color: 0xef4444, angle: -Math.PI / 2 },
-    { id: 'move',   label: 'Déplacer', icon: '🚶', color: 0x4dabf7, angle:  Math.PI / 2 + Math.PI * 2 / 3 },
-    { id: 'defend', label: 'Défendre', icon: '🛡', color: 0xfbbf24, angle:  Math.PI / 2 - Math.PI * 2 / 3 },
+    { id: 'attack', label: 'Attaquer', icon: '⚔', color: 0xfb7185, angle: -Math.PI / 2 },                            // rose-rouge néon
+    { id: 'move',   label: 'Déplacer', icon: '🚶', color: 0x22d3ee, angle:  Math.PI / 2 + Math.PI * 2 / 3 },          // cyan
+    { id: 'defend', label: 'Défendre', icon: '🛡', color: 0xfbbf24, angle:  Math.PI / 2 - Math.PI * 2 / 3 },          // or
   ];
 
   function init(phaserScene) {
@@ -85,12 +85,12 @@ const RadialMenu = (() => {
 
     elements = { segments: [], icons: [], labels: [] };
 
-    // Fond circulaire
-    elements.bg = scene.add.circle(wx, wy, RADIUS_OUTER, 0x0f172a, 0.85)
-      .setStrokeStyle(3, 0xfbbf24, 0.9)
+    // Fond circulaire — palette obsidienne néon (cyan border)
+    elements.bg = scene.add.circle(wx, wy, RADIUS_OUTER, 0x0a121a, 0.88)
+      .setStrokeStyle(2, 0x22d3ee, 0.85)
       .setDepth(900);
-    elements.center = scene.add.circle(wx, wy, RADIUS_INNER, 0x1e293b, 0.95)
-      .setStrokeStyle(2, 0x475569, 0.8)
+    elements.center = scene.add.circle(wx, wy, RADIUS_INNER, 0x070d11, 0.95)
+      .setStrokeStyle(1.5, 0x1e3a45, 0.9)
       .setDepth(901);
 
     // Pour chaque option, dessine un segment (graphics) + icône + label
@@ -115,10 +115,10 @@ const RadialMenu = (() => {
       const ix = wx + Math.cos(opt.angle) * iconR;
       const iy = wy + Math.sin(opt.angle) * iconR;
       const iconText = scene.add.text(ix, iy - 8, opt.icon, {
-        fontSize: '28px', fontFamily: '"Quicksand", sans-serif',
+        fontSize: '28px', fontFamily: '"Inter", system-ui, sans-serif',
       }).setOrigin(0.5, 0.5).setDepth(902);
       const labelText = scene.add.text(ix, iy + 16, opt.label, {
-        fontSize: '11px', fontFamily: '"Quicksand", sans-serif', fontStyle: 'bold',
+        fontSize: '11px', fontFamily: '"Inter", system-ui, sans-serif', fontStyle: 'bold',
         color: '#fff', stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5, 0.5).setDepth(902);
       elements.icons.push(iconText);

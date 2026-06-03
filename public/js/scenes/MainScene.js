@@ -125,6 +125,24 @@ class MainScene extends Phaser.Scene {
 
     Network.setOnVillageCaptured((data) => {
       this._addKillFeedEntry(`🏘 ${data.ownerName} capture un village`, Theme.factionColorStr(data.ownerId));
+      // Flash de capture (juice §11.7) : pulse doré + 10 particules dorées au centre du village
+      const v = (Network.getState().villages || []).find(vv => vv.id === data.villageId);
+      if (v) {
+        const ring = this.add.circle(v.x, v.y, 24, 0xfbbf24, 0).setDepth(57);
+        ring.setStrokeStyle(3, 0xfbbf24, 0.95);
+        ring.setBlendMode(Phaser.BlendModes.ADD);
+        this.tweens.add({
+          targets: ring, scale: { from: 0.4, to: 2.2 }, alpha: { from: 1, to: 0 },
+          duration: 600, ease: 'Quad.easeOut', onComplete: () => ring.destroy(),
+        });
+        const emitter = this.add.particles(v.x, v.y, 'particle', {
+          tint: 0xfbbf24, speed: { min: 50, max: 110 },
+          scale: { start: 1.4, end: 0 }, alpha: { start: 1, end: 0 },
+          lifespan: 700, blendMode: Phaser.BlendModes.ADD, emitting: false,
+        });
+        emitter.explode(10);
+        this.time.delayedCall(800, () => emitter.destroy());
+      }
     });
 
     Network.setOnVillageDestroyed((data) => {
@@ -155,7 +173,13 @@ class MainScene extends Phaser.Scene {
         tx = t.x; ty = t.y;
         this._flashUnit(data.targetId);
         if (data.killed) {
-          this._spawnDeathParticles(t.x, t.y, Theme.factionColorInt(t.ownerId));
+          this._spawnDeathParticles(t.x, t.y, Theme.factionColorInt(t.ownerId, t.type));
+          // Camera shake si gros impact (boss tué) — juice §11.1
+          const shape = Theme.unitShape(t.type);
+          const isCampBoss = t.ownerId === 'neutral_boss' || t.neutralRole === 'camp_boss';
+          if (shape.sh === 'boss' || isCampBoss) {
+            this.cameras.main.shake(180, 0.004);
+          }
         }
       } else if (data.targetType === 'village') {
         const v = (state.villages || []).find(vv => vv.id === data.targetId);
@@ -169,6 +193,10 @@ class MainScene extends Phaser.Scene {
         const t = state.players && state.players[data.targetId];
         if (!t) return;
         tx = t.x; ty = t.y;
+        // HDV touché : shake léger uniquement si c'est MON HDV
+        if (data.targetId === Network.getMyId()) {
+          this.cameras.main.shake(120, 0.0025);
+        }
         this._flashHdv(data.targetId);
       }
 
@@ -879,7 +907,23 @@ class MainScene extends Phaser.Scene {
 
     for (const id of Object.keys(this.unitSprites)) {
       if (!units[id]) {
-        this.unitSprites[id].forEach(o => { if (o) o.destroy(); });
+        // ── SQUASH DE MORT (juice §11.4) : scale → 0 + alpha → 0 en 200ms, puis destroy ──
+        const arr = this.unitSprites[id];
+        const sprite = arr && arr[0];
+        if (sprite) {
+          this.tweens.add({
+            targets: sprite,
+            scaleX: 0, scaleY: 0, alpha: 0,
+            duration: 200, ease: 'Cubic.easeIn',
+            onComplete: () => arr.forEach(o => { if (o && o.destroy) o.destroy(); }),
+          });
+          // Détruire immédiatement les éléments secondaires (barres, badge)
+          for (let i = 1; i < arr.length; i++) {
+            if (arr[i] && arr[i].destroy) {
+              this.tweens.add({ targets: arr[i], alpha: 0, duration: 180, onComplete: () => arr[i] && arr[i].destroy && arr[i].destroy() });
+            }
+          }
+        }
         delete this.unitSprites[id];
         if (this.unitTweens[id])    { this.unitTweens[id].stop(); delete this.unitTweens[id]; }
         delete this.unitServerPos[id];
@@ -889,8 +933,11 @@ class MainScene extends Phaser.Scene {
     }
 
     for (const [id, unit] of Object.entries(units)) {
-      const colorInt = Theme.factionColorInt(unit.ownerId);
-      const shape    = Theme.unitShape(unit.type);
+      const isNeutral = Theme.isNeutralOwner(unit.ownerId);
+      const isCampBoss = unit.ownerId === 'neutral_boss' || (unit.neutralRole === 'camp_boss');
+      const colorInt = Theme.factionColorInt(unit.ownerId, unit.type);
+      // Mob d'un camp PvE traité comme un boss (forme boss + glow renforcé) si camp_boss.
+      const shape    = isCampBoss ? { sh:'boss', sz:16, ax:null } : Theme.unitShape(unit.type);
       const isBoss   = shape.sh === 'boss';
       const isBeast  = !!Theme.BEAST[unit.type];
       const prev     = this.unitServerPos[id];
@@ -927,18 +974,21 @@ class MainScene extends Phaser.Scene {
         sprite._unitType    = unit.type;
         sprite._idlePhase   = Math.random() * Math.PI * 2;
 
-        // ── Pastille d'axe (sci/mag/rel) : disque coloré au centre ──
-        // Bêtes : pas de pastille. Boss : disque blanc central (au lieu de pastille axe).
+        // ── Pastille d'axe (sci/mag/rel) ──
+        // Bêtes + tous les neutres : pas de pastille d'axe.
+        // Boss : disque blanc central.
         let axisDot = null;
-        if (!isBeast) {
+        if (!isBeast && !isNeutral) {
           if (isBoss) {
-            // Disque blanc central rayon sz*0.4
             axisDot = this.add.circle(unit.x, unit.y, sz * 0.4, 0xffffff, 1).setDepth(51);
           } else {
             const axColor = Theme.AXC_INT[shape.ax] || 0xffffff;
             const dotR = Math.max(1.5, sz * 0.28);
             axisDot = this.add.circle(unit.x, unit.y, dotR, axColor, 1).setDepth(51);
           }
+        } else if (isCampBoss) {
+          // Boss de camp : disque blanc central (signature visuelle des boss).
+          axisDot = this.add.circle(unit.x, unit.y, sz * 0.4, 0xffffff, 1).setDepth(51);
         }
 
         if (unit.ownerId === myId) {
@@ -969,6 +1019,28 @@ class MainScene extends Phaser.Scene {
         const freeze = null;
 
         this.unitSprites[id] = [sprite, barBg, barFill, badge, axisDot, freeze];
+
+        // ── POP D'APPARITION (juice §11.3) : scale 0 → 1 en 150ms, Back.easeOut ──
+        sprite.setScale(sprite._baseScaleX * 0.1, sprite._baseScaleY * 0.1);
+        if (axisDot) axisDot.setScale(0.1);
+        this.tweens.add({
+          targets: sprite,
+          scaleX: sprite._baseScaleX,
+          scaleY: sprite._baseScaleY,
+          duration: 180, ease: 'Back.easeOut',
+        });
+        if (axisDot) this.tweens.add({ targets: axisDot, scale: 1, duration: 180, ease: 'Back.easeOut' });
+
+        // ── PULSE GLOW pour les boss (juice §11.8) — outer oscille subtilement ──
+        if (isBoss && sprite.preFX && sprite.preFX.list && sprite.preFX.list.length) {
+          const glowFX = sprite.preFX.list[0];
+          const gpBoss = Theme.GLOW.unitBoss;
+          this.tweens.add({
+            targets: glowFX,
+            outerStrength: { from: gpBoss.outer * 0.85, to: gpBoss.outer * 1.15 },
+            duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+          });
+        }
 
       } else if (posChanged || hpChanged) {
         const [sprite, , barFill, badge] = this.unitSprites[id];

@@ -80,6 +80,30 @@ const Minimap = (() => {
       ctx.fillRect(u.x * sx - 1, u.y * sy - 1, 2, 2);
     }
 
+    // Camps PvE — losange rouge clignotant si pas nettoyé
+    const camps = state.camps || [];
+    if (camps.length) {
+      const pulse = (Math.sin(Date.now() / 350) + 1) / 2; // 0..1
+      ctx.save();
+      for (const c of camps) {
+        const px = c.x * sx, py = c.y * sy;
+        if (c.cleared) {
+          // Camp nettoyé : losange gris discret
+          ctx.fillStyle = 'rgba(100,116,139,0.55)';
+        } else {
+          ctx.fillStyle = `rgba(239,68,68,${0.55 + pulse * 0.4})`;
+        }
+        ctx.beginPath();
+        ctx.moveTo(px, py - 3);
+        ctx.lineTo(px + 3, py);
+        ctx.lineTo(px, py + 3);
+        ctx.lineTo(px - 3, py);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     // Viewport caméra (cyan)
     if (phaserCamera) {
       const cam = phaserCamera;

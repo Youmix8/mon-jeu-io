@@ -59,7 +59,7 @@ const SpellCast = (() => {
     ghost.fillStyle(color, 0.12);
     const costIcon = (sp.costType === 'faith') ? '🙏' : '🔮';
     label = scene.add.text(0, 0, `${sp.icon} ${sp.name} (${sp.cost} ${costIcon}) — clic gauche pour lancer, Échap pour annuler`, {
-      fontSize: '13px', fontFamily: 'Quicksand', color: '#fff', backgroundColor: 'rgba(15,23,42,0.85)', padding: { x: 8, y: 5 },
+      fontSize: '13px', fontFamily: 'Inter', color: '#fff', backgroundColor: 'rgba(15,23,42,0.85)', padding: { x: 8, y: 5 },
     }).setDepth(96).setOrigin(0.5, 1).setScrollFactor(0);
     label.setPosition(scene.scale.width / 2, scene.scale.height - 12);
   }
@@ -104,7 +104,7 @@ const SpellCast = (() => {
     // Toast vite-fait (réutilise label si possible, sinon nouveau)
     if (!scene) return;
     const t = scene.add.text(scene.scale.width / 2, scene.scale.height - 60, msg, {
-      fontSize: '14px', fontFamily: 'Quicksand', color: '#fff',
+      fontSize: '14px', fontFamily: 'Inter', color: '#fff',
       backgroundColor: 'rgba(220,38,38,0.92)', padding: { x: 10, y: 6 },
     }).setOrigin(0.5, 1).setDepth(120).setScrollFactor(0);
     scene.tweens.add({ targets: t, alpha: 0, duration: 1400, ease: 'Quad.easeIn', onComplete: () => t.destroy() });
