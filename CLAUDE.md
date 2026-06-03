@@ -233,7 +233,7 @@ Format multi-lignes via heredoc, avec :
 | 1 | **Boats sans combat naval** : `damage: 0, range: 0` → pas d'attaque entre bateaux | Latent, non prioritaire |
 | 2 | ~~**IA bot ignore le naval**~~ | ✅ RÉSOLU (commit `976387c`) — voir botTick : construit port, spawn bateaux, wave navale (embarque/traverse/débarque) |
 | 3 | ~~**Passifs tech décoratifs**~~ | ✅ RÉSOLU (commits `b47f69c` + `46f164c`) — 25/25 passifs actifs. Les 3 derniers ont été ajoutés : `blessing` (+10% HP max all units), `lightning` (vision +30% magie/undead), et `reveal_enemy_techs` remplacé par **omniscience minimap** (tech renaissance = vois tous les mouvements ennemis en permanence sur la mini-carte). Visualisation publique : chaque tech débloquée affiche un badge emoji autour du HDV + halo pulsant pour les passifs de zone (prayer/citadel/empire) — visibles par TOUS les joueurs (ennemis voient tes passifs dès qu'ils voient ton HDV). |
-| 4 | **Debug panel accessible en prod** (touche `` ` ``) | Cheat possible — à gater par env var |
+| 4 | ~~**Debug panel / handlers debug accessibles en prod**~~ | ✅ RÉSOLU (commit `7c56ce8`) — handlers `debugSpawn`/`debugCastPortal`/`_legacyCastSpell` gatés `NODE_ENV==='production'` (render.yaml met NODE_ENV=production). |
 | 5 | **HUD double 👥 emoji** (pop + unit count) | UX mineur |
 | 6 | **Pas de feedback "port nécessite eau adjacente"** | UX |
 | 7 | **Pas de tutoriel intégré** | Onboarding |
@@ -382,31 +382,73 @@ Factions neutres dans `gameState.units` via `ownerId` spécial (pas de canal sé
 neutres ne s'attaquent pas entre eux. `isNeutralOwner(id)`. Miroir client
 `NEUTRAL_FACTIONS` + `getOwnerDisplay()` (MainScene.js).
 
-- **A — Villages barbares** : garnison 2 soldats (HP50/dmg8) ; capture bloquée tant
-  qu'un défenseur vit (`garrisonAlive` dans la section 3.5 capture). Drop +8 gold.
-  Raids : village neutre > 5 min → 2 barbares/60s vers le joueur proche, cap 6 actifs.
-- **B — Camps de bandits** : 2 camps (5 mobs + 1 boss elite_guard HP400). `gameState.camps`
+- **A — Villages barbares (raids)** : PLUS DE GARNISON (retirée — les 2 défenseurs
+  bloquaient parfois la capture). Villages **librement capturables** (1 équipe dans le
+  rayon 70 px pendant 10 s). Raids : village neutre > 5 min → 2 barbares/60s vers le
+  joueur proche, cap 6 actifs. Drop +8 gold/barbare.
+- **B — Camps de bandits** : 2 camps (5 mobs + 1 boss elite_guard **HP 320**). `gameState.camps`
   (broadcasté light, toujours visible minimap). Clear → +150 gold + 1 unité gratuite.
 - **D — Faune** : 10 paquets boar/wolf, mode `wander`, riposte si attaquée, drop +5 gold.
 - **IA bot** : menace barbare < 600px HDV → repli défensif 30s (`bot.botState.defenseUntil`).
-- **Reset** : `spawnAllVillageGarrisons()` + `spawnAllCampMobs()` + `spawnAllFauna()`
-  appelés après chaque `generateVillages`/`generateCamps` (init + 3 resets).
+- **Reset** : `spawnAllCampMobs()` + `spawnAllFauna()` après chaque `generateVillages`/
+  `generateCamps` (4 chemins : init, resetMatch, zombie-recovery, no-humans, config-map).
 - **Events** : `barbarianRaid`, `campCleared` (network.js → MainScene kill feed).
-- **Drops gold** centralisés dans `onNeutralUnitKilled()` (appelé aux 4 sites de kill :
-  combat ciblé, IDLE, tour, citadelle).
+- **Drops gold + clear de camp** centralisés dans `onNeutralUnitKilled()` (appelé aux 5
+  sites de kill : combat ciblé, IDLE, tour, citadelle, splash fire_elemental).
+- **Helpers ciblage** : `sameSide(a,b)` (neutres alliés entre eux), `areAllied(a,b)` (pacte
+  diplomatique entre joueurs), `friendly(a,b)` = les deux. Utilisés dans tous les scans.
+- **Gating unités boss** : `UNIT_UNLOCK_TECH` (reverse-map depuis `node.unlocks.units`) →
+  god_avatar/arcane_dragon/angel/fire_elemental exigent leur tech tier 5-6.
 
-⚠️ Valeurs d'équilibrage (garnison/raid/camp/faune) en constantes en tête de `server.js`
+⚠️ Valeurs d'équilibrage (raid/camp/faune) en constantes en tête de `server.js`
 (bloc « Faction neutre PvE »). Ajuster là.
+
+### Audit complet (session pve-on-main) — corrigé & déployé (`7c56ce8`)
+Anti-cheat debug gaté en prod · unités boss gatées par tech · pactes respectés par le
+ciblage des unités (pas que les tours) · splash fire_elemental crédite kills/drops/clear ·
+3e reset (config-map) régénère camps+faune · kill feed espèce de faune.
+**Restant à trier (NON corrigé, voir historique)** : passagers de bateau perdus à la mort ;
+contournement cap pop au débarquement ; bot figé en défense si raid traîne ; raids qui
+collent à l'ancienne position ; faune kitée sans leash ; `roads` passif décoratif.
 
 ---
 
-**Dernière mise à jour** : commit `e5dfba7` (session pve-on-main) — Ajout PvE complet
-(A villages barbares + raids, B camps de bandits, D faune dispersée) sur le code à jour.
-Re-porté après divergence de worktree (base périmée). Direction artistique verrouillée :
-technique hybride (PNG intacts + rig procédural), style cinématique lisible, ambiance
-chaude + glow faction néon, intensité juice SUBTILE.
-⚠️ Validation : serveur boote proprement avec toutes les entités PvE + ticks stables
-(testé via node direct). Rendu visuel client (tints, faune, minimap, kill feed) à
-confirmer en navigateur réel — non vérifiable en preview headless cette session.
-Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier commit
-de ta session.
+## 🎨 PROCHAINE TÂCHE — REFONTE VISUELLE « NÉON / OBSIDIENNE » (re-skin client)
+
+**Objectif** : re-skiner le rendu client dans un style **néon sombre géométrique** (validé
+par Robin depuis un prototype Claude Artifact). Robin fournira un **spec design détaillé**
+(palette hex, formes par rôle, glow, rayons laser, n° de niveau au centre des HDV/villages,
+couleurs néon = équipe, HUD, minimap, fog) — à coller en début de session.
+
+**Périmètre STRICT** : rendu **client uniquement**. ZÉRO changement serveur/gameplay/réseau
+(déjà audité/équilibré). On garde **Phaser 3.90** (pas de réécriture Canvas).
+
+**Architecture recommandée (propre)** :
+1. Créer `public/js/config/theme.js` = tokens de design (hex équipes/ressources, params glow,
+   tailles, formes par type). Source de vérité unique (pas de hex éparpillés).
+2. `sprite-factory.js` : générer les **textures géométriques** (formes blanches/neutres) une
+   fois via `generateTexture`, tintées par couleur d'équipe à l'usage. (Remplace l'usage des
+   PNG pour les unités — les PNG restent dans le repo mais ne sont plus rendus.)
+3. Glow néon = `sprite.postFX.addGlow(couleur, outer, inner)` (WebGL, déjà utilisé) — PAS de
+   shadowBlur. Rayons laser = Graphics (segment) + emitter de particules + tween de fade.
+4. N° de niveau HDV/village = `this.add.text` centré + glow.
+5. Encodage : **équipe = couleur néon (tint+glow)**, **rôle = forme**, **axe = couleur interne**.
+
+**Méthode** : worktree dédié, **incrémental** (unités → HDV/villages → projectiles → HUD →
+minimap → fog), preview + commit à chaque étape. **Pièges** : respecter le depth ordering
+(section Conventions visuelles) et `_baseScaleX/_baseScaleY` (JAMAIS lire `sprite.scaleX/Y`).
+Fichiers clés : `sprite-factory.js`, `scenes/MainScene.js` (`_syncUnits`/`_syncVillages`/HDV/
+kill feed/projectiles), `minimap.js`, `utils/animations.js`, `config/entitiesConfig.js`.
+
+**Déploiement** : tester en navigateur réel (la preview headless ne boote pas Phaser de façon
+fiable — valider le serveur via client socket, le visuel via vrai navigateur), puis
+`git push origin HEAD:main` → Render redéploie (~3 min). URL : https://mon-jeu-io-17dn.onrender.com
+
+---
+
+**Dernière mise à jour** : commit `7c56ce8` (session pve-on-main) — PvE complet (villages
+barbares+raids SANS garnison, camps, faune) + audit complet 4 zones avec correctifs sûrs
+(anti-cheat debug gaté, unités boss gatées par tech, pactes respectés en combat, splash
+fire_elemental crédité, resets PvE complets). Prochain chantier : **refonte visuelle néon**
+(re-skin client Phaser, gameplay intact) — spec design fourni par Robin en début de session.
+Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier commit de ta session.
