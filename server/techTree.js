@@ -171,9 +171,9 @@ const TECH_TREE = {
   },
   renaissance: {
     id: 'renaissance', axis: 'science', tier: 6, name: 'Renaissance', icon: '🌟',
-    desc: 'END NODE. Débloque la Garde d\'Élite + révèle les techs des ennemis.',
+    desc: 'END NODE. Débloque la Garde d\'Élite + omniscience minimap : tu vois en permanence TOUS les mouvements ennemis (HDV, villages, unités, bâtiments) sur la mini-carte, même dans le fog of war.',
     cost: 250, requires: ['printing', 'citadel', 'gunpowder'],
-    unlocks: { units: ['elite_guard'], passives: ['reveal_enemy_techs'] },
+    unlocks: { units: ['elite_guard'], passives: ['minimap_omniscience'] },
     pos: pos('science', 6, 1),
   },
 
@@ -197,16 +197,16 @@ const TECH_TREE = {
 
   pyromancy: {
     id: 'pyromancy', axis: 'magic', tier: 2, name: 'Pyromancie', icon: '🔥',
-    desc: 'Sort Boule de feu — AoE dégâts (30 mana, rayon 80, 30 dmg).',
+    desc: 'Maitrise du feu : unites magie +30% degats (passif).',
     cost: 30, requires: ['elements_study'],
-    unlocks: { spells: ['fireball'] },
+    unlocks: { passives: ['magic_dmg_boost'] },
     pos: pos('magic', 2, -1),
   },
   cryomancy: {
     id: 'cryomancy', axis: 'magic', tier: 2, name: 'Cryomancie', icon: '❄️',
-    desc: 'Sort Gel — immobilise les unités ennemies 5s (25 mana).',
+    desc: 'Maitrise du froid : 20% chance de ralentir la cible 2s a chaque tir magique.',
     cost: 30, requires: ['elements_study'],
-    unlocks: { spells: ['freeze'] },
+    unlocks: { passives: ['magic_slow_chance'] },
     pos: pos('magic', 2, 0),
   },
   mage_tower: {
@@ -219,23 +219,23 @@ const TECH_TREE = {
 
   lightning: {
     id: 'lightning', axis: 'magic', tier: 3, name: 'Foudre', icon: '⚡',
-    desc: 'Sort Éclair en chaîne — frappe jusqu\'à 5 cibles proches.',
+    desc: 'Eclair : unites magie +25% vitesse + vision +30%.',
     cost: 60, requires: ['pyromancy'],
-    unlocks: { spells: ['chain_lightning'] },
+    unlocks: { passives: ['magic_speed_vision'] },
     pos: pos('magic', 3, -1.2),
   },
   teleportation: {
     id: 'teleportation', axis: 'magic', tier: 3, name: 'Téléportation', icon: '🌀',
-    desc: 'Sort Portail — téléporte tes unités sélectionnées à une position.',
+    desc: 'Mobilite magique : toutes tes unites +15% vitesse de deplacement.',
     cost: 60, requires: ['cryomancy'],
-    unlocks: { spells: ['portal'] },
+    unlocks: { passives: ['all_speed_boost'] },
     pos: pos('magic', 3, 0),
   },
   enchantment: {
     id: 'enchantment', axis: 'magic', tier: 3, name: 'Enchantement', icon: '✨',
-    desc: 'Buff actif : +50% dégâts à tes unités pendant 20s (CD 90s).',
+    desc: 'Enchantement : generation de mana de tes batiments x1.5.',
     cost: 50, requires: ['mage_tower'],
-    unlocks: { spells: ['enchant'] },
+    unlocks: { passives: ['mana_gen_boost'] },
     pos: pos('magic', 3, 1.2),
   },
 
@@ -248,24 +248,24 @@ const TECH_TREE = {
   },
   illusion: {
     id: 'illusion', axis: 'magic', tier: 4, name: 'Illusion', icon: '👤',
-    desc: 'Sort Mirage : crée 3 copies illusoires d\'une unité (0 dmg, mêmes HP).',
+    desc: 'Illusion : tes unites magiques +15% HP max.',
     cost: 80, requires: ['teleportation'],
-    unlocks: { spells: ['mirage'] },
+    unlocks: { passives: ['magic_hp_boost'] },
     pos: pos('magic', 4, 0),
   },
   curses: {
     id: 'curses', axis: 'magic', tier: 4, name: 'Malédictions', icon: '🧪',
-    desc: 'Sort Affaiblissement : -50% dégâts ennemis dans une zone pendant 15s.',
+    desc: 'Maledictions : ennemis a <150px de tes mages subissent -15% degats.',
     cost: 80, requires: ['enchantment'],
-    unlocks: { spells: ['weaken'] },
+    unlocks: { passives: ['magic_curse_aura'] },
     pos: pos('magic', 4, 1.2),
   },
 
   elemental_summon: {
     id: 'elemental_summon', axis: 'magic', tier: 5, name: 'Convocation élémentaire', icon: '🌋',
-    desc: 'Invoque un Élémentaire de feu pendant 60s (HP 250, dmg 25 AoE).',
+    desc: 'Debloque la production d Elementaires de feu (250 HP, AoE 40, 60s).',
     cost: 150, requires: ['lightning', 'pyromancy'],
-    unlocks: { spells: ['summon_elemental'] },
+    unlocks: { units: ['fire_elemental'] },
     pos: pos('magic', 5, -1),
   },
   lich: {
@@ -277,17 +277,17 @@ const TECH_TREE = {
   },
   time_mastery: {
     id: 'time_mastery', axis: 'magic', tier: 5, name: 'Maîtrise du temps', icon: '⏳',
-    desc: 'Sort Stase : fige toutes les unités d\'une zone pendant 8s (alliées et ennemies).',
+    desc: 'Maitrise du temps : cooldown d attaque de tes unites magie -20%.',
     cost: 180, requires: ['illusion', 'curses'],
-    unlocks: { spells: ['stasis'] },
+    unlocks: { passives: ['magic_atk_speed'] },
     pos: pos('magic', 5, 1),
   },
 
   arcane_avatar: {
     id: 'arcane_avatar', axis: 'magic', tier: 6, name: 'Avatar des Arcanes', icon: '🐉',
-    desc: 'END NODE. Invoque le Dragon Arcanique (HP 800, dmg 40 AoE, vol). 1× par partie.',
+    desc: 'Debloque la production du Dragon arcanique (800 HP, vol, 60s par invoc).',
     cost: 250, requires: ['elemental_summon', 'lich'],
-    unlocks: { spells: ['arcane_dragon'] },
+    unlocks: { units: ['arcane_dragon'] },
     pos: pos('magic', 6, 0),
   },
 
@@ -333,16 +333,16 @@ const TECH_TREE = {
 
   blessing: {
     id: 'blessing', axis: 'religion', tier: 3, name: 'Bénédiction', icon: '✝️',
-    desc: 'Faveur : +30% HP max et regen aux unités dans une zone pendant 30s.',
+    desc: 'Benediction : toutes tes unites +10% HP max + 0.5 HP/s regen passive.',
     cost: 60, requires: ['temple'],
-    unlocks: { spells: ['blessing'] },
+    unlocks: { passives: ['all_hp_regen'] },
     pos: pos('religion', 3, -1.2),
   },
   purifying_light: {
     id: 'purifying_light', axis: 'religion', tier: 3, name: 'Lumière purificatrice', icon: '🌟',
-    desc: 'Faveur : dégâts massifs aux unités magiques/undead dans une zone.',
+    desc: 'Lumiere purificatrice : Inquisiteur degats vs magie/undead x3 (au lieu de x2).',
     cost: 60, requires: ['inquisition'],
-    unlocks: { spells: ['purifying_light'] },
+    unlocks: { passives: ['inquisitor_buff'] },
     pos: pos('religion', 3, 0),
   },
   sacred_order: {
@@ -362,9 +362,9 @@ const TECH_TREE = {
   },
   crusade: {
     id: 'crusade', axis: 'religion', tier: 4, name: 'Croisade', icon: '⚔️',
-    desc: 'Faveur : tous tes Chevaliers Sacrés gagnent +50% vitesse et dégâts (60s).',
+    desc: 'Croisade : +25% degats de toutes tes unites contre HDV et batiments.',
     cost: 100, requires: ['sacred_order'],
-    unlocks: { spells: ['crusade'] },
+    unlocks: { passives: ['anti_building_dmg'] },
     pos: pos('religion', 4, 0),
   },
   martyrs: {
@@ -377,16 +377,16 @@ const TECH_TREE = {
 
   guardian_angel: {
     id: 'guardian_angel', axis: 'religion', tier: 5, name: 'Ange Gardien', icon: '👼',
-    desc: 'Invoque un Ange (HP 300, dmg 20, vol, regen alliés proches) pendant 90s.',
+    desc: 'Debloque la production de l Ange (300 HP, vol, aura soin allies).',
     cost: 180, requires: ['cathedral'],
-    unlocks: { spells: ['summon_angel'] },
+    unlocks: { units: ['angel'] },
     pos: pos('religion', 5, -1),
   },
   excommunication: {
     id: 'excommunication', axis: 'religion', tier: 5, name: 'Excommunication', icon: '🚫',
-    desc: 'Faveur : retire les buffs ennemis d\'une zone + -30% vitesse pendant 30s.',
+    desc: 'Excommunication : ennemis à <150px d une unité Religion -20% dégâts.',
     cost: 150, requires: ['purifying_light', 'inquisition'],
-    unlocks: { spells: ['excommunicate'] },
+    unlocks: { passives: ['religion_curse_aura'] },
     pos: pos('religion', 5, 0),
   },
   unwavering_faith: {
@@ -399,9 +399,9 @@ const TECH_TREE = {
 
   divine_invocation: {
     id: 'divine_invocation', axis: 'religion', tier: 6, name: 'Invocation divine', icon: '👁',
-    desc: 'END NODE. Invoque l\'Avatar du Dieu (HP 1500, dmg 60 AoE, peur en zone). 1× par partie.',
+    desc: 'Debloque la production de l Avatar divin (1500 HP, peur, AoE 60).',
     cost: 280, requires: ['guardian_angel', 'unwavering_faith'],
-    unlocks: { spells: ['divine_avatar'] },
+    unlocks: { units: ['god_avatar'] },
     pos: pos('religion', 6, 0),
   },
 };

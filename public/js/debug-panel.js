@@ -1,0 +1,297 @@
+// ════════════════════════════════════════════════════════════════════
+// DebugPanel — panneau debug bottom-right pour spawn + tuning tailles.
+//
+// DEBUG — à retirer après branchement arbre tech.
+//
+// Modes :
+//   SPAWN : boutons par catégorie qui spawnent gratuitement au curseur.
+//   TUNING : clic sur un sprite en jeu → popup slider scale 0.3-3.0
+//           Le scale s'applique IMMÉDIATEMENT sur toutes les instances du type.
+//           Bouton EXPORTER CONFIG → console.log d'un bloc prêt à coller.
+//
+// Touche H : toggle visibilité du panneau.
+// ════════════════════════════════════════════════════════════════════
+
+const DebugPanel = (() => {
+  let panel = null, popup = null;
+  let mode  = 'spawn';      // 'spawn' | 'tuning'
+  // Caché par défaut depuis le branchement arbre tech.
+  // Réactivable via Ctrl+Shift+D ou en ajoutant ?debug=1 à l'URL.
+  let visible = false;
+  let pendingSpawn = null;  // { entityType } — clic sur la map = spawn
+  let currentTunedType = null;
+  // Overrides scale appliqués via tuning (entityType → scale)
+  const scaleOverrides = {};
+
+  function init() {
+    // Active si ?debug=1 dans l'URL
+    if (typeof location !== 'undefined' && /[?&]debug=1\b/.test(location.search)) {
+      visible = true;
+    }
+    panel = document.createElement('div');
+    panel.id = 'debug-panel';
+    if (!visible) panel.classList.add('hidden');
+    document.body.appendChild(panel);
+
+    popup = document.createElement('div');
+    popup.id = 'debug-tuning-popup';
+    document.body.appendChild(popup);
+
+    _render();
+    _bindKeys();
+  }
+
+  function _bindKeys() {
+    // Toggle DEBUG : touche backtick ` (au-dessus de Tab).
+    // PAS Ctrl+Shift+D : conflit avec Chrome "Save all tabs as bookmarks" qui
+    // vole le focus → keyup de D perdu → caméra dérive à droite à l'infini.
+    window.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (e.key === '`' || e.key === '~' || e.code === 'Backquote') {
+        e.preventDefault();
+        visible = !visible;
+        panel.classList.toggle('hidden', !visible);
+      }
+    });
+  }
+
+  function _categoriesOfEntities() {
+    if (typeof ENTITIES_CONFIG === 'undefined') return {};
+    const out = { science: [], magic: [], religion: [], spells: [] };
+    for (const [key, cfg] of Object.entries(ENTITIES_CONFIG)) {
+      if (cfg.category && out[cfg.category]) out[cfg.category].push({ key, cfg });
+    }
+    // Sorts (en dur, mappés aux events serveur)
+    out.spells = [
+      { key: 'fireball', label: '🔥 Boule de feu' },
+      { key: 'freeze',   label: '❄️ Gel' },
+      { key: 'blessing', label: '✝️ Bénédiction' },
+      { key: 'purifying_light', label: '🌟 Lumière pure' },
+    ];
+    return out;
+  }
+
+  function _render() {
+    const cats = _categoriesOfEntities();
+    const modeLabel = mode === 'spawn' ? '🎯 MODE SPAWN' : '📏 MODE TUNING';
+
+    let html = `
+      <button class="mode-toggle" id="dbg-mode-toggle">${modeLabel} (clic pour basculer)</button>
+      <div class="debug-warn">DEBUG — à retirer après branchement arbre tech</div>
+      <h3>${mode === 'spawn' ? 'Spawn (clic bouton → clic map)' : 'Tuning (clic sprite en jeu)'}</h3>
+    `;
+
+    if (mode === 'spawn') {
+      const blocks = [
+        { title: '🔬 Science',  list: cats.science  || [] },
+        { title: '🔮 Magie',    list: cats.magic    || [] },
+        { title: '✝️ Religion', list: cats.religion || [] },
+      ];
+      for (const b of blocks) {
+        html += `<div class="debug-section"><div class="debug-section-title">${b.title}</div>`;
+        for (const e of b.list) {
+          html += `<button data-spawn="${e.key}">${e.key}</button>`;
+        }
+        html += '</div>';
+      }
+      html += `<div class="debug-section"><div class="debug-section-title">🪄 Sorts (au curseur)</div>`;
+      for (const s of cats.spells) {
+        html += `<button data-spell="${s.key}">${s.label}</button>`;
+      }
+      html += `</div>`;
+      html += `<div class="debug-section" style="font-size:10px;color:#94a3b8;">
+        Raccourcis : <b>1</b>🔥 <b>2</b>❄️ <b>3</b>✝️ <b>4</b>🌟 <b>5</b>🌀portal
+      </div>`;
+    } else {
+      html += `<div class="debug-section">Clic sur un sprite en jeu pour ouvrir le slider scale.</div>`;
+      html += `<button class="export-config" id="dbg-export">📋 EXPORTER CONFIG</button>`;
+      const overrideKeys = Object.keys(scaleOverrides);
+      if (overrideKeys.length > 0) {
+        html += `<div class="debug-section"><div class="debug-section-title">Overrides actifs</div>`;
+        for (const k of overrideKeys) {
+          html += `<div>${k} → ${scaleOverrides[k].toFixed(2)}</div>`;
+        }
+        html += `</div>`;
+      }
+    }
+
+    panel.innerHTML = html;
+
+    document.getElementById('dbg-mode-toggle').addEventListener('click', () => {
+      mode = (mode === 'spawn') ? 'tuning' : 'spawn';
+      pendingSpawn = null;
+      popup.style.display = 'none';
+      _render();
+    });
+
+    // Spawn buttons
+    panel.querySelectorAll('[data-spawn]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        pendingSpawn = btn.getAttribute('data-spawn');
+        btn.style.outline = '2px solid #f59e0b';
+        setTimeout(() => { btn.style.outline = ''; }, 400);
+      });
+    });
+    // Spell buttons → cast au curseur immédiatement (utilise dernier worldX/Y)
+    panel.querySelectorAll('[data-spell]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const main = _getMainScene();
+        if (!main || !main.input) return;
+        const ptr = main.input.activePointer;
+        if (typeof Network !== 'undefined') Network.castSpell(btn.getAttribute('data-spell'), ptr.worldX, ptr.worldY);
+      });
+    });
+    if (mode === 'tuning') {
+      const ex = document.getElementById('dbg-export');
+      if (ex) ex.addEventListener('click', _exportConfig);
+    }
+  }
+
+  function _getMainScene() {
+    if (!window.game || !window.game.scene) return null;
+    return window.game.scene.scenes.find(s => s.scene && s.scene.key === 'MainScene');
+  }
+
+  // Appelé depuis MainScene quand le joueur clique sur la map (mode SPAWN)
+  function tryHandleMapClick(worldX, worldY) {
+    if (mode !== 'spawn' || !pendingSpawn) return false;
+    if (typeof Network !== 'undefined') Network.debugSpawn(pendingSpawn, worldX, worldY);
+    pendingSpawn = null;
+    return true;
+  }
+
+  // Appelé depuis MainScene quand le joueur clique sur un sprite (mode TUNING)
+  function tryHandleSpriteClick(unitType, screenX, screenY) {
+    if (mode !== 'tuning' || !unitType) return false;
+    currentTunedType = unitType;
+    _openPopup(unitType, screenX, screenY);
+    return true;
+  }
+
+  function _openPopup(type, sx, sy) {
+    const cfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[type] : null;
+    const baseScale = scaleOverrides[type] != null ? scaleOverrides[type] : (cfg ? cfg.scale : 1.0);
+    popup.style.display = 'block';
+    popup.style.left = Math.min(window.innerWidth - 240, sx + 20) + 'px';
+    popup.style.top  = Math.min(window.innerHeight - 140, sy + 20) + 'px';
+    popup.innerHTML = `
+      <div class="name">${type}</div>
+      <div>Scale : <span id="dbg-scale-val">${baseScale.toFixed(2)}</span></div>
+      <input type="range" id="dbg-scale-slider" min="0.3" max="3.0" step="0.05" value="${baseScale}" />
+      <div class="row">
+        <button id="dbg-scale-minus">−</button>
+        <button id="dbg-scale-plus">+</button>
+        <button id="dbg-scale-reset">Reset 1.0</button>
+        <button id="dbg-scale-close" style="margin-left:auto;">×</button>
+      </div>
+    `;
+    const slider = document.getElementById('dbg-scale-slider');
+    const valEl  = document.getElementById('dbg-scale-val');
+    const apply = (v) => {
+      const f = Math.max(0.3, Math.min(3.0, parseFloat(v)));
+      scaleOverrides[type] = f;
+      valEl.textContent = f.toFixed(2);
+      slider.value = f;
+      _applyScaleLive(type, f);
+    };
+    slider.addEventListener('input', (e) => apply(e.target.value));
+    document.getElementById('dbg-scale-minus').addEventListener('click', () => apply((parseFloat(slider.value) - 0.05).toFixed(2)));
+    document.getElementById('dbg-scale-plus' ).addEventListener('click', () => apply((parseFloat(slider.value) + 0.05).toFixed(2)));
+    document.getElementById('dbg-scale-reset').addEventListener('click', () => apply(1.0));
+    document.getElementById('dbg-scale-close').addEventListener('click', () => { popup.style.display = 'none'; });
+  }
+
+  // Applique le scale en direct sur toutes les instances en jeu.
+  // ATTENTION : MainScene._updateUnitBarPositions() applique un wobble Y permanent qui
+  // pollue sprite.scaleY chaque frame. Il faut donc :
+  //   - Lire/écrire UNIQUEMENT _baseScaleX / _baseScaleY (référence stable)
+  //   - Ne JAMAIS multiplier par sprite.scaleY (qui contient le wobble)
+  function _applyScaleLive(type, scale) {
+    const main = _getMainScene();
+    if (!main) return;
+    if (typeof ENTITIES_CONFIG !== 'undefined' && ENTITIES_CONFIG[type]) {
+      ENTITIES_CONFIG[type].scale = scale;
+    }
+
+    // ── Unités ─────────────────────────────────────────────────────
+    for (const arr of Object.values(main.unitSprites || {})) {
+      const s = arr && arr[0];
+      if (!s || s._unitType !== type) continue;
+      const oldMult = s._scaleMult || 1.0;
+      const ratio = scale / oldMult;
+      const newBaseX = (s._baseScaleX || s.scaleX) * ratio;
+      const newBaseY = (s._baseScaleY || s.scaleY) * ratio;
+      s._baseScaleX = newBaseX;
+      s._baseScaleY = newBaseY;
+      s.setScale(newBaseX, newBaseY);
+      s._scaleMult = scale;
+      const overlay = arr[4];
+      if (overlay && overlay.setScale) overlay.setScale(overlay.scaleX * ratio, overlay.scaleY * ratio);
+    }
+
+    // ── Bâtiments ──────────────────────────────────────────────────
+    // Note : les sprites bâtiments n'ont pas de wobble, donc on peut directement
+    // multiplier scaleX/scaleY. On scale aussi l'icon overlay si placeholder.
+    for (const obj of Object.values(main.buildingSprites || {})) {
+      const s = obj && obj.bg;
+      if (!s || s._unitType !== type) continue;
+      const oldMult = s._scaleMult || (ENTITIES_CONFIG[type] ? ENTITIES_CONFIG[type].scale : 2.0);
+      const ratio = scale / oldMult;
+      if (s.setScale && s.scaleX != null) {
+        s.setScale(s.scaleX * ratio, s.scaleY * ratio);
+      } else if (s.setDisplaySize && s.width != null) {
+        s.setDisplaySize(s.width * ratio, s.height * ratio);
+      }
+      s._scaleMult = scale;
+      if (obj.icon && obj.icon.setScale) obj.icon.setScale(obj.icon.scaleX * ratio, obj.icon.scaleY * ratio);
+    }
+  }
+
+  function _exportConfig() {
+    if (typeof ENTITIES_CONFIG === 'undefined') {
+      alert('ENTITIES_CONFIG non chargé');
+      return;
+    }
+    const date = new Date().toISOString().slice(0, 10);
+    const lines = [];
+    lines.push(`// ═══════════════════════════════════════════════════════════════`);
+    lines.push(`// Scales ajustés via mode tuning — ${date}`);
+    lines.push(`// Recherche/remplace les "scale: X.X" dans entitiesConfig.js par les valeurs ci-dessous.`);
+    lines.push(`// ═══════════════════════════════════════════════════════════════`);
+    // Tri par catégorie pour lecture facilitée
+    const groups = { science: [], magic: [], religion: [] };
+    for (const [key, cfg] of Object.entries(ENTITIES_CONFIG)) {
+      const cat = cfg.category || 'science';
+      const sc = Number((cfg.scale || 1.0).toFixed(2));
+      (groups[cat] || groups.science).push({ key, sc, type: cfg.type });
+    }
+    for (const [cat, list] of Object.entries(groups)) {
+      if (list.length === 0) continue;
+      lines.push('');
+      lines.push(`// ── ${cat.toUpperCase()} (${list.length}) ──`);
+      // Sort: units before buildings, puis alpha
+      list.sort((a, b) => (a.type === b.type ? a.key.localeCompare(b.key) : a.type.localeCompare(b.type)));
+      for (const e of list) {
+        lines.push(`  ${e.key.padEnd(20)} scale: ${e.sc.toFixed(2)},`);
+      }
+    }
+    const txt = lines.join('\n');
+    console.log(txt);
+    // Tente de copier dans le presse-papier
+    const ok = (msg) => alert(msg);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(
+        () => ok(`✅ Config exportée et copiée dans le presse-papier (${Object.keys(ENTITIES_CONFIG).length} entités)\n\nColle dans entitiesConfig.js : remplace les "scale: X.X" par les valeurs.`),
+        () => ok('⚠️ Config affichée dans la console DevTools (presse-papier refusé par le navigateur).')
+      );
+    } else {
+      ok('Config affichée dans la console DevTools.');
+    }
+  }
+
+  function getMode() { return mode; }
+  function hasPendingSpawn() { return !!pendingSpawn; }
+  function isOpen() { return visible; }
+
+  return { init, tryHandleMapClick, tryHandleSpriteClick, getMode, hasPendingSpawn, isOpen };
+})();

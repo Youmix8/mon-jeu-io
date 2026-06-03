@@ -1,0 +1,30 @@
+# Render.com Blueprint — déploiement auto du jeu .io
+# Doc : https://render.com/docs/blueprint-spec
+#
+# Comment utiliser :
+#   1. Push ce repo sur GitHub (branche main).
+#   2. Sur Render.com : New + → "Blueprint" → connecte le repo
+#      OU : New + → "Web Service" → connecte le repo → Render détecte ce fichier
+#   3. Render créera automatiquement le service Web Node.js avec WebSockets activés.
+#
+# Notes :
+# - Le plan "free" suffit pour tester (le service dort après 15 min d'inactivité,
+#   premier visiteur attend ~30s pour le réveil — cold start).
+# - Pour une expérience smooth (pas de cold start), passer en "starter" ($7/mois).
+# - Socket.io fonctionne en WebSocket sur Render (sticky sessions auto-gérés).
+
+services:
+  - type: web
+    name: mon-jeu-io
+    runtime: node
+    plan: free                   # Change en "starter" si tu veux pas de cold start
+    region: frankfurt            # Plus proche de la France ; alternatives : oregon / singapore
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true             # Re-deploy automatique à chaque push sur main
+    healthCheckPath: /           # Render ping cette URL pour vérifier que le serveur vit
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production

@@ -2,7 +2,8 @@ const Network = (() => {
   let socket = null;
   let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, playerSummary: [], fog: null };
   let myId   = null;
-  let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50 };
+  let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50, mapType: 'continental', mapSize: 'medium' };
+  let waterTiles = null;  // Uint8Array, set par init
   let config  = {
     unitTypes: {}, techTree: {}, hdvLevels: [],
     villageRadius: 70, villageCaptureTicks: 200, villageMaxHp: 300,
@@ -22,12 +23,36 @@ const Network = (() => {
   let onMatchRestartedCallback   = null;
   let onVillageCapturedCallback  = null;
   let onVillageDestroyedCallback = null;
+  let onBarbarianRaidCallback    = null;
+  let onCampClearedCallback      = null;
   let onTechUnlockedCallback     = null;
   let onInitReceivedCallback     = null;
   let initReceived = false;
 
-  function init(playerName) {
-    socket = io({ auth: { name: playerName || '' } });
+  // ── Bump animation pour les compteurs HUD (Phase 6 glassmorphism) ──
+  // Met à jour textContent et déclenche l'anim value-bump (gain doré) /
+  // value-down (perte rouge) seulement si la valeur a changé.
+  function _bumpVal(el, valueStr) {
+    if (!el) return;
+    const old = el.textContent;
+    if (old === valueStr) return;
+    el.textContent = valueStr;
+    // Direction : tente une comparaison numérique pour choisir l'anim
+    const a = parseFloat(old);
+    const b = parseFloat(valueStr);
+    const cls = (!isNaN(a) && !isNaN(b) && b < a) ? 'value-down' : 'value-bump';
+    el.classList.remove('value-bump', 'value-down');
+    // reflow pour redémarrer l'anim si elle était déjà en cours
+    // (lecture forcée d'offsetWidth)
+    void el.offsetWidth;
+    el.classList.add(cls);
+  }
+
+  function init(playerName, mapOptions) {
+    const auth = { name: playerName || '' };
+    if (mapOptions && mapOptions.mapType) auth.mapType = mapOptions.mapType;
+    if (mapOptions && mapOptions.mapSize) auth.mapSize = mapOptions.mapSize;
+    socket = io({ auth });
 
     socket.on('init', (data) => {
       myId = data.playerId;
@@ -36,6 +61,14 @@ const Network = (() => {
       if (data.tileSize)  mapInfo.tileSize  = data.tileSize;
       if (data.gridW)     mapInfo.gridW     = data.gridW;
       if (data.gridH)     mapInfo.gridH     = data.gridH;
+      if (data.mapType)   mapInfo.mapType   = data.mapType;
+      if (data.mapSize)   mapInfo.mapSize   = data.mapSize;
+      // waterTiles : ArrayBuffer venant du serveur → Uint8Array
+      if (data.waterTiles) {
+        waterTiles = data.waterTiles instanceof ArrayBuffer
+          ? new Uint8Array(data.waterTiles)
+          : new Uint8Array(data.waterTiles);
+      }
       if (data.unitTypes)   config.unitTypes   = data.unitTypes;
       if (data.techTree)    config.techTree    = data.techTree;
       if (data.hdvLevels)   config.hdvLevels   = data.hdvLevels;
@@ -82,10 +115,26 @@ const Network = (() => {
         const elPr   = document.getElementById('my-pr');
         const elMana = document.getElementById('my-mana');
         const elFaith= document.getElementById('my-faith');
-        if (elGold) elGold.textContent = Math.floor(me.gold);
-        if (elPr)   elPr.textContent   = Math.floor(me.researchPoints || 0);
-        if (elMana) elMana.textContent = Math.floor(me.mana  || 0);
-        if (elFaith)elFaith.textContent= Math.floor(me.faith || 0);
+        if (elGold) _bumpVal(elGold, String(Math.floor(me.gold)));
+        if (elPr)   _bumpVal(elPr,   String(Math.floor(me.researchPoints || 0)));
+        if (elMana) _bumpVal(elMana, String(Math.floor(me.mana  || 0)));
+        if (elFaith)_bumpVal(elFaith,String(Math.floor(me.faith || 0)));
+        const elPop    = document.getElementById('my-pop');
+        const elPopMax = document.getElementById('my-pop-max');
+        if (elPop)    _bumpVal(elPop, String(Math.floor(me.populationUsed || 0)));
+        if (elPopMax) elPopMax.textContent = Math.floor(me.populationMax || 8);
+
+        // Affichage conditionnel mana/faith selon bâtiments possédés
+        const MAGIC_BLDGS = new Set(['sanctum', 'mage_tower']);
+        const RELIG_BLDGS = new Set(['altar', 'temple', 'cathedral']);
+        const myBuildings = (state.buildings || []).filter(b => b.ownerId === myId);
+        const hasMagic = myBuildings.some(b => MAGIC_BLDGS.has(b.type));
+        const hasFaith = myBuildings.some(b => RELIG_BLDGS.has(b.type))
+                       || Object.values(state.units || {}).some(u => u.ownerId === myId && u.type === 'pilgrim');
+        const elManaRow  = document.getElementById('my-mana-row');
+        const elFaithRow = document.getElementById('my-faith-row');
+        if (elManaRow)  elManaRow.style.display  = hasMagic ? 'inline' : 'none';
+        if (elFaithRow) elFaithRow.style.display = hasFaith ? 'inline' : 'none';
         if (elHp) {
           if (me.eliminated) {
             elHp.textContent = 'ÉLIMINÉ';
@@ -105,7 +154,7 @@ const Network = (() => {
 
       const elUnits = document.getElementById('my-unit-count');
       if (elUnits && myId) {
-        elUnits.textContent = Object.values(state.units || {}).filter(u => u.ownerId === myId).length;
+        _bumpVal(elUnits, String(Object.values(state.units || {}).filter(u => u.ownerId === myId).length));
       }
 
       const elWaiting = document.getElementById('waiting-msg');
@@ -118,6 +167,7 @@ const Network = (() => {
       // Rafraîchit le panneau HDV s'il est ouvert (gold, HP, techs en temps réel)
       if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible()) HdvPanel.refresh();
       if (typeof VillagePanel !== 'undefined' && VillagePanel.isVisible()) VillagePanel.refresh();
+      if (typeof BuildingInfoPanel !== 'undefined' && BuildingInfoPanel.isVisible()) BuildingInfoPanel.refresh();
       // Update léger des compteurs PR/Mana/Foi dans l'overlay tech (pas de rebuild SVG)
       if (typeof TechTreeOverlay !== 'undefined' && TechTreeOverlay.isOpen() && me) TechTreeOverlay.updateResources(me);
     });
@@ -148,15 +198,41 @@ const Network = (() => {
       if (onVillageDestroyedCallback) onVillageDestroyedCallback(data);
     });
 
+    socket.on('barbarianRaid', (data) => {
+      if (onBarbarianRaidCallback) onBarbarianRaidCallback(data);
+    });
+
+    socket.on('campCleared', (data) => {
+      if (onCampClearedCallback) onCampClearedCallback(data);
+    });
+
     socket.on('techUnlocked', (data) => {
+      // Update local state IMMÉDIATEMENT pour que refresh() voit la nouvelle tech
+      // (sans attendre le prochain broadcast gameState — sinon décalage visible)
+      if (data.playerId === myId && state.players && state.players[myId]) {
+        const me = state.players[myId];
+        me.unlockedTechs = me.unlockedTechs || [];
+        if (!me.unlockedTechs.includes(data.techId)) me.unlockedTechs.push(data.techId);
+      }
       if (onTechUnlockedCallback) onTechUnlockedCallback(data);
-      // Rafraîchit l'arbre s'il est ouvert
       if (typeof TechTreeOverlay !== 'undefined' && TechTreeOverlay.isOpen()) TechTreeOverlay.refresh();
     });
 
     socket.on('spellCast', (data) => {
       if (typeof SpellCast !== 'undefined') SpellCast.playCastAnim(data);
+      // Anim visuelle (sprite spell_*) via Animations helper si scène disponible
+      if (typeof Animations !== 'undefined' && window.game && window.game.scene && window.game.scene.scenes) {
+        const main = window.game.scene.scenes.find(s => s.scene && s.scene.key === 'MainScene');
+        if (main && main.add) Animations.animateSpellCast(main, data.spellId, data.x, data.y);
+      }
     });
+    socket.on('pilgrimExplosion', (data) => {
+      if (typeof Animations !== 'undefined' && window.game && window.game.scene && window.game.scene.scenes) {
+        const main = window.game.scene.scenes.find(s => s.scene && s.scene.key === 'MainScene');
+        if (main && main.add) Animations.animateSpellCast(main, 'purifying_light', data.x, data.y);
+      }
+    });
+    socket.on('unitSummoned', () => { /* visuel via _syncUnits */ });
 
     socket.on('gameOver', (data) => {
       if (onGameOverCallback) onGameOverCallback(data);
@@ -264,6 +340,28 @@ const Network = (() => {
   function buildBuilding(type, x, y, baseType, baseId) {
     if (socket) socket.emit('buildBuilding', { type, x, y, baseType, baseId });
   }
+  function sellBuilding(buildingId) {
+    if (socket) socket.emit('sellBuilding', { buildingId });
+  }
+  function embarkBoat(boatId, unitIds) {
+    if (socket) socket.emit('embarkBoat', { boatId, unitIds });
+  }
+  function disembarkBoat(boatId, destX, destY) {
+    if (socket) socket.emit('disembarkBoat', { boatId, destX, destY });
+  }
+  function isWaterAt(wx, wy) {
+    if (!waterTiles || !mapInfo.gridW || !mapInfo.tileSize) return false;
+    const tx = Math.floor(wx / mapInfo.tileSize);
+    const ty = Math.floor(wy / mapInfo.tileSize);
+    if (tx < 0 || tx >= mapInfo.gridW || ty < 0 || ty >= mapInfo.gridH) return false;
+    return waterTiles[ty * mapInfo.gridW + tx] === 1;
+  }
+  function debugSpawn(entityType, x, y) {
+    if (socket) socket.emit('debugSpawn', { entityType, x, y });
+  }
+  function debugCastPortal(unitIds, destX, destY) {
+    if (socket) socket.emit('debugCastPortal', { unitIds, destX, destY });
+  }
 
   function setOnSpawnFailed(cb)      { onSpawnFailedCallback = cb; }
   function setOnAttack(cb)           { onAttackCallback = cb; }
@@ -272,6 +370,8 @@ const Network = (() => {
   function setOnMatchRestarted(cb)   { onMatchRestartedCallback = cb; }
   function setOnVillageCaptured(cb)  { onVillageCapturedCallback = cb; }
   function setOnVillageDestroyed(cb) { onVillageDestroyedCallback = cb; }
+  function setOnBarbarianRaid(cb)    { onBarbarianRaidCallback = cb; }
+  function setOnCampCleared(cb)      { onCampClearedCallback = cb; }
   function setOnTechUnlocked(cb)     { onTechUnlockedCallback = cb; }
   function setOnInitReceived(cb)     { onInitReceivedCallback = cb; if (initReceived && cb) cb(); }
   function isInitReceived()          { return initReceived; }
@@ -279,13 +379,16 @@ const Network = (() => {
   function getMyId()                 { return myId; }
   function getMapInfo()              { return mapInfo; }
   function getConfig()               { return config; }
+  function getWaterTiles()           { return waterTiles; }
 
   return {
-    init, getState, getMyId, getMapInfo, getConfig,
+    init, getState, getMyId, getMapInfo, getConfig, getWaterTiles,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
-    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, unlockTech, castSpell, proposeTreaty,
+    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty,
+    embarkBoat, disembarkBoat, isWaterAt,
+    debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,
-    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnInitReceived,
+    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnBarbarianRaid, setOnCampCleared, setOnInitReceived,
     isInitReceived,
   };
 })();

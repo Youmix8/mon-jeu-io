@@ -19,6 +19,36 @@
       <h1 class="lobby-title">Mon Jeu .io</h1>
       <p class="lobby-sub">RTS multijoueur — détruisez les HDV adverses !</p>
       <input id="name-input" class="name-input" type="text" maxlength="20" placeholder="Ton pseudo..." autocomplete="off" />
+
+      <div class="lobby-config">
+        <div class="lobby-config-title">🗺 Configuration de la carte</div>
+        <div class="lobby-config-row">
+          <div class="lobby-config-label">Type de carte</div>
+          <div class="lobby-map-types">
+            <button type="button" class="map-type-btn" data-type="no_water">
+              <div class="mt-emoji">🌾</div><div class="mt-label">Plaines</div><div class="mt-desc">Sans eau</div>
+            </button>
+            <button type="button" class="map-type-btn selected" data-type="lakes">
+              <div class="mt-emoji">💧</div><div class="mt-label">Lacs</div><div class="mt-desc">Petits plans d'eau</div>
+            </button>
+            <button type="button" class="map-type-btn" data-type="continental">
+              <div class="mt-emoji">🌊</div><div class="mt-label">Continental</div><div class="mt-desc">Rivière qui divise</div>
+            </button>
+            <button type="button" class="map-type-btn" data-type="island">
+              <div class="mt-emoji">🏝</div><div class="mt-label">Île</div><div class="mt-desc">Continent entouré</div>
+            </button>
+          </div>
+        </div>
+        <div class="lobby-config-row">
+          <div class="lobby-config-label">Taille</div>
+          <div class="lobby-map-sizes">
+            <button type="button" class="map-size-btn" data-size="small">Petite (3000)</button>
+            <button type="button" class="map-size-btn selected" data-size="medium">Moyenne (4500)</button>
+            <button type="button" class="map-size-btn" data-size="large">Grande (6000)</button>
+          </div>
+        </div>
+      </div>
+
       <button id="play-btn" class="primary-btn">Jouer ▶</button>
       <div class="lobby-hint">
         🏛 Clic HDV : production & recherche &nbsp;|&nbsp; Drag : sélectionner &nbsp;|&nbsp; Clic droit : déplacer/attaquer<br/>
@@ -33,10 +63,11 @@
     <div id="spectator-label" style="display:none;">👻 Mode spectateur</div>
     <div id="my-stats">
       <span id="my-gold-row">💰 Gold : <span id="my-gold">0</span></span><br />
-      🔬 PR : <span id="my-pr">0</span> &nbsp;
-      🔮 <span id="my-mana">0</span> &nbsp;
-      🙏 <span id="my-faith">0</span><br />
+      <span id="my-pr-row"><img id="icon-pr" src="assets/icon_research.png" alt="" class="hud-icon" onerror="this.style.display='none'" />🔬 PR : <span id="my-pr">0</span></span> &nbsp;
+      <span id="my-mana-row" style="display:none"><img id="icon-mana" src="assets/icon_mana.png" alt="" class="hud-icon" onerror="this.style.display='none'" />🔮 <span id="my-mana">0</span></span> &nbsp;
+      <span id="my-faith-row" style="display:none"><img id="icon-faith" src="assets/icon_faith.png" alt="" class="hud-icon" onerror="this.style.display='none'" />🙏 <span id="my-faith">0</span></span><br />
       ❤️ HDV : <span id="my-hp">1000/1000</span><br />
+      👥 Population : <span id="my-pop">0</span> / <span id="my-pop-max">8</span><br />
       👥 Mes unités : <span id="my-unit-count">0</span><br />
       📍 Sélectionnées : <span id="selected-count">0</span>
     </div>
@@ -49,7 +80,7 @@
       🎯 <strong>Maintien clic droit</strong> : roue (Attaquer / Déplacer / Défendre)<br />
       ⌨️ ZQSD : caméra &nbsp; 🔍 Ctrl+scroll : zoom<br />
       🌳 <strong>T</strong> : arbre tech<br />
-      🔥 <strong>F</strong> Feu &nbsp; ❄️ <strong>G</strong> Gel &nbsp; ✝️ <strong>H</strong> Bénédiction &nbsp; 🌟 <strong>J</strong> Lumière<br />
+      🐛 <strong>`</strong> debug panel (spawn / tuning)<br />
       ✅ Ctrl+A : tout
     </div>
     <div id="waiting-msg" style="display:none; margin-top:8px; font-size:12px; color:#aaaaaa;">⏳ En attente d'au moins 2 joueurs…</div>
@@ -168,10 +199,13 @@
   <script src="/js/village-panel.js"></script>
   <script src="/js/radial-menu.js"></script>
   <script src="/js/build-mode.js"></script>
+  <script src="/js/building-info-panel.js"></script>
   <script src="/js/spell-cast.js"></script>
   <script src="/js/tech-tree-overlay.js"></script>
   <script src="/js/minimap.js"></script>
+  <script src="/js/tech-indicators.js"></script>
   <script src="/js/scenes/MainScene.js"></script>
+  <script src="/js/debug-panel.js"></script>
   <script src="/js/game.js"></script>
 </body>
 </html>

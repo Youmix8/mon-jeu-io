@@ -77,14 +77,9 @@ const TechTreeOverlay = (() => {
 
     // Events
     root.querySelector('#tt-close').addEventListener('click', close);
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && isOpen) close();
-      if ((e.key === 't' || e.key === 'T') && !drag) {
-        // Ouvre si pas déjà ouvert et si on n'est pas en train de taper dans un input
-        if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
-        toggle();
-      }
-    });
+    // Note : le listener T global est attaché au load via _bindGlobalKeys() ci-dessous,
+    // pas ici (sinon T n'aurait jamais marché car ensureDOM() est appelé depuis open()
+    // → on a besoin de T pour ouvrir → cycle vicieux)
 
     // Pan (avec coalesce via rAF pour rester fluide)
     let panRafPending = false;
@@ -164,6 +159,17 @@ const TechTreeOverlay = (() => {
   }
 
   function toggle() { isOpen ? close() : open(); }
+
+  // Bindings clavier globaux attachés au load (pas dans ensureDOM, sinon T jamais utilisable)
+  document.addEventListener('keydown', (e) => {
+    if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+    if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (e.key === 'Escape' && isOpen) { close(); return; }
+    if (e.key === 't' || e.key === 'T') {
+      e.preventDefault();
+      toggle();
+    }
+  });
 
   function refresh() {
     if (!isOpen || !stage) return;

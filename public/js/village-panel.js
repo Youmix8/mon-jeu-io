@@ -7,6 +7,26 @@ const VillagePanel = (() => {
   let panelEl, prodEl, upgradeBtn, titleEl, levelEl, hpEl, ratesEl;
   let cardsBuilt = false;
 
+  // Filtre tech (même logique que HdvPanel) : cache les unités dont la tech
+  // n'est pas débloquée + les invocations pures (skeleton, skeleton_knight).
+  const SUMMONED_ONLY = new Set(['skeleton', 'skeleton_knight']);
+  let _unitTechMap = null;
+  function _buildUnitTechMap(cfg) {
+    if (_unitTechMap) return _unitTechMap;
+    _unitTechMap = {};
+    const tt = cfg.techTree || {};
+    for (const tid of Object.keys(tt)) {
+      const units = tt[tid].unlocks && tt[tid].unlocks.units;
+      if (Array.isArray(units)) units.forEach(uid => { _unitTechMap[uid] = tid; });
+    }
+    return _unitTechMap;
+  }
+  function _effectiveRequiredTech(u, cfg) {
+    if (SUMMONED_ONLY.has(u.id)) return '__SUMMONED_ONLY__';
+    if (u.requiresTech) return u.requiresTech;
+    return _buildUnitTechMap(cfg)[u.id] || null;
+  }
+
   function _initOnce() {
     if (panelEl) return;
     panelEl    = document.getElementById('village-panel');
@@ -125,10 +145,13 @@ const VillagePanel = (() => {
 
     if (!cardsBuilt && !_buildCards()) return;
 
-    // Empire mini-stats
-    levelEl.textContent = v.level || 1;
+    // Empire mini-stats — utilise villageLevels (5 niveaux : Hameau → Métropole)
+    const villageLevels = cfg.villageLevels || [];
+    const curLvl  = villageLevels[(v.level || 1) - 1] || { name: 'Hameau', goldPerSec: 0.5, allowedUnits: ['soldier'] };
+    const nextLvl = villageLevels[(v.level || 1)] || null;
+    levelEl.textContent = `${v.level || 1} (${curLvl.name})`;
     hpEl.textContent    = `${v.hp}/${v.maxHp || cfg.villageMaxHp}`;
-    ratesEl.textContent = `+${cfg.villageGoldPerSec || 0.5}`;
+    ratesEl.textContent = `+${curLvl.goldPerSec || 0.5}`;
     // Garnison : unités à moins de 200px du village
     const garrisonEl = document.getElementById('village-garrison');
     if (garrisonEl) {
@@ -138,32 +161,46 @@ const VillagePanel = (() => {
       garrisonEl.textContent = nearby;
     }
 
-    // Upgrade button
-    const cost = cfg.villageUpgradeCost || 150;
-    if (v.level >= 2) {
-      upgradeBtn.textContent = '✨ Niveau max (Lv 2)';
+    // Upgrade button — coût du niveau courant (croît à chaque palier)
+    if (!nextLvl || curLvl.upgradeCost == null) {
+      upgradeBtn.textContent = `✨ Niveau max (${curLvl.name})`;
       upgradeBtn.disabled = true;
       upgradeBtn.classList.add('disabled');
     } else {
-      upgradeBtn.textContent = `⬆ Améliorer Lv 2 (${cost} 💰)`;
+      const cost = curLvl.upgradeCost;
+      upgradeBtn.textContent = `⬆ ${nextLvl.name} — ${cost} 💰`;
       upgradeBtn.disabled = me.gold < cost;
       upgradeBtn.classList.toggle('disabled', me.gold < cost);
     }
 
-    // Production cards : selon le niveau du village + tech du joueur
+    // Production cards :
+    //   - CACHE les unités dont la tech requise n'est pas débloquée
+    //   - GARDE en grisé celles bloquées par le niveau du village (Lv2 requis)
+    const allowedAll = curLvl.allowedUnits === 'all';
+    const allowedList = Array.isArray(curLvl.allowedUnits) ? curLvl.allowedUnits : null;
     for (const card of prodEl.querySelectorAll('.unit-card')) {
       const u = cfg.unitTypes[card.dataset.unitId];
       if (!u) continue;
-      const lvlAllowsType = (v.level >= 2)
-        ? (!u.requiresTech || (me.unlockedTechs || []).includes(u.requiresTech))
-        : (u.id === 'soldier');
-      const affordable = me.gold >= u.cost;
+      // Tech débloquée ? (gère summoned-only + unlocks.units indirects)
+      const req = _effectiveRequiredTech(u, cfg);
+      const techOk = (req === null) || (req !== '__SUMMONED_ONLY__'
+        && (me.unlockedTechs || []).includes(req));
+      // Cache si la tech n'est pas débloquée
+      card.style.display = techOk ? '' : 'none';
+      if (!techOk) continue;
+      // Niveau du village permet cette unité ?
+      const lvlAllowsType = allowedAll ? true : (allowedList && allowedList.includes(u.id));
+      const popCost = u.populationCost || 1;
+      const popOk = (me.populationUsed || 0) + popCost <= (me.populationMax || 8);
+      const manaOk  = !u.manaCost  || (me.mana  || 0) >= u.manaCost;
+      const faithOk = !u.faithCost || (me.faith || 0) >= u.faithCost;
+      const affordable = me.gold >= u.cost && manaOk && faithOk && popOk;
       card.classList.toggle('locked', !lvlAllowsType);
       card.classList.toggle('poor', lvlAllowsType && !affordable);
       const lockNote = card.querySelector('[data-role="lock"]');
       if (lockNote) {
         if (!lvlAllowsType) {
-          lockNote.textContent = (v.level < 2) ? '🔒 Village Lv 2 requis' : `🔒 ${u.requiresTech ? 'Tech ' + u.requiresTech : 'verrouillé'}`;
+          lockNote.textContent = `🔒 Village Lv 2+ requis`;
           lockNote.style.display = '';
         } else {
           lockNote.style.display = 'none';
@@ -178,19 +215,14 @@ const VillagePanel = (() => {
         const b = cfg.buildingTypes[card.dataset.buildingType];
         if (!b) continue;
         const unlocked   = !b.requiresTech || (me.unlockedTechs || []).includes(b.requiresTech);
+        // Cache complètement les bâtiments tech-locked
+        card.style.display = unlocked ? '' : 'none';
+        if (!unlocked) continue;
         const affordable = me.gold >= b.cost;
-        card.classList.toggle('locked', !unlocked);
-        card.classList.toggle('poor', unlocked && !affordable);
+        card.classList.remove('locked');
+        card.classList.toggle('poor', !affordable);
         const lockNote = card.querySelector('[data-role="lock"]');
-        if (lockNote) {
-          if (!unlocked) {
-            const t = cfg.techTree && cfg.techTree[b.requiresTech];
-            lockNote.textContent = `🔒 ${t ? t.name : b.requiresTech}`;
-            lockNote.style.display = '';
-          } else {
-            lockNote.style.display = 'none';
-          }
-        }
+        if (lockNote) lockNote.style.display = 'none';
       }
     }
   }

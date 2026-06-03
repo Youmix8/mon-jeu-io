@@ -502,3 +502,324 @@ hr {
   50%       { background: rgba(251, 113, 133, 0.4); }
 }
 .error-flash { animation: errorFlash 0.4s ease-out; }
+
+/* Icônes HUD ressources */
+.hud-icon {
+  width: 14px; height: 14px;
+  vertical-align: -2px;
+  margin-right: 2px;
+  image-rendering: pixelated;
+}
+
+/* Panneau debug (étape 6) */
+#debug-panel {
+  position: fixed; bottom: 12px; right: 12px;
+  width: 340px; max-height: 80vh; overflow-y: auto;
+  background: rgba(15, 23, 42, 0.95);
+  border: 2px solid #f59e0b;
+  border-radius: 8px;
+  padding: 10px;
+  font-family: "Quicksand", sans-serif;
+  font-size: 12px;
+  color: #fff;
+  z-index: 1000;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+#debug-panel.hidden { display: none; }
+#debug-panel h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #f59e0b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+#debug-panel .debug-warn {
+  font-size: 10px; color: #fca5a5;
+  margin-bottom: 8px;
+  font-style: italic;
+}
+#debug-panel .debug-section { margin-bottom: 10px; }
+#debug-panel .debug-section-title {
+  font-weight: 700;
+  font-size: 11px;
+  margin: 6px 0 4px;
+  color: #cbd5e1;
+}
+#debug-panel button {
+  background: #334155;
+  border: 1px solid #475569;
+  color: #f1f5f9;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  margin: 2px;
+}
+#debug-panel button:hover { background: #475569; }
+#debug-panel button.mode-toggle {
+  background: #f59e0b;
+  color: #1e293b;
+  font-weight: 700;
+  width: 100%;
+  margin-bottom: 6px;
+}
+#debug-panel button.export-config {
+  background: #10b981;
+  color: #fff;
+  font-weight: 700;
+  width: 100%;
+  margin-top: 8px;
+}
+#debug-tuning-popup {
+  position: fixed;
+  background: rgba(15, 23, 42, 0.98);
+  border: 2px solid #10b981;
+  border-radius: 6px;
+  padding: 8px;
+  font-family: "Quicksand", sans-serif;
+  color: #fff;
+  font-size: 12px;
+  z-index: 1001;
+  display: none;
+  min-width: 200px;
+}
+#debug-tuning-popup .name { font-weight: 700; color: #10b981; margin-bottom: 4px; }
+#debug-tuning-popup input[type="range"] { width: 100%; }
+#debug-tuning-popup .row {
+  display: flex; align-items: center; gap: 4px; margin-top: 4px;
+}
+#debug-tuning-popup button {
+  background: #334155; border: 1px solid #475569; color: #fff;
+  padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 11px;
+}
+
+/* Lobby — Configuration de carte */
+.lobby-config {
+  margin: 14px 0;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+.lobby-config-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #475569;
+  margin-bottom: 8px;
+  text-align: center;
+}
+.lobby-config-row {
+  margin-bottom: 10px;
+}
+.lobby-config-row:last-child { margin-bottom: 0; }
+.lobby-config-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.lobby-map-types {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.map-type-btn {
+  background: #fff;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+  font-family: "Quicksand", sans-serif;
+}
+.map-type-btn:hover { border-color: #94a3b8; background: #f8fafc; }
+.map-type-btn.selected {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.map-type-btn .mt-emoji { font-size: 22px; }
+.map-type-btn .mt-label { font-size: 12px; font-weight: 700; color: #1e293b; }
+.map-type-btn .mt-desc  { font-size: 9px; color: #64748b; line-height: 1.2; }
+
+.lobby-map-sizes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.map-size-btn {
+  background: #fff;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  font-family: "Quicksand", sans-serif;
+  transition: all 0.15s;
+}
+.map-size-btn:hover { border-color: #94a3b8; background: #f8fafc; }
+.map-size-btn.selected {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+/* Building Info Panel — apparait au clic d'un bâtiment */
+#building-info-panel {
+  position: fixed;
+  top: 90px;
+  right: 16px;
+  width: 280px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 2px solid #3b82f6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #f1f5f9;
+  font-family: "Quicksand", sans-serif;
+  font-size: 13px;
+  z-index: 900;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+}
+#building-info-panel .bip-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+#building-info-panel .bip-icon { font-size: 22px; }
+#building-info-panel .bip-name {
+  flex: 1;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fbbf24;
+}
+#building-info-panel .bip-close {
+  background: transparent; border: none; color: #94a3b8;
+  font-size: 20px; cursor: pointer; padding: 0 4px;
+  line-height: 1;
+}
+#building-info-panel .bip-close:hover { color: #f1f5f9; }
+#building-info-panel .bip-hp-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+#building-info-panel .bip-label { color: #94a3b8; }
+#building-info-panel .bip-hp-bar {
+  flex: 1;
+  height: 7px;
+  background: #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+#building-info-panel .bip-hp-fill {
+  height: 100%;
+  transition: width 0.2s ease-out;
+}
+#building-info-panel .bip-hp-text {
+  font-size: 11px;
+  color: #cbd5e1;
+  min-width: 60px;
+  text-align: right;
+}
+#building-info-panel .bip-effects {
+  background: rgba(30, 41, 59, 0.6);
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+  color: #e2e8f0;
+}
+#building-info-panel .bip-footer { text-align: center; }
+#building-info-panel .bip-sell {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  font-family: "Quicksand", sans-serif;
+}
+#building-info-panel .bip-sell:hover { background: #ef4444; }
+#building-info-panel .bip-foreign {
+  color: #94a3b8;
+  font-style: italic;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+/* ─── Phase 6 — Glassmorphism + animations de compteurs ──────── */
+
+/* HUD plus glass : gradient interne + bordure haute lumière */
+#ui {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 35%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.82) 0%, rgba(15, 23, 42, 0.72) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 8px 28px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.10);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+}
+
+/* Compteurs de ressources : tween de bump quand la valeur change */
+@keyframes value-bump {
+  0%   { transform: scale(1.0); color: var(--gold); text-shadow: 0 0 0 rgba(251,191,36,0); }
+  35%  { transform: scale(1.22); color: #fde68a; text-shadow: 0 0 12px rgba(251,191,36,0.85); }
+  100% { transform: scale(1.0); color: inherit; text-shadow: 0 0 0 rgba(251,191,36,0); }
+}
+.value-bump {
+  display: inline-block;
+  animation: value-bump 360ms ease-out;
+}
+
+/* Variante "perte" (rouge) — pour quand une valeur baisse */
+@keyframes value-down {
+  0%   { transform: scale(1.0); color: var(--red); }
+  35%  { transform: scale(0.88); color: #fecaca; text-shadow: 0 0 10px rgba(239,68,68,0.7); }
+  100% { transform: scale(1.0); color: inherit; }
+}
+.value-down {
+  display: inline-block;
+  animation: value-down 320ms ease-out;
+}
+
+/* Panneaux HDV/Village/Building : glass cohérent */
+#hdv-panel, #village-panel, #building-info-panel {
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+/* Game-over overlay : entrée pop + bordure néon dorée */
+@keyframes overlay-pop {
+  from { transform: scale(0.88); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+#game-over-overlay .overlay-box,
+#match-ended-overlay .overlay-box {
+  animation: overlay-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(251, 191, 36, 0.18),
+    inset 0 1px 0 rgba(255,255,255,0.85);
+}
+#game-over-overlay .overlay-title {
+  text-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+
+/* Mini-carte : harmonisation glass */
+#minimap-wrap {
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+}
