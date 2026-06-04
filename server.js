@@ -109,9 +109,7 @@ const UNIT_TYPES = {
                      icon: '👼', desc: 'Vole. Aura soin +3 HP/s rayon 120. Durée 90s.' },
   god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 250,  manaCost: 0,  faithCost: 150,  populationCost: 15, hp: 1500, speed: 50, range: 60, damage: 60, requiresTech: null,
                      icon: '🌟', desc: 'Boss. Aura peur (ennemis ralentis 50% rayon 400). AoE 60.' },
-  // Bateau : se déplace UNIQUEMENT sur l'eau, produit depuis un Port
-  boat:            { id: 'boat',            name: 'Bateau',             cost: 90,  manaCost: 0,  faithCost: 0,  populationCost: 1, hp: 100, speed: 100, range: 0,  damage: 0, requiresTech: 'marine',
-                     icon: '⛵', desc: 'Va sur l\'eau uniquement. Produit depuis un Port.' },
+  // Bateau retiré (système eau supprimé).
 };
 
 // Unités invoquées : durée de vie ms (mortes après expiration)
@@ -165,14 +163,7 @@ const BUILDING_TYPES = {
     requiresTech: 'gunpowder',
     desc: 'Tour lourde longue portée. Dégâts massifs, cadence lente.',
   },
-  port: {
-    id: 'port', name: 'Port', icon: '⚓',
-    cost: 150, hp: 300,
-    range: 0, damage: 0, cooldownMs: 0,
-    halfSize: 28,
-    requiresTech: 'marine',
-    desc: 'Permet de produire des bateaux. Nécessaire pour la voie maritime.',
-  },
+  // ── Port retiré (système eau supprimé) ──
   // ── Magie ──
   sanctum: {
     id: 'sanctum', name: 'Sanctum', icon: '🔮',
@@ -420,107 +411,21 @@ function _fillCircle(arr, gw, gh, cx, cy, r) {
   }
 }
 
-function generateWaterTiles(type, gw, gh) {
-  const arr = new Uint8Array(gw * gh);
-  if (type === 'no_water') return arr;
-
-  if (type === 'lakes') {
-    // 4 à 8 lacs aléatoires
-    const lakeCount = 4 + Math.floor(Math.random() * 5);
-    for (let l = 0; l < lakeCount; l++) {
-      const cx = 6 + Math.random() * (gw - 12);
-      const cy = 6 + Math.random() * (gh - 12);
-      const r  = 3 + Math.random() * 5;
-      _fillCircle(arr, gw, gh, cx, cy, r);
-    }
-  } else if (type === 'continental') {
-    // Une rivière/détroit sinusoïdal qui traverse la map (verticalement ou horizontalement)
-    const vertical = Math.random() < 0.5;
-    const halfWidth = 2.5 + Math.random() * 2;
-    const amplitude = Math.min(gw, gh) * 0.18;
-    const freq = 0.08 + Math.random() * 0.06;
-    if (vertical) {
-      const baseX = gw * (0.4 + Math.random() * 0.2);
-      for (let ty = 0; ty < gh; ty++) {
-        const off = Math.sin(ty * freq) * amplitude;
-        for (let tx = Math.floor(baseX + off - halfWidth); tx <= Math.ceil(baseX + off + halfWidth); tx++) {
-          if (tx >= 0 && tx < gw) arr[ty * gw + tx] = 1;
-        }
-      }
-    } else {
-      const baseY = gh * (0.4 + Math.random() * 0.2);
-      for (let tx = 0; tx < gw; tx++) {
-        const off = Math.sin(tx * freq) * amplitude;
-        for (let ty = Math.floor(baseY + off - halfWidth); ty <= Math.ceil(baseY + off + halfWidth); ty++) {
-          if (ty >= 0 && ty < gh) arr[ty * gw + tx] = 1;
-        }
-      }
-    }
-  } else if (type === 'island') {
-    // Disque grass au centre, océan tout autour. Bord irrégulier pour réalisme.
-    const cx = gw / 2, cy = gh / 2;
-    const baseR = Math.min(gw, gh) * 0.36;
-    for (let ty = 0; ty < gh; ty++) {
-      for (let tx = 0; tx < gw; tx++) {
-        const dx = tx - cx, dy = ty - cy;
-        const angle = Math.atan2(dy, dx);
-        // Bord irrégulier : variation ±10% en fonction de l'angle
-        const localR = baseR * (1 + Math.sin(angle * 3) * 0.08 + Math.sin(angle * 7) * 0.05);
-        if (dx*dx + dy*dy > localR * localR) arr[ty * gw + tx] = 1;
-      }
-    }
-  }
-  return arr;
+// L'eau a été retirée du jeu — on garde la fonction comme stub no-op
+// pour ne pas casser les appelants (renvoie toujours un Uint8Array vide).
+function generateWaterTiles(_type, gw, gh) {
+  return new Uint8Array(gw * gh); // tout à 0 = pas d'eau
 }
 
 // waterTiles : Uint8Array global, recréé à chaque applyMapConfig
 let waterTiles = new Uint8Array(0);
 
-// Tile (tx, ty) → est-ce une tile d'eau ?
-function isWaterTile(tx, ty) {
-  if (!waterTiles || waterTiles.length === 0) return false;
-  if (tx < 0 || tx >= GRID_W || ty < 0 || ty >= GRID_H) return false;
-  return waterTiles[ty * GRID_W + tx] === 1;
-}
-// (x, y) coordonnées monde → est-ce de l'eau ?
-function isWaterAt(x, y) {
-  return isWaterTile(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
-}
-// ────────── Pathfinding simple — contournement de l'eau ──────────
-// Pour les unités terrestres : si la trajectoire directe traverse trop d'eau,
-// on calcule un waypoint intermédiaire pour contourner le lac/rivière.
-// Algorithme simple (suffisant pour des grands plans d'eau, pas pour des labyrinthes) :
-//   1. Compte les tiles d'eau sur le segment direct (raycast 30px par sample)
-//   2. Si >3 tiles d'eau croisées → essaie un waypoint perpendiculaire au milieu
-//   3. Offsets progressifs (200, 400, 600, 800, 1200 px de chaque côté)
-function pathHasWaterCount(fromX, fromY, toX, toY) {
-  const dist = Math.hypot(toX - fromX, toY - fromY);
-  const steps = Math.max(5, Math.floor(dist / 30));
-  let waterCount = 0;
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    if (isWaterAt(fromX + (toX - fromX) * t, fromY + (toY - fromY) * t)) waterCount++;
-  }
-  return waterCount;
-}
-function findWaypointAroundWater(fromX, fromY, toX, toY) {
-  const mx = (fromX + toX) / 2, my = (fromY + toY) / 2;
-  const dx = toX - fromX, dy = toY - fromY;
-  const len = Math.hypot(dx, dy) || 1;
-  const px = -dy / len, py = dx / len; // unité perpendiculaire
-  for (const offset of [200, 400, 600, 800, 1200]) {
-    for (const sign of [1, -1]) {
-      const wx = mx + px * sign * offset;
-      const wy = my + py * sign * offset;
-      if (wx < 50 || wx > MAP_WIDTH - 50 || wy < 50 || wy > MAP_HEIGHT - 50) continue;
-      if (isWaterAt(wx, wy)) continue;
-      if (pathHasWaterCount(fromX, fromY, wx, wy) > 2) continue;
-      if (pathHasWaterCount(wx, wy, toX, toY) > 2) continue;
-      return { x: Math.round(wx), y: Math.round(wy) };
-    }
-  }
-  return null;
-}
+// L'eau a été retirée du jeu : tous les helpers renvoient des valeurs neutres.
+function isWaterTile(_tx, _ty) { return false; }
+function isWaterAt(_x, _y) { return false; }
+// Pathfinding eau supprimé : pas d'eau dans le jeu, fonctions stub.
+function pathHasWaterCount(_fromX, _fromY, _toX, _toY) { return 0; }
+function findWaypointAroundWater(_fromX, _fromY, _toX, _toY) { return null; }
 
 // Cherche une position de spawn libre (non-eau) autour de (cx, cy).
 // Pour unités terrestres : essaie 16 angles, retourne la 1ère position grass.
@@ -539,18 +444,8 @@ function findFreeSpawnPos(cx, cy, baseRadius = 80, preferWater = false) {
   return { x: Math.round(cx), y: Math.round(cy) };
 }
 
-// Au moins une tile d'eau dans les 8 voisines (utilisé pour port)
-function hasWaterNeighbor(x, y) {
-  const tx = Math.floor(x / TILE_SIZE);
-  const ty = Math.floor(y / TILE_SIZE);
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      if (dx === 0 && dy === 0) continue;
-      if (isWaterTile(tx + dx, ty + dy)) return true;
-    }
-  }
-  return false;
-}
+// L'eau a été retirée : ce helper renvoie toujours false.
+function hasWaterNeighbor(_x, _y) { return false; }
 
 // Recalcule TOUT en fonction du type/size de map. Appelé au démarrage et
 // quand le 1er joueur (ou un reset) déclenche une nouvelle config.
@@ -561,11 +456,13 @@ function applyMapConfig(type, size) {
     MAP_HEIGHT = sz.height;
     currentMapSize = size;
   }
-  if (type) currentMapType = type;
+  // L'eau a été retirée du jeu — on force toujours 'no_water' quelle que soit
+  // la demande du client (compat avec les anciens types lakes/continental/island).
+  currentMapType = 'no_water';
   GRID_W = Math.floor(MAP_WIDTH  / TILE_SIZE);
   GRID_H = Math.floor(MAP_HEIGHT / TILE_SIZE);
   waterTiles = generateWaterTiles(currentMapType, GRID_W, GRID_H);
-  console.log(`[map] config: type=${currentMapType} size=${currentMapSize} (${MAP_WIDTH}x${MAP_HEIGHT}, grid ${GRID_W}x${GRID_H}, water tiles ${waterTiles.reduce((s,v)=>s+v,0)}/${GRID_W*GRID_H})`);
+  console.log(`[map] config: type=${currentMapType} size=${currentMapSize} (${MAP_WIDTH}x${MAP_HEIGHT}, grid ${GRID_W}x${GRID_H})`);
 }
 
 function generateVillages(spawns) {
@@ -596,65 +493,11 @@ function generateVillages(spawns) {
     });
   }
   console.log(`Villages générés: ${villages.length} (${count} demandés)`);
-  // Garantit qu'au moins 2 villages sont côtiers (water-adjacent) si la map a de l'eau
-  // → permet la stratégie navale (port → bateau) sans avoir de chance de spawn
-  ensureCoastalVillages(villages, spawns, 2);
   return villages;
 }
 
-// Force au moins `minCoastal` villages à avoir une tile d'eau adjacente.
-// Cherche une water tile, trouve une tile terre adjacente, y place un village.
-// No-op si pas d'eau sur la map ou si déjà assez de villages côtiers.
-function ensureCoastalVillages(villages, spawns, minCoastal) {
-  const totalWater = waterTiles.reduce((s, v) => s + v, 0);
-  if (totalWater === 0) return; // map sans eau
-  const coastalCount = villages.filter(v => hasWaterNeighbor(v.x, v.y)).length;
-  let toAdd = Math.max(0, minCoastal - coastalCount);
-  if (toAdd === 0) return;
-
-  // Collecte les water tiles qui ont au moins un voisin terre (= les côtes)
-  const coastWaterTiles = [];
-  for (let ty = 0; ty < GRID_H; ty++) {
-    for (let tx = 0; tx < GRID_W; tx++) {
-      if (waterTiles[ty * GRID_W + tx] !== 1) continue;
-      // Voisin terre ?
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          const ntx = tx + dx, nty = ty + dy;
-          if (ntx >= 0 && ntx < GRID_W && nty >= 0 && nty < GRID_H && !isWaterTile(ntx, nty)) {
-            coastWaterTiles.push({ tx: ntx, ty: nty }); // la tile TERRE adjacente
-            dx = dy = 2; // break double
-          }
-        }
-      }
-    }
-  }
-  if (coastWaterTiles.length === 0) return;
-  // Mélange (Fisher-Yates)
-  for (let i = coastWaterTiles.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [coastWaterTiles[i], coastWaterTiles[j]] = [coastWaterTiles[j], coastWaterTiles[i]];
-  }
-  let idCounter = villages.length + 100;
-  for (const t of coastWaterTiles) {
-    if (toAdd <= 0) break;
-    const wx = t.tx * TILE_SIZE + TILE_SIZE / 2;
-    const wy = t.ty * TILE_SIZE + TILE_SIZE / 2;
-    if (spawns.some(s => Math.hypot(s.x - wx, s.y - wy) < VILLAGE_MIN_DIST_HDV)) continue;
-    if (villages.some(v => Math.hypot(v.x - wx, v.y - wy) < VILLAGE_MIN_DIST_OTHER)) continue;
-    villages.push({
-      id: `v_coast_${idCounter++}`,
-      x: Math.round(wx), y: Math.round(wy),
-      ownerId: null,
-      hp: VILLAGE_MAX_HP, maxHp: VILLAGE_MAX_HP,
-      captureProgress: 0, capturingPlayerId: null,
-      level: 1, lastAttackTime: 0,
-    });
-    toAdd--;
-  }
-  console.log(`[Map] ${minCoastal - toAdd} village(s) côtier(s) garantis (eau navigable)`);
-}
+// ensureCoastalVillages a été retiré (plus d'eau dans le jeu).
+function ensureCoastalVillages(_villages, _spawns, _minCoastal) { /* no-op */ }
 
 function villageAllowsUnit(village, player, typeId) {
   const def = UNIT_TYPES[typeId];
@@ -1123,95 +966,12 @@ function botTick(bot) {
     }
   }
 
-  // 3.5. CONSTRUCTION PORT (naval) ────────────────────────────────
-  // Construit 1 port à proximité d'une water tile dans la zone constructible du HDV.
-  if (hasTech(bot, 'marine') && bot.gold >= BUILDING_TYPES.port.cost
-      && nowMs - bot.botState.lastPortTime > 4000) {
-    const myPorts = gameState.buildings.filter(b => b.ownerId === bot.id && b.type === 'port');
-    if (myPorts.length < 1) {
-      const portDef = BUILDING_TYPES.port;
-      const buildR = baseBuildRadius('hdv', bot);
-      // Scan en spirale autour du HDV pour trouver une case-grille avec voisin eau
-      let placed = false;
-      for (let attempt = 0; attempt < 24 && !placed; attempt++) {
-        const angle = (attempt / 24) * Math.PI * 2 + Math.random() * 0.3;
-        const dist  = 110 + Math.random() * (buildR - 130);
-        const px = bot.x + Math.cos(angle) * dist;
-        const py = bot.y + Math.sin(angle) * dist;
-        const snap = snapToGrid(px, py);
-        if (isWaterAt(snap.x, snap.y)) continue;
-        if (!hasWaterNeighbor(snap.x, snap.y)) continue;
-        if (Math.hypot(bot.x - snap.x, bot.y - snap.y) < BUILDING_MIN_DIST_HDV) continue;
-        if (gameState.buildings.some(b => b.x === snap.x && b.y === snap.y)) continue;
-        bot.gold -= portDef.cost;
-        gameState.buildings.push({
-          id: `b_${nextBuildingId++}`,
-          ownerId: bot.id, type: 'port',
-          x: snap.x, y: snap.y,
-          hp: portDef.hp, maxHp: portDef.hp,
-          lastAttackTime: 0,
-        });
-        bot.botState.lastPortTime = nowMs;
-        console.log(`[Bot ${bot.name}] construit un Port en (${snap.x}, ${snap.y})`);
-        placed = true;
-      }
-    }
-  }
-
   // 4. SPAWN UNITÉ ────────────────────────────────────────────────
   // Préfère les unités haut tiers débloquées ; respect du cap de population.
   const myUnits = Object.values(gameState.units).filter(u => u.ownerId === bot.id);
   const botPopUsed = getPopulationUsed(bot);
   const botPopMax  = getPopulationMax(bot);
 
-  // 4.bis. SPAWN BOAT (si port construit + tech marine + sous le cap de 2 bateaux)
-  if (hasTech(bot, 'marine') && bot.gold >= UNIT_TYPES.boat.cost
-      && nowMs - bot.botState.lastBoatSpawnTime > 5000
-      && botPopUsed + (UNIT_TYPES.boat.populationCost || 1) <= botPopMax) {
-    const myBoats = myUnits.filter(u => u.type === 'boat');
-    const myPorts = gameState.buildings.filter(b => b.ownerId === bot.id && b.type === 'port' && b.hp > 0);
-    if (myPorts.length > 0 && myBoats.length < 2) {
-      // Trouve water tile adjacente au port
-      let found = null;
-      for (const port of myPorts) {
-        const tx0 = Math.floor(port.x / TILE_SIZE);
-        const ty0 = Math.floor(port.y / TILE_SIZE);
-        for (let r = 1; r <= 3 && !found; r++) {
-          for (let dy = -r; dy <= r && !found; dy++) {
-            for (let dx = -r; dx <= r && !found; dx++) {
-              if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-              if (isWaterTile(tx0 + dx, ty0 + dy)) {
-                found = {
-                  x: (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2,
-                  y: (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2,
-                };
-              }
-            }
-          }
-        }
-        if (found) break;
-      }
-      if (found) {
-        const def = UNIT_TYPES.boat;
-        bot.gold -= def.cost;
-        bot.unitsCreated++;
-        const unitId = `unit_${nextUnitId++}`;
-        gameState.units[unitId] = {
-          id: unitId, ownerId: bot.id,
-          x: found.x, y: found.y, type: 'boat',
-          hp: def.hp, maxHp: def.hp,
-          speed: def.speed, range: def.range, damage: def.damage, cost: def.cost,
-          targetX: null, targetY: null,
-          attackTargetId: null, attackTargetType: null,
-          lastAttackTime: 0,
-          mode: 'defend', defendX: found.x, defendY: found.y, defendRadius: 320,
-          passengers: [],
-        };
-        bot.botState.lastBoatSpawnTime = nowMs;
-        console.log(`[Bot ${bot.name}] a produit un Bateau (port→eau)`);
-      }
-    }
-  }
   if (botPopUsed < botPopMax) {
     const preferOrder = ['heavy_knight', 'crossbowman', 'general', 'catapult', 'knight', 'archer', 'soldier'];
     for (const typeId of preferOrder) {
@@ -1325,120 +1085,7 @@ function botTick(bot) {
     }
   }
 
-  // 7. WAVE NAVALE ───────────────────────────────────────────────
-  // Si on a un bateau libre (sans passagers) et qu'une cible ennemie est "bloquée"
-  // par de l'eau, embarque jusqu'à 4 unités terrestres proches du bateau, puis envoie
-  // le bateau vers la côte ennemie pour débarquer.
-  if (hasTech(bot, 'marine') && nowMs - bot.botState.lastNavalWaveTime > 12000) {
-    const myBoats = myUnits.filter(u => u.type === 'boat');
-    const freeBoats = myBoats.filter(b => (!b.passengers || b.passengers.length === 0));
-    if (freeBoats.length > 0) {
-      // Cible : un HDV ennemi accessible uniquement en passant par >3 tiles d'eau
-      let navalTarget = null;
-      for (const p of Object.values(gameState.players)) {
-        if (p.id === bot.id || p.eliminated || p.hp <= 0) continue;
-        if ((bot.allies || []).includes(p.id)) continue;
-        const waterTiles = pathHasWaterCount(bot.x, bot.y, p.x, p.y);
-        if (waterTiles >= 3) { navalTarget = p; break; }
-      }
-      if (navalTarget) {
-        const boat = freeBoats[0];
-        // Embarque jusqu'à 4 unités terrestres à proximité du bateau (≤200px)
-        const candidates = myUnits.filter(u =>
-          u.type !== 'boat' && u.type !== 'pilgrim' && u.type !== 'settler'
-          && (u.damage || 0) > 0
-          && Math.hypot(u.x - boat.x, u.y - boat.y) <= 200
-          && (u.mode === 'defend' || u.mode === 'attack')
-        ).slice(0, 4);
-        if (candidates.length >= 2) {
-          boat.passengers = boat.passengers || [];
-          for (const c of candidates) {
-            if (boat.passengers.length >= 4) break;
-            boat.passengers.push({
-              type: c.type, hp: c.hp, maxHp: c.maxHp,
-              speed: c.speed, range: c.range, damage: c.damage, cost: c.cost,
-            });
-            delete gameState.units[c.id];
-          }
-          // Trouve une water tile côtière près du HDV cible et envoie le bateau là
-          let landing = null;
-          const tx0 = Math.floor(navalTarget.x / TILE_SIZE);
-          const ty0 = Math.floor(navalTarget.y / TILE_SIZE);
-          for (let r = 2; r <= 8 && !landing; r++) {
-            for (let dy = -r; dy <= r && !landing; dy++) {
-              for (let dx = -r; dx <= r && !landing; dx++) {
-                if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-                if (isWaterTile(tx0 + dx, ty0 + dy)) {
-                  landing = {
-                    x: (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2,
-                    y: (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2,
-                  };
-                }
-              }
-            }
-          }
-          if (landing) {
-            boat.targetX = landing.x;
-            boat.targetY = landing.y;
-            boat.mode = 'move';
-            boat._navalLanding = { x: navalTarget.x, y: navalTarget.y }; // pour débarquement auto
-            bot.botState.lastNavalWaveTime = nowMs;
-            console.log(`[Bot ${bot.name}] WAVE NAVALE : ${boat.passengers.length} passagers vers ${navalTarget.name}`);
-          } else {
-            // Pas trouvé de tile côtière — abandonne (rare)
-            console.log(`[Bot ${bot.name}] WAVE NAVALE annulée : pas de tile côtière trouvée`);
-          }
-        }
-      }
-    }
-
-    // Débarquement automatique : si un bateau du bot avec passagers est ≤ 80px de sa landing
-    for (const boat of myBoats) {
-      if (!boat._navalLanding || !boat.passengers || boat.passengers.length === 0) continue;
-      const d = Math.hypot(boat.x - boat._navalLanding.x, boat.y - boat._navalLanding.y);
-      if (d > 250) continue; // pas encore arrivé
-      // Cherche une tile terre proche du HDV cible pour débarquer
-      const tx0 = Math.floor(boat._navalLanding.x / TILE_SIZE);
-      const ty0 = Math.floor(boat._navalLanding.y / TILE_SIZE);
-      let landTile = null;
-      for (let r = 1; r <= 4 && !landTile; r++) {
-        for (let dy = -r; dy <= r && !landTile; dy++) {
-          for (let dx = -r; dx <= r && !landTile; dx++) {
-            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-            if (!isWaterTile(tx0 + dx, ty0 + dy)) {
-              landTile = {
-                x: (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2,
-                y: (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2,
-              };
-            }
-          }
-        }
-      }
-      if (!landTile) continue;
-      // Recrée les unités sur la terre et donne ordre d'attaque sur le HDV
-      const targetHdvX = boat._navalLanding.x, targetHdvY = boat._navalLanding.y;
-      for (const pInfo of boat.passengers) {
-        const pos = findFreeSpawnPos(landTile.x, landTile.y, 40 + Math.random() * 30, false);
-        const unitId = `unit_${nextUnitId++}`;
-        gameState.units[unitId] = {
-          id: unitId, ownerId: bot.id,
-          x: pos.x, y: pos.y, type: pInfo.type,
-          hp: pInfo.hp, maxHp: pInfo.maxHp,
-          speed: pInfo.speed, range: pInfo.range, damage: pInfo.damage, cost: pInfo.cost,
-          targetX: targetHdvX + (Math.random() - 0.5) * 100,
-          targetY: targetHdvY + (Math.random() - 0.5) * 100,
-          attackTargetId: null, attackTargetType: null,
-          lastAttackTime: 0,
-          mode: 'move', defendX: pos.x, defendY: pos.y, defendRadius: 280,
-        };
-      }
-      const count = boat.passengers.length;
-      boat.passengers = [];
-      boat._navalLanding = null;
-      io.emit('boatDisembarked', { boatId: boat.id, count, x: landTile.x, y: landTile.y });
-      console.log(`[Bot ${bot.name}] DÉBARQUE ${count} unités en (${landTile.x},${landTile.y})`);
-    }
-  }
+  // 7. WAVE NAVALE — RETIRÉE (système eau supprimé).
 }
 
 // Reverse-map unité → tech qui la débloque (via node.unlocks.units ou node.unitType).
@@ -1572,10 +1219,7 @@ function computeVisibility(player) {
   if (!vis) return;
   vis.visible.fill(0);
   if (!player.eliminated && player.hp > 0) {
-    // Tech 'cartography' : révèle TOUT la map (vision instantanée partout)
-    if (hasTech(player, 'cartography')) {
-      vis.visible.fill(1);
-    } else {
+    {
       markCircle(vis.visible, player.x, player.y, player.vision || HDV_LEVELS[0].vision);
       for (const unit of Object.values(gameState.units)) {
         if (unit.ownerId === player.id) markCircle(vis.visible, unit.x, unit.y, unitVisionRadius(unit));
@@ -2053,41 +1697,9 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Bateau : doit spawner depuis un port (et dans l'eau adjacente)
+    // Système eau retiré : on spawn toujours sur terre autour du HDV.
     let spawnX, spawnY;
-    if (typeId === 'boat') {
-      const ports = gameState.buildings.filter(b => b.type === 'port' && b.ownerId === socket.id && b.hp > 0);
-      if (ports.length === 0) {
-        socket.emit('spawnFailed', { reason: 'no_port' });
-        return;
-      }
-      // Cherche la water tile la plus proche d'un port quelconque
-      let found = null;
-      for (const port of ports) {
-        const tx0 = Math.floor(port.x / TILE_SIZE);
-        const ty0 = Math.floor(port.y / TILE_SIZE);
-        for (let r = 1; r <= 3 && !found; r++) {
-          for (let dy = -r; dy <= r && !found; dy++) {
-            for (let dx = -r; dx <= r && !found; dx++) {
-              if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; // anneau de rayon r
-              if (isWaterTile(tx0 + dx, ty0 + dy)) {
-                found = {
-                  x: (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2,
-                  y: (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2,
-                };
-              }
-            }
-          }
-        }
-        if (found) break;
-      }
-      if (!found) {
-        socket.emit('spawnFailed', { reason: 'no_water_near_port' });
-        return;
-      }
-      spawnX = found.x; spawnY = found.y;
-    } else {
-      // Cherche une position grass libre autour du HDV (évite spawn dans l'eau)
+    {
       const pos = findFreeSpawnPos(p.x, p.y, 70 + Math.random() * 30, false);
       spawnX = pos.x; spawnY = pos.y;
     }
@@ -2245,15 +1857,8 @@ io.on('connection', (socket) => {
       unit.attackTargetId   = null;
       unit.attackTargetType = null;
       unit.mode = 'move';
-      // Pathfinding eau : calcule un waypoint de contournement si lac sur la trajectoire
+      // Pathfinding eau retiré.
       unit.waypoint = null;
-      if (unit.type !== 'boat') {
-        const waterCount = pathHasWaterCount(unit.x, unit.y, cx, cy);
-        if (waterCount > 3) {
-          const wp = findWaypointAroundWater(unit.x, unit.y, cx, cy);
-          if (wp) unit.waypoint = wp;
-        }
-      }
     }
   });
 
@@ -2277,69 +1882,10 @@ io.on('connection', (socket) => {
   });
 
   // ── Construction d'un bâtiment dans la zone d'une base (HDV/village) ──
-  // ── Transport de troupes par bateau ────────────────────────────────
-  // Capacité 4 passagers max par bateau. Embarquement nécessite proximité (≤ 100px).
-  // Débarquement nécessite une tile terre (pas de l'eau).
-  const BOAT_CAPACITY = 4;
-  socket.on('embarkBoat', ({ boatId, unitIds } = {}) => {
-    const p = gameState.players[socket.id];
-    if (!p || p.eliminated) return;
-    const boat = gameState.units[boatId];
-    if (!boat || boat.ownerId !== socket.id || boat.type !== 'boat') return;
-    if (!Array.isArray(unitIds)) return;
-    boat.passengers = boat.passengers || [];
-    let embarkedCount = 0;
-    for (const uid of unitIds) {
-      if (boat.passengers.length >= BOAT_CAPACITY) break;
-      const u = gameState.units[uid];
-      if (!u || u.ownerId !== socket.id) continue;
-      if (u.type === 'boat') continue;
-      if (Math.hypot(u.x - boat.x, u.y - boat.y) > 100) continue;
-      // Mémorise l'état de l'unité (recréée à débarquement)
-      boat.passengers.push({
-        type: u.type, hp: u.hp, maxHp: u.maxHp,
-        speed: u.speed, range: u.range, damage: u.damage, cost: u.cost,
-      });
-      delete gameState.units[uid];
-      embarkedCount++;
-    }
-    if (embarkedCount > 0) {
-      io.emit('boatEmbarked', { boatId, passengerCount: boat.passengers.length, embarked: embarkedCount });
-      console.log(`Bateau ${boatId} : ${embarkedCount} unité(s) embarquée(s) (total ${boat.passengers.length}/${BOAT_CAPACITY})`);
-    }
-  });
-  socket.on('disembarkBoat', ({ boatId, destX, destY } = {}) => {
-    const p = gameState.players[socket.id];
-    if (!p || p.eliminated) return;
-    const boat = gameState.units[boatId];
-    if (!boat || boat.ownerId !== socket.id || boat.type !== 'boat') return;
-    if (!boat.passengers || boat.passengers.length === 0) return;
-    if (!Number.isFinite(destX) || !Number.isFinite(destY)) return;
-    // La destination doit être une tile terre (sinon le débarquement n'a pas de sens)
-    if (isWaterAt(destX, destY)) {
-      socket.emit('spawnFailed', { reason: 'must_disembark_on_land' });
-      return;
-    }
-    // Pour chaque passager, recrée à proximité de destX/destY (tile terre)
-    for (const pInfo of boat.passengers) {
-      const pos = findFreeSpawnPos(destX, destY, 40 + Math.random() * 30, false);
-      const unitId = `unit_${nextUnitId++}`;
-      gameState.units[unitId] = {
-        id: unitId, ownerId: socket.id,
-        x: pos.x, y: pos.y, type: pInfo.type,
-        hp: pInfo.hp, maxHp: pInfo.maxHp,
-        speed: pInfo.speed, range: pInfo.range, damage: pInfo.damage, cost: pInfo.cost,
-        targetX: null, targetY: null,
-        attackTargetId: null, attackTargetType: null,
-        lastAttackTime: 0,
-        mode: 'defend', defendX: pos.x, defendY: pos.y, defendRadius: 280,
-      };
-    }
-    const count = boat.passengers.length;
-    boat.passengers = [];
-    io.emit('boatDisembarked', { boatId, count, x: destX, y: destY });
-    console.log(`Bateau ${boatId} : ${count} unité(s) débarquée(s) en (${destX}, ${destY})`);
-  });
+  // ── Transport bateau retiré (système eau supprimé) ──
+  // Les handlers embarkBoat/disembarkBoat restent en stub pour compat client legacy.
+  socket.on('embarkBoat', () => {});
+  socket.on('disembarkBoat', () => {});
 
   // Vendre un bâtiment : rembourse 50% du coût initial, détruit le bâtiment.
   socket.on('sellBuilding', ({ buildingId } = {}) => {
@@ -2410,9 +1956,9 @@ io.on('connection', (socket) => {
         return;
       }
     }
-    // Port : doit avoir au moins une tile d'eau adjacente
-    if (type === 'port' && !hasWaterNeighbor(x, y)) {
-      socket.emit('spawnFailed', { reason: 'port_needs_water' });
+    // Port retiré (système eau supprimé) — empêche explicitement la construction.
+    if (type === 'port') {
+      socket.emit('spawnFailed', { reason: 'building_disabled' });
       return;
     }
     // Coût
@@ -2868,22 +2414,9 @@ setInterval(() => {
     }
 
     const [nx, ny] = computeDesiredDir(unit, goalX, goalY, skipPlayerId, skipBuildingId);
-    const newX = unit.x + nx * step;
-    const newY = unit.y + ny * step;
-    // Blocage eau/terre : seul le boat va dans l'eau, les autres restent sur terre
-    const isBoat = unit.type === 'boat';
-    if (!isBoat && isWaterAt(newX, newY)) {
-      // Unité terrestre essaie d'entrer dans l'eau → essaie axe par axe (slide le long du bord)
-      if (!isWaterAt(newX, unit.y)) unit.x = newX;
-      else if (!isWaterAt(unit.x, newY)) unit.y = newY;
-      // sinon bloqué (reste sur place)
-    } else if (isBoat && !isWaterAt(newX, newY)) {
-      if (isWaterAt(newX, unit.y)) unit.x = newX;
-      else if (isWaterAt(unit.x, newY)) unit.y = newY;
-    } else {
-      unit.x = newX;
-      unit.y = newY;
-    }
+    unit.x += nx * step;
+    unit.y += ny * step;
+    // L'eau a été retirée : aucune collision sol/eau à gérer.
   }
 
   // 1.5. Colons arrivés : transforme en village
@@ -2974,30 +2507,7 @@ setInterval(() => {
     unit.y = Math.max(UNIT_RADIUS, Math.min(MAP_HEIGHT - UNIT_RADIUS, unit.y));
   }
 
-  // Push-out défensif : unités terrestres coincées dans l'eau → tile terre proche.
-  // Couvre le cas hérité (spawn pre-fix) + collision avec push-out hors map.
-  for (const unit of unitArr) {
-    if (unit.type === 'boat') continue;
-    if (!isWaterAt(unit.x, unit.y)) continue;
-    const tx0 = Math.floor(unit.x / TILE_SIZE);
-    const ty0 = Math.floor(unit.y / TILE_SIZE);
-    for (let r = 1; r <= 6; r++) {
-      let escaped = false;
-      for (let dy = -r; dy <= r && !escaped; dy++) {
-        for (let dx = -r; dx <= r && !escaped; dx++) {
-          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-          const ntx = tx0 + dx, nty = ty0 + dy;
-          if (ntx < 0 || ntx >= GRID_W || nty < 0 || nty >= GRID_H) continue;
-          if (!isWaterTile(ntx, nty)) {
-            unit.x = ntx * TILE_SIZE + TILE_SIZE / 2;
-            unit.y = nty * TILE_SIZE + TILE_SIZE / 2;
-            escaped = true;
-          }
-        }
-      }
-      if (escaped) break;
-    }
-  }
+  // Push-out eau retiré (système eau supprimé).
 
   // 3. Combat (ATTACK_MOVE: specific target | IDLE: nearest enemy | MOVE: skip)
   const toDelete = new Set();
