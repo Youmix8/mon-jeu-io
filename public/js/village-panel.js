@@ -108,8 +108,8 @@ const VillagePanel = (() => {
       <div class="unit-card" data-unit-id="${u.id}">
         <div class="unit-card-icon">${u.icon}</div>
         <div class="unit-card-name">${u.name}</div>
-        <div class="unit-card-stats">❤️ ${u.hp} &nbsp; 🗡 ${u.damage} &nbsp; 🎯 ${u.range}</div>
-        <div class="unit-card-cost">${u.cost} 💰</div>
+        <div class="unit-card-stats">❤ ${u.hp} &nbsp; ▶ ${u.damage} &nbsp; ◎ ${u.range}</div>
+        <div class="unit-card-cost">${u.cost} ◈</div>
         <div class="locked-note" data-role="lock"></div>
       </div>
     `).join('');
@@ -122,7 +122,7 @@ const VillagePanel = (() => {
           <div class="unit-card-icon">${b.icon}</div>
           <div class="unit-card-name">${b.name}</div>
           <div class="unit-card-stats">${b.desc || ''}</div>
-          <div class="unit-card-cost">${b.cost} 💰</div>
+          <div class="unit-card-cost">${b.cost} ◈</div>
           <div class="locked-note" data-role="lock"></div>
         </div>
       `).join('');
@@ -168,7 +168,7 @@ const VillagePanel = (() => {
       upgradeBtn.classList.add('disabled');
     } else {
       const cost = curLvl.upgradeCost;
-      upgradeBtn.textContent = `⬆ ${nextLvl.name} — ${cost} 💰`;
+      upgradeBtn.textContent = `▲ ${nextLvl.name} — ${cost} ◈`;
       upgradeBtn.disabled = me.gold < cost;
       upgradeBtn.classList.toggle('disabled', me.gold < cost);
     }

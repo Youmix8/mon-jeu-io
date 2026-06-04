@@ -823,3 +823,45 @@ hr {
   backdrop-filter: blur(10px) saturate(140%);
   -webkit-backdrop-filter: blur(10px) saturate(140%);
 }
+
+/* ─── Glyphes néon (rebrand) ─────────────────────────────────── */
+/* Remplacent les emojis médiévaux. Couleurs tirées de la palette
+   ressource/axe ; léger glow pour rester cohérent avec le thème. */
+.g-gold,
+.g-pr,
+.g-mana,
+.g-faith,
+.g-pop,
+.g-sel,
+.g-hp,
+.g-base,
+.g-village,
+.g-ring,
+.g-kbd,
+.g-tree,
+.g-debug,
+.g-shield,
+.g-spec {
+  display: inline-block;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.05em;
+  line-height: 1;
+  margin-right: 2px;
+  text-shadow: 0 0 6px currentColor;
+}
+.g-gold     { color: var(--gold); }
+.g-pr       { color: var(--pr); }
+.g-mana     { color: var(--mana); }
+.g-faith    { color: var(--faith); }
+.g-pop      { color: var(--pop); }
+.g-sel      { color: var(--accent-cyan); }
+.g-hp       { color: #ef4444; }
+.g-base     { color: var(--accent-cyan); }
+.g-village  { color: var(--accent-cyan); }
+.g-ring     { color: var(--accent-cyan); }
+.g-kbd      { color: var(--text-soft); }
+.g-tree     { color: var(--accent-violet); }
+.g-debug    { color: var(--text-soft); }
+.g-shield   { color: #c4a47a; }
+.g-spec     { color: var(--text-soft); }

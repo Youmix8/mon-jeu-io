@@ -70,8 +70,8 @@ const BuildingInfoPanel = (() => {
     // Production passive (depuis entitiesConfig)
     const eCfg = (typeof ENTITIES_CONFIG !== 'undefined') ? ENTITIES_CONFIG[type] : null;
     if (eCfg) {
-      if (eCfg.manaGen)  lines.push(`🔮 Génère <b>+${eCfg.manaGen} mana/sec</b>`);
-      if (eCfg.faithGen) lines.push(`🙏 Génère <b>+${eCfg.faithGen} foi/sec</b>`);
+      if (eCfg.manaGen)  lines.push(`✦ Génère <b>+${eCfg.manaGen} mana/sec</b>`);
+      if (eCfg.faithGen) lines.push(`✚ Génère <b>+${eCfg.faithGen} foi/sec</b>`);
       if (eCfg.produces) lines.push(`🏭 Permet de produire : <b>${eCfg.produces}</b>`);
     }
     // (port retiré — système eau supprimé)
@@ -79,7 +79,7 @@ const BuildingInfoPanel = (() => {
     if (type === 'altar')     lines.push(`🕯 Petit générateur de foi (axe Religion)`);
     if (type === 'temple')    lines.push(`⛩ Générateur intermédiaire de foi`);
     if (type === 'cathedral') lines.push(`⛪ Générateur majeur de foi`);
-    if (type === 'sanctum')   lines.push(`🔮 Petit générateur de mana (axe Magie)`);
+    if (type === 'sanctum')   lines.push(`✦ Petit générateur de mana (axe Magie)`);
     if (type === 'mage_tower')lines.push(`🧙 Générateur intermédiaire de mana + produit des Sorciers`);
     return lines.length ? lines.join('<br/>') : '<i>Bâtiment passif</i>';
   }
@@ -104,14 +104,14 @@ const BuildingInfoPanel = (() => {
         <button class="bip-close" title="Fermer">×</button>
       </div>
       <div class="bip-hp-row">
-        <span class="bip-label">❤️ HP :</span>
+        <span class="bip-label">❤ HP :</span>
         <div class="bip-hp-bar"><div class="bip-hp-fill" style="width:${hpPct}%; background:${hpColor}"></div></div>
         <span class="bip-hp-text">${b.hp} / ${b.maxHp}</span>
       </div>
       <div class="bip-effects">${_describeEffects(def, b.type)}</div>
       <div class="bip-footer">
         ${isMine
-          ? `<button class="bip-sell">💰 Vendre <b>+${refund}</b> gold</button>`
+          ? `<button class="bip-sell">◈ Vendre <b>+${refund}</b> gold</button>`
           : `<div class="bip-foreign">🚫 Bâtiment adverse</div>`
         }
       </div>

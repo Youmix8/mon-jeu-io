@@ -36,7 +36,7 @@ const SpellCast = (() => {
         }
         const costType = sp.costType || 'mana';
         const current  = (costType === 'faith') ? (me.faith || 0) : (me.mana || 0);
-        const label    = (costType === 'faith') ? '🙏 foi' : '🔮 mana';
+        const label    = (costType === 'faith') ? '✚ foi' : '✦ mana';
         if (current < sp.cost) {
           _flashHud(`Pas assez de ${label} (${sp.cost} requis)`);
           return;

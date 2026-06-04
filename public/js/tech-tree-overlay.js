@@ -15,9 +15,9 @@ const TechTreeOverlay = (() => {
 
   // Couleurs des axes
   const AXIS_COLORS = {
-    science:  { stroke: '#3b82f6', glow: 'rgba(59,130,246,0.5)',  name: '🔬 Science'  },
-    magic:    { stroke: '#a855f7', glow: 'rgba(168,85,247,0.5)',  name: '✨ Magie'    },
-    religion: { stroke: '#f59e0b', glow: 'rgba(245,158,11,0.5)',  name: '⛪ Religion' },
+    science:  { stroke: '#22d3ee', glow: 'rgba(34,211,238,0.5)',  name: '◆ Science'  },
+    magic:    { stroke: '#a78bfa', glow: 'rgba(167,139,250,0.5)', name: '✦ Magie'    },
+    religion: { stroke: '#fcd34d', glow: 'rgba(252,211,77,0.5)',  name: '✚ Religion' },
   };
 
   function ensureDOM() {
@@ -40,13 +40,13 @@ const TechTreeOverlay = (() => {
     `;
     header.innerHTML = `
       <div style="display:flex; gap:18px; align-items:center; pointer-events:auto;">
-        <h2 style="margin:0; font-size: 22px; font-weight: 700;">🌳 Arbre des Technologies</h2>
+        <h2 style="margin:0; font-size: 22px; font-weight: 700; letter-spacing: 0.5px;"><span style="color:#22d3ee;">⌬</span> Arbre des Technologies</h2>
         <div style="font-size: 14px; color: #94a3b8;">Pan : drag &nbsp;·&nbsp; Zoom : molette &nbsp;·&nbsp; Échap : fermer</div>
       </div>
       <div id="tt-resources" style="display:flex; gap:14px; font-size: 15px; font-weight: 700; pointer-events:auto;">
-        <span>🔬 <span id="tt-pr">0</span> PR</span>
-        <span style="color:#a855f7;">🔮 <span id="tt-mana">0</span></span>
-        <span style="color:#f59e0b;">🙏 <span id="tt-faith">0</span></span>
+        <span>▤ <span id="tt-pr">0</span> PR</span>
+        <span style="color:#a855f7;">✦ <span id="tt-mana">0</span></span>
+        <span style="color:#f59e0b;">✚ <span id="tt-faith">0</span></span>
         <button id="tt-close" style="background:rgba(15,30,42,0.9); border:1px solid #2a4d5c; color:#e2e8f0; padding:6px 14px; border-radius:6px; cursor:pointer; font-family:inherit; font-weight:600;">✕</button>
       </div>
     `;
@@ -298,8 +298,9 @@ const TechTreeOverlay = (() => {
       g.insertBefore(halo, bg);
     }
 
-    // Icône emoji centrée
-    const ic = _text(0, 6, node.icon || '?', 22);
+    // Icône néon — substitue l'emoji serveur par un glyphe néon cohérent (NeonGlyphs).
+    const glyph = (typeof NeonGlyphs !== 'undefined') ? NeonGlyphs.tech(node.id, node.icon) : (node.icon || '?');
+    const ic = _text(0, 6, glyph, 22);
     g.appendChild(ic);
 
     // Label (nom)
@@ -351,7 +352,7 @@ const TechTreeOverlay = (() => {
 
     const axisCol = AXIS_COLORS[node.axis] || AXIS_COLORS.science;
     info.innerHTML = `
-      <div style="font-size: 16px; font-weight: 700; color: ${axisCol.stroke}; margin-bottom: 4px;">${node.icon} ${node.name}</div>
+      <div style="font-size: 16px; font-weight: 700; color: ${axisCol.stroke}; margin-bottom: 4px;">${(typeof NeonGlyphs !== 'undefined') ? NeonGlyphs.tech(node.id, node.icon) : node.icon} ${node.name}</div>
       <div style="color: #cbd5e1; margin-bottom: 8px;">${node.desc}</div>
       <div style="font-size: 12px; color: #94a3b8;"><strong>Coût :</strong> ${node.cost} PR</div>
       <div style="font-size: 12px; color: #94a3b8;"><strong>Prérequis :</strong> ${reqsHtml}</div>

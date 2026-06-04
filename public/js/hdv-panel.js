@@ -134,8 +134,8 @@ const HdvPanel = (() => {
       <div class="unit-card" data-unit-id="${u.id}">
         <div class="unit-card-icon">${u.icon}</div>
         <div class="unit-card-name">${u.name}</div>
-        <div class="unit-card-stats">❤️ ${u.hp} &nbsp; 🗡 ${u.damage} &nbsp; 🎯 ${u.range} &nbsp; 👥 ${popCost}</div>
-        <div class="unit-card-cost">${u.cost} 💰${extraCost}</div>
+        <div class="unit-card-stats">❤ ${u.hp} &nbsp; ▶ ${u.damage} &nbsp; ◎ ${u.range} &nbsp; ⌬ ${popCost}</div>
+        <div class="unit-card-cost">${u.cost} ◈${extraCost}</div>
         <div class="locked-note" data-role="lock"></div>
       </div>`;
     }).join('');
@@ -158,7 +158,7 @@ const HdvPanel = (() => {
           <div class="unit-card-icon">${b.icon}</div>
           <div class="unit-card-name">${b.name}</div>
           <div class="unit-card-stats">${b.desc || ''}</div>
-          <div class="unit-card-cost">${b.cost} 💰</div>
+          <div class="unit-card-cost">${b.cost} ◈</div>
           <div class="locked-note" data-role="lock"></div>
         </div>
       `).join('');
@@ -206,7 +206,7 @@ const HdvPanel = (() => {
       upgradeBtn.classList.add('disabled');
     } else {
       const cost = levels[lvlIdx].upgradeCost;
-      upgradeBtn.textContent = `⬆ Améliorer Lv ${me.hdvLevel + 1} (${cost} 💰)`;
+      upgradeBtn.textContent = `▲ Améliorer Lv ${me.hdvLevel + 1} (${cost} ◈)`;
       upgradeBtn.disabled = me.gold < cost;
       upgradeBtn.classList.toggle('disabled', me.gold < cost);
     }

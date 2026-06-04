@@ -77,9 +77,9 @@ const BuildMode = (() => {
     _spawnGhost(scene.input.activePointer.worldX, scene.input.activePointer.worldY);
 
     if (lineMode) {
-      _toast(`🧱 Rempart : clique pour le 1er point, puis bouge pour tracer la ligne — ${def.cost} 💰 / case`);
+      _toast(`🧱 Rempart : clique pour le 1er point, puis bouge pour tracer la ligne — ${def.cost} ◈ / case`);
     } else {
-      _toast(`Place ton ${def.name} (clic = construire, clic droit / Échap = annuler) — ${def.cost} 💰`);
+      _toast(`Place ton ${def.name} (clic = construire, clic droit / Échap = annuler) — ${def.cost} ◈`);
     }
   }
 
@@ -156,7 +156,7 @@ const BuildMode = (() => {
       const totalCost = N * wallCost;
       const myGold = (Network.getState().players[Network.getMyId()] || {}).gold || 0;
       const affordable = myGold >= totalCost;
-      _toast(`🧱 ${N} rempart${N > 1 ? 's' : ''} × ${wallCost} = ${totalCost} 💰 ${affordable ? '' : '⛔ (gold insuffisant)'} — clic = poser, Échap = annuler`);
+      _toast(`🧱 ${N} rempart${N > 1 ? 's' : ''} × ${wallCost} = ${totalCost} ◈ ${affordable ? '' : '⛔ (gold insuffisant)'} — clic = poser, Échap = annuler`);
       return;
     }
 

@@ -73,7 +73,7 @@ const DebugPanel = (() => {
 
   function _render() {
     const cats = _categoriesOfEntities();
-    const modeLabel = mode === 'spawn' ? '🎯 MODE SPAWN' : '📏 MODE TUNING';
+    const modeLabel = mode === 'spawn' ? '◎ MODE SPAWN' : '📏 MODE TUNING';
 
     let html = `
       <button class="mode-toggle" id="dbg-mode-toggle">${modeLabel} (clic pour basculer)</button>
@@ -83,8 +83,8 @@ const DebugPanel = (() => {
 
     if (mode === 'spawn') {
       const blocks = [
-        { title: '🔬 Science',  list: cats.science  || [] },
-        { title: '🔮 Magie',    list: cats.magic    || [] },
+        { title: '▤ Science',  list: cats.science  || [] },
+        { title: '✦ Magie',    list: cats.magic    || [] },
         { title: '✝️ Religion', list: cats.religion || [] },
       ];
       for (const b of blocks) {
