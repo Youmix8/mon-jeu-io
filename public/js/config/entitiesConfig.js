@@ -255,21 +255,7 @@ const ENTITIES_CONFIG = {
     hdvUpgrade: true,
   },
 
-  port: {
-    type: 'building', category: 'science',
-    assetKey: 'port',
-    scale: 2.2, displaySize: 56,
-    hp: 300, cost: 150,
-    produces: 'boat',
-  },
-
-  boat: {
-    type: 'unit', category: 'science',
-    assetKey: 'boat',
-    scale: 2.4, displaySize: 60,
-    hp: 100, dmg: 0, speed: 100, range: 0, cost: 80,
-    water: true,
-  },
+  // port / boat retirés (système eau supprimé).
 
   // ══════════════════════════════════════════════════════════════════
   // BÂTIMENTS — AXE MAGIE

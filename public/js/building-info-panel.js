@@ -74,7 +74,7 @@ const BuildingInfoPanel = (() => {
       if (eCfg.faithGen) lines.push(`🙏 Génère <b>+${eCfg.faithGen} foi/sec</b>`);
       if (eCfg.produces) lines.push(`🏭 Permet de produire : <b>${eCfg.produces}</b>`);
     }
-    if (type === 'port') lines.push(`⛵ Permet de produire des bateaux dans l'eau adjacente`);
+    // (port retiré — système eau supprimé)
     if (type === 'wall') lines.push(`🧱 Bloque le passage des unités (HP élevé)`);
     if (type === 'altar')     lines.push(`🕯 Petit générateur de foi (axe Religion)`);
     if (type === 'temple')    lines.push(`⛩ Générateur intermédiaire de foi`);

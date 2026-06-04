@@ -23,17 +23,10 @@ const nameInput    = document.getElementById('name-input');
 const playBtn      = document.getElementById('play-btn');
 
 // État de la config map (mis à jour par les boutons du lobby)
-let selectedMapType = 'lakes';
+// L'eau a été retirée : type forcé à 'no_water' côté serveur, ici uniquement la taille.
+const selectedMapType = 'no_water';
 let selectedMapSize = 'medium';
 
-// Boutons type de carte
-document.querySelectorAll('.map-type-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.map-type-btn').forEach(b => b.classList.remove('selected'));
-    btn.classList.add('selected');
-    selectedMapType = btn.dataset.type;
-  });
-});
 // Boutons taille de carte
 document.querySelectorAll('.map-size-btn').forEach(btn => {
   btn.addEventListener('click', () => {
