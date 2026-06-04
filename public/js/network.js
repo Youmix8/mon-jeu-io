@@ -18,6 +18,7 @@ const Network = (() => {
   };
   let onSpawnFailedCallback      = null;
   let onAttackCallback           = null;
+  let onUnitSummonedCallback     = null;
   let onPlayerEliminatedCallback = null;
   let onGameOverCallback         = null;
   let onMatchRestartedCallback   = null;
@@ -232,7 +233,9 @@ const Network = (() => {
         if (main && main.add) Animations.animateSpellCast(main, 'purifying_light', data.x, data.y);
       }
     });
-    socket.on('unitSummoned', () => { /* visuel via _syncUnits */ });
+    socket.on('unitSummoned', (data) => {
+      if (onUnitSummonedCallback) onUnitSummonedCallback(data);
+    });
 
     socket.on('gameOver', (data) => {
       if (onGameOverCallback) onGameOverCallback(data);
@@ -374,6 +377,7 @@ const Network = (() => {
   function setOnCampCleared(cb)      { onCampClearedCallback = cb; }
   function setOnTechUnlocked(cb)     { onTechUnlockedCallback = cb; }
   function setOnInitReceived(cb)     { onInitReceivedCallback = cb; if (initReceived && cb) cb(); }
+  function setOnUnitSummoned(cb)     { onUnitSummonedCallback = cb; }
   function isInitReceived()          { return initReceived; }
   function getState()                { return state; }
   function getMyId()                 { return myId; }
@@ -388,7 +392,7 @@ const Network = (() => {
     embarkBoat, disembarkBoat, isWaterAt,
     debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,
-    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnBarbarianRaid, setOnCampCleared, setOnInitReceived,
+    setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnBarbarianRaid, setOnCampCleared, setOnInitReceived, setOnUnitSummoned,
     isInitReceived,
   };
 })();

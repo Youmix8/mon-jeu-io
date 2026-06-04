@@ -32,6 +32,13 @@ const SpriteFactory = (() => {
       g.fillRect(0, 0, 3, 3);
     }, 3, 3);
 
+    // Projectile néon volant : petit disque blanc tintable (4×4).
+    // Utilisé pour les unités à projectile (archer/crossbow/catapult/cannon).
+    _shape(scene, 'sf-projectile', g => {
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(3, 3, 2);
+    }, 6, 6);
+
     // Anneau de sélection cyan (couleur fixe — pas de tint nécessaire).
     _shape(scene, 'sf-selection', g => {
       g.lineStyle(2, 0x22d3ee, 1);

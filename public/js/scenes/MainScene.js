@@ -123,6 +123,28 @@ class MainScene extends Phaser.Scene {
       this._addKillFeedEntry(`💀 ${data.name} éliminé !`, data.color);
     });
 
+    // Soul Harvest — pop néon vert lime quand un squelette ami apparaît au point d'un kill magique.
+    Network.setOnUnitSummoned && Network.setOnUnitSummoned((data) => {
+      if (data.source !== 'soul_harvest') return;
+      if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
+      const lime = 0xa3e635; // couleur soul_harvest (cohérence palette néon)
+      // Halo expansif
+      const halo = this.add.circle(data.x, data.y, 14, lime, 0).setDepth(56);
+      halo.setStrokeStyle(2.5, lime, 1).setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({
+        targets: halo, scale: { from: 0.3, to: 2.4 }, alpha: { from: 1, to: 0 },
+        duration: 520, ease: 'Quad.easeOut', onComplete: () => halo.destroy(),
+      });
+      // Burst de particules néon lime
+      const emitter = this.add.particles(data.x, data.y, 'particle', {
+        tint: lime, speed: { min: 40, max: 90 },
+        scale: { start: 1.2, end: 0 }, alpha: { start: 1, end: 0 },
+        lifespan: 500, blendMode: Phaser.BlendModes.ADD, emitting: false,
+      });
+      emitter.explode(12);
+      this.time.delayedCall(600, () => emitter.destroy());
+    });
+
     Network.setOnVillageCaptured((data) => {
       this._addKillFeedEntry(`🏘 ${data.ownerName} capture un village`, Theme.factionColorStr(data.ownerId));
       // Flash de capture (juice §11.7) : pulse doré + 10 particules dorées au centre du village
@@ -226,6 +248,15 @@ class MainScene extends Phaser.Scene {
 
       // Particule d'impact (couleur équipe attaquante) à chaque coup porté.
       this._spawnImpactParticles(tx, ty, attackerColorInt);
+
+      // Ricochet (tech 'arcane_ricochet') : mini-beam vers 2e cible + flash
+      if (data.ricochet && Number.isFinite(data.ricochet.x) && Number.isFinite(data.ricochet.y)) {
+        this._playRicochet(tx, ty, data.ricochet.x, data.ricochet.y);
+        this._spawnImpactParticles(data.ricochet.x, data.ricochet.y, Theme.BEAM.magic);
+        if (data.ricochet.killed) {
+          this._spawnDeathParticles(data.ricochet.x, data.ricochet.y, Theme.BEAM.magic);
+        }
+      }
     });
 
     // ── Input ─────────────────────────────────────────────────────
@@ -956,8 +987,12 @@ class MainScene extends Phaser.Scene {
           .setOrigin(0.5, 0.5)
           .setDisplaySize(displaySize, displaySize)
           .setDepth(50);
-        // Couleur : faction pour joueur, couleur propre pour bête
-        const tintColor = isBeast ? Theme.BEAST[unit.type].color : colorInt;
+        // Couleur : faction pour joueur, couleur propre pour bête,
+        // vert lime néon pour les squelettes soul_harvest (signature visuelle distincte).
+        let tintColor;
+        if (unit._soulHarvest) tintColor = 0xa3e635;
+        else if (isBeast) tintColor = Theme.BEAST[unit.type].color;
+        else tintColor = colorInt;
         sprite.setTint(tintColor);
         // Glow néon via preFX (postFX désactivé dans ce build Phaser)
         const gp = isBoss ? Theme.GLOW.unitBoss : Theme.GLOW.unit;
@@ -1348,6 +1383,38 @@ class MainScene extends Phaser.Scene {
     this._drawBeam(ax, ay, tx, ty, color);
   }
 
+  // ── Projectile néon volant : sprite tinté qui vole de attacker → target en 280ms ──
+  // Utilisé pour les unités à projectile (archer, crossbow, catapult, cannon).
+  // Trail particle néon derrière (couleur de tint).
+  _drawProjectile(x0, y0, x1, y1, color) {
+    const proj = this.add.sprite(x0, y0, 'sf-projectile')
+      .setOrigin(0.5, 0.5).setDisplaySize(7, 7).setDepth(55);
+    proj.setTint(color);
+    proj.setBlendMode(Phaser.BlendModes.ADD);
+    // Glow via preFX (cohérence avec les autres sprites néon)
+    if (proj.preFX && proj.preFX.addGlow) {
+      proj.preFX.setPadding(6);
+      proj.preFX.addGlow(color, 2.5, 0, false, 0.15);
+    }
+    // Trail : emitter qui suit le sprite et émet 1 particule tous les 25ms
+    const emitter = this.add.particles(x0, y0, 'particle', {
+      tint: color, follow: proj,
+      speed: { min: 5, max: 15 }, scale: { start: 1.0, end: 0 },
+      alpha: { start: 0.7, end: 0 }, lifespan: 220,
+      frequency: 25, blendMode: Phaser.BlendModes.ADD,
+    });
+    this.tweens.add({
+      targets: proj, x: x1, y: y1,
+      duration: 280, ease: 'Quad.easeOut',
+      onComplete: () => {
+        emitter.stop();
+        this.time.delayedCall(250, () => emitter.destroy());
+        proj.destroy();
+      },
+    });
+    return proj;
+  }
+
   // ── Animations d'attaque pour les unités : beam si distance, sinon flash mêlée ──
   _playAttackAnimation(attacker, tx, ty) {
     const dist = Math.hypot(tx - attacker.x, ty - attacker.y);
@@ -1368,12 +1435,37 @@ class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Beam distant : couleur dépend de la catégorie
+    // ── Catégorie 'ranged' : nouveau visuel projectile néon volant ──
+    // Archer/Arbalétrier/Catapulte/Canon ont leur propre sprite qui vole.
+    // Magie/Holy gardent les beams laser instantanés (signature visuelle distincte).
+    if (category === 'ranged') {
+      this._drawProjectile(attacker.x, attacker.y, tx, ty, Theme.BEAM.ranged);
+      return;
+    }
+
+    // Beam distant pour magie/holy : couleur dépend de la catégorie
     let color;
     if (category === 'magic') color = Theme.BEAM.magic;
     else if (category === 'holy') color = Theme.BEAM.holy;
     else color = Theme.BEAM.ranged;
     this._drawBeam(attacker.x, attacker.y, tx, ty, color);
+  }
+
+  // ── Ricochet visible (juice tech 'arcane_ricochet') ──
+  // Affiche un mini-beam du 1er impact vers la 2e cible + flash au point de ricochet.
+  _playRicochet(srcX, srcY, dstX, dstY) {
+    // Mini-flash au point de départ (1er impact)
+    const flash = this.add.circle(srcX, srcY, 6, 0xffffff, 0.85).setDepth(56);
+    flash.setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({
+      targets: flash, scale: { from: 0.4, to: 1.4 }, alpha: { from: 1, to: 0 },
+      duration: 200, ease: 'Cubic.easeOut',
+      onComplete: () => flash.destroy(),
+    });
+    // Beam de rebond — délai 80ms pour que l'œil capte le rebond, pas instantané
+    this.time.delayedCall(60, () => {
+      this._drawBeam(srcX, srcY, dstX, dstY, Theme.BEAM.magic);
+    });
   }
 
   _showMoveIndicator(x, y, isAttack = false) {
