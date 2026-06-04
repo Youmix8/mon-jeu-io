@@ -865,11 +865,13 @@ function addBot() {
     vision: HDV_LEVELS[0].vision,
     populationUsed: 0, populationMax: BASE_POPULATION,
     botCooldown: 0,
+    // Spécialité bot (science / magic / religion) — détermine sa route tech et ses unités préférées.
+    botSpecialty: pickBotSpecialty(),
   };
   gameState.players[botId] = botPlayer;
   initVisibility(botId);
   peakPlayerCount = Math.max(peakPlayerCount, Object.keys(gameState.players).length);
-  console.log(`Bot "${botPlayer.name}" added — slot ${slot}`);
+  console.log(`Bot "${botPlayer.name}" added — slot ${slot} — spécialité ${botPlayer.botSpecialty}`);
   checkMatchState();
   return botPlayer;
 }
@@ -890,29 +892,55 @@ function addBot() {
 // Différence vs ancien : ne spam plus 1 unité/sec sur l'HDV ennemi ; constitue
 // d'abord une army, capture les villages pour le passif, et lance des vagues groupées.
 
-const BOT_TECH_PRIORITY = [
-  // Économie d'abord (gold passif = snowball)
-  'agriculture',
+// ── Stratégies de tech par spécialité bot ──
+// Chaque bot reçoit aléatoirement une spécialité au spawn (science/magic/religion).
+// Il suit en priorité sa branche, mais débloque aussi les techs économiques de base.
+const BOT_TECH_PRIORITY_SCIENCE = [
+  'agriculture', 'archery', 'riding', 'military_architecture',
+  'ballistics', 'reconnaissance', 'empire',
+  'steel_forge', 'crossbows', 'war_academy', 'siege_engineering',
+  'gunpowder', 'citadel', 'renaissance',
+];
+const BOT_TECH_PRIORITY_MAGIC = [
+  // Économie de base d'abord
+  'agriculture', 'stargazing', 'elements_study',
+  // Mage tower (T2) débloque le nécromancien
+  'mage_tower', 'pyromancy',
+  // Militaire de base pour ne pas être démuni en early
+  'archery', 'riding',
+  // Magie avancée
+  'lightning', 'enchantment', 'cryomancy',
+  'necromancy', 'illusion', 'arcane_ricochet',
+  'lich', 'elemental_summon', 'time_mastery',
+  'arcane_avatar',
+];
+const BOT_TECH_PRIORITY_RELIGION = [
+  // Économie + religion de base
+  'agriculture', 'animism', 'prayer',
+  'temple', 'pilgrimage', 'inquisition',
   // Militaire de base
   'archery', 'riding',
-  // Défense
-  'military_architecture',  // tour
-  // Économie avancée
-  'empire',
-  // Militaire avancé
-  'steel_forge', 'crossbows', 'war_academy',
-  'siege_engineering',      // catapulte
-  // Sciences avancées
-  'gunpowder', 'citadel',
-  'renaissance',
+  // Religion avancée
+  'blessing', 'purifying_light', 'sacred_order',
+  'cathedral', 'crusade', 'martyrs',
+  'guardian_angel', 'excommunication', 'unwavering_faith',
+  'divine_invocation',
 ];
+// Pool d'unités prioritaires SPÉCIFIQUE à chaque spécialité, du plus fort au plus simple.
+// Le bot tente toujours ses unités haut-tier d'abord ; à défaut, fallback militaire commun.
+const BOT_UNITS_BY_SPECIALTY = {
+  science:  ['elite_guard', 'cannon', 'heavy_knight', 'crossbowman', 'general', 'catapult', 'knight', 'archer', 'soldier'],
+  magic:    ['arcane_dragon', 'fire_elemental', 'necromancer', 'knight', 'archer', 'soldier'],
+  religion: ['god_avatar', 'angel', 'holy_knight', 'inquisitor', 'pilgrim', 'knight', 'archer', 'soldier'],
+};
 
-// Priorité tech additionnelle pour bots ayant détecté de l'eau sur la map.
-// Insérée APRÈS les techs de base (économie + archery/riding) mais AVANT le militaire haut tier.
-const BOT_TECH_PRIORITY_NAVAL = [
-  'construction', // prérequis marine
-  'marine',       // débloque port + bateau
-];
+// Choix aléatoire de spécialité au moment du spawn d'un bot.
+function pickBotSpecialty() {
+  const r = Math.random();
+  if (r < 0.34) return 'science';
+  if (r < 0.67) return 'magic';
+  return 'religion';
+}
 
 function botTick(bot) {
   if (bot.eliminated) return;
@@ -923,17 +951,21 @@ function botTick(bot) {
   };
   const nowMs = Date.now();
 
-  // Détecte une seule fois si la map a assez d'eau pour justifier l'effort naval.
-  // currentMapType est 'no_water' | 'lakes' | 'continental' | 'island'.
-  if (bot.botState.hasNavalAmbition === null) {
-    bot.botState.hasNavalAmbition = (typeof currentMapType !== 'undefined' && currentMapType !== 'no_water');
-  }
-
   // 1. RECHERCHE TECH ────────────────────────────────────────────
-  // Priorité de base, puis naval si pertinent (insertion juste après archery/riding).
-  const techRoute = bot.botState.hasNavalAmbition
-    ? [...BOT_TECH_PRIORITY.slice(0, 3), ...BOT_TECH_PRIORITY_NAVAL, ...BOT_TECH_PRIORITY.slice(3)]
-    : BOT_TECH_PRIORITY;
+  // Chaque bot suit la route de sa spécialité, complétée par les autres axes
+  // une fois sa propre branche épuisée (pour qu'il continue de progresser tard).
+  const specialty = bot.botSpecialty || 'science';
+  let primaryRoute;
+  if (specialty === 'magic')         primaryRoute = BOT_TECH_PRIORITY_MAGIC;
+  else if (specialty === 'religion') primaryRoute = BOT_TECH_PRIORITY_RELIGION;
+  else                                primaryRoute = BOT_TECH_PRIORITY_SCIENCE;
+  // En fin de chaîne : techs des deux autres axes (pour le snowball late-game)
+  const techRoute = [
+    ...primaryRoute,
+    ...BOT_TECH_PRIORITY_SCIENCE,
+    ...BOT_TECH_PRIORITY_MAGIC,
+    ...BOT_TECH_PRIORITY_RELIGION,
+  ];
   for (const tid of techRoute) {
     if ((bot.unlockedTechs || []).includes(tid)) continue;
     const node = NEW_TECH_TREE[tid];
@@ -1003,7 +1035,8 @@ function botTick(bot) {
   const botPopMax  = getPopulationMax(bot);
 
   if (botPopUsed < botPopMax) {
-    const preferOrder = ['heavy_knight', 'crossbowman', 'general', 'catapult', 'knight', 'archer', 'soldier'];
+    // Ordre de préférence selon la spécialité du bot (magie/religion/science).
+    const preferOrder = BOT_UNITS_BY_SPECIALTY[specialty] || BOT_UNITS_BY_SPECIALTY.science;
     for (const typeId of preferOrder) {
       const def = UNIT_TYPES[typeId];
       if (!unitTypeUnlocked(bot, typeId)) continue;
@@ -1075,6 +1108,9 @@ function botTick(bot) {
           u.targetX = nearest.x + (Math.random() - 0.5) * 60;
           u.targetY = nearest.y + (Math.random() - 0.5) * 60;
           u.mode = 'move';
+          // Mémorise la cible village : à l'arrivée, l'unité reste sur place
+          // pour démarrer la capture (10s sur place).
+          u.defendX = nearest.x; u.defendY = nearest.y; u.defendRadius = 70;
         }
         bot.botState.lastVillageScout = nowMs;
         console.log(`[Bot ${bot.name}] envoie 3 unités capturer village ${nearest.id}`);
@@ -1101,12 +1137,16 @@ function botTick(bot) {
       if (score > bestScore) { bestScore = score; target = p; }
     }
     if (target) {
-      // 70% de l'army part en wave, 30% reste défensive
+      // 70% de l'army part en wave, 30% reste défensive.
+      // FIX PASSIVITÉ : on assigne attackTargetId=HDV plutôt qu'un point flou,
+      // de sorte que les unités gardent une cible explicite jusqu'à destruction.
       const waveSize = Math.floor(stillAtBase.length * 0.7);
       const wave = stillAtBase.slice(0, waveSize);
       for (const u of wave) {
-        u.targetX = target.x + (Math.random() - 0.5) * 180;
-        u.targetY = target.y + (Math.random() - 0.5) * 180;
+        u.attackTargetId = target.id;
+        u.attackTargetType = 'hdv';
+        u.targetX = target.x + (Math.random() - 0.5) * 120;
+        u.targetY = target.y + (Math.random() - 0.5) * 120;
         u.mode = 'move';
       }
       bot.botState.lastWaveTime = nowMs;
