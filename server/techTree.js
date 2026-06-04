@@ -197,9 +197,9 @@ const TECH_TREE = {
 
   pyromancy: {
     id: 'pyromancy', axis: 'magic', tier: 2, name: 'Pyromancie', icon: '🔥',
-    desc: 'Maitrise du feu : unites magie +30% degats (passif).',
+    desc: 'Maîtrise du feu : unités magie +45 % dégâts + chaque tir magique inflige une mini-AoE de 30 px (dégâts ×0.5 sur les ennemis périphériques).',
     cost: 30, requires: ['elements_study'],
-    unlocks: { passives: ['magic_dmg_boost'] },
+    unlocks: { passives: ['magic_dmg_boost', 'magic_splash'] },
     pos: pos('magic', 2, -1),
   },
   cryomancy: {
@@ -211,9 +211,9 @@ const TECH_TREE = {
   },
   mage_tower: {
     id: 'mage_tower', axis: 'magic', tier: 2, name: 'Tour de mage', icon: '🧙',
-    desc: 'Produit le Sorcier (HP 40, dégâts magiques 10, portée 200) + +1 mana/sec.',
+    desc: 'Débloque le Nécromancien (HP 70, dmg 14, portée 200) — sa victime ressuscite en allié temporaire. Construit aussi la Tour de mage (+1 mana/sec).',
     cost: 50, requires: ['elements_study'],
-    unlocks: { units: ['wizard'], buildings: ['mage_tower'] },
+    unlocks: { units: ['necromancer'], buildings: ['mage_tower'] },
     pos: pos('magic', 2, 1),
   },
 
@@ -241,9 +241,9 @@ const TECH_TREE = {
 
   necromancy: {
     id: 'necromancy', axis: 'magic', tier: 4, name: 'Nécromancie', icon: '💀',
-    desc: 'Débloque le Nécromancien : ressuscite un Squelette à chaque kill ennemi proche.',
+    desc: 'Renforce le revive : cap d\'undeads actifs +3 et squelettes invoqués avec +20 % HP/dmg.',
     cost: 100, requires: ['mage_tower', 'lightning'],
-    unlocks: { units: ['necromancer'] },
+    unlocks: { passives: ['necro_revive_buff'] },
     pos: pos('magic', 4, -1.2),
   },
   illusion: {
@@ -270,9 +270,9 @@ const TECH_TREE = {
   },
   lich: {
     id: 'lich', axis: 'magic', tier: 5, name: 'Liche', icon: '☠️',
-    desc: 'Upgrade le Nécromancien en Liche (HP 120, dmg 15) + Récolte d\'âmes : chaque kill par une unité magique invoque un squelette ami (HP 25, dmg 4, 15s, cap 5).',
+    desc: 'Transmutation : à chaque kill du Nécromancien, la victime ressuscite en CLONE allié à -40 % HP / -40 % dmg (au lieu d\'un simple squelette). Durée 30s.',
     cost: 180, requires: ['necromancy'],
-    unlocks: { units: ['lich'], passives: ['necro_upgrade', 'soul_harvest'] },
+    unlocks: { passives: ['lich_clone_revive'] },
     pos: pos('magic', 5, 0),
   },
   time_mastery: {

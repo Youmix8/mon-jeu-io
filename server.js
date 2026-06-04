@@ -82,15 +82,13 @@ const UNIT_TYPES = {
                    icon: '💣', desc: 'Très lent, dégâts énormes à longue portée.' },
   elite_guard:   { id: 'elite_guard',   name: 'Garde d\'élite',  cost: 100, manaCost: 0,  faithCost: 0,  populationCost: 3,  hp: 200, speed: 110, range:  35, damage: 20,  requiresTech: 'renaissance',
                    icon: '👑', desc: 'L\'élite militaire. Le meilleur soldat du jeu.' },
-  // Unités Magie
-  wizard:        { id: 'wizard',        name: 'Sorcier',         cost: 50,  manaCost: 30,  faithCost: 0,  populationCost: 1,  hp: 40,  speed:  80, range: 200, damage: 10,  requiresTech: 'mage_tower',
-                   icon: '🧙', desc: 'Dégâts magiques à distance, ignore les armures.' },
-  necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 80,  manaCost: 50,  faithCost: 0,  populationCost: 2,  hp: 50,  speed:  80, range: 150, damage:  6,  requiresTech: 'necromancy',
-                   icon: '💀', desc: 'Attaque magique à distance. (Résurrection : à venir.)' },
+  // Unités Magie — un seul mage : le Nécromancien (refonte v3).
+  // wizard et lich (unités) ont été retirés ; lich devient une tech-upgrade
+  // qui transforme le revive en "copie de l'unité tuée à -40 % HP/dmg".
+  necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 60,  manaCost: 30,  faithCost: 0,  populationCost: 2,  hp: 70,  speed:  80, range: 200, damage: 14,  requiresTech: 'mage_tower',
+                   icon: '💀', desc: 'Mage à distance. Sa victime ressuscite en allié temporaire.' },
   skeleton:      { id: 'skeleton',      name: 'Squelette',       cost: 15,  manaCost: 10,  faithCost: 0,  populationCost: 1,   hp: 30,  speed:  80, range:  30, damage:  5,  requiresTech: null,
                    icon: '☠️', desc: 'Invoqué par le Nécromancien. Durée 60s.' },
-  lich:          { id: 'lich',          name: 'Liche',           cost: 150,  manaCost: 80,  faithCost: 0,  populationCost: 4, hp: 120, speed:  80, range: 180, damage: 15,  requiresTech: 'lich',
-                   icon: '☠️', desc: 'Nécromancien suprême : longue portée + dégâts massifs.' },
   // Unités Religion
   pilgrim:       { id: 'pilgrim',       name: 'Pèlerin',         cost: 20,  manaCost: 0,  faithCost: 10,  populationCost: 1,  hp: 40,  speed: 100, range:   0, damage:  0,  requiresTech: 'pilgrimage',
                    icon: '🚶', desc: 'Ne combat pas. +0.5 foi/sec à son propriétaire.' },
@@ -286,7 +284,7 @@ const SPELLS = {
 };
 
 // Unités "magie/undead" (cibles bonus de Lumière purificatrice + Inquisiteur)
-const MAGIC_UNDEAD = new Set(['wizard', 'necromancer', 'lich', 'skeleton', 'skeleton_knight', 'fire_elemental', 'arcane_dragon']);
+const MAGIC_UNDEAD = new Set(['necromancer', 'skeleton', 'skeleton_knight', 'fire_elemental', 'arcane_dragon']);
 // Unités "religion" pour aura d'excommunication (religion_curse_aura)
 const RELIGION_UNITS = new Set(['holy_knight', 'inquisitor', 'pilgrim', 'paladin', 'angel', 'god_avatar']);
 
@@ -2593,9 +2591,9 @@ setInterval(() => {
           const owner = gameState.players[unit.ownerId];
           uDamage *= hasTech(owner, 'purifying_light') ? 3 : 2;
         }
-        // Tech 'pyromancy' : +30% dmg pour unités magie/undead du joueur
+        // Tech 'pyromancy' : +45% dmg pour unités magie/undead du joueur
         if (MAGIC_UNDEAD.has(unit.type) && hasTech(gameState.players[unit.ownerId], 'pyromancy')) {
-          uDamage *= 1.3;
+          uDamage *= 1.45;
         }
         // Tech 'unwavering_faith' (côté CIBLE) : -25% dmg reçus si l'attaquant est magie/undead
         if (MAGIC_UNDEAD.has(unit.type) && target.ownerId
@@ -2675,6 +2673,34 @@ setInterval(() => {
         targetType: unit.attackTargetType, targetId: target.id,
         targetX: target.x, targetY: target.y,
       };
+
+      // ── Passif 'magic_splash' (pyromancy) : mini-AoE 30 px à chaque tir magique ──
+      // Touche tous les ennemis voisins de la cible (×0.5 dmg). Joueurs alliés exclus.
+      if (unit.attackTargetType === 'unit'
+          && MAGIC_UNDEAD.has(unit.type)
+          && hasTech(gameState.players[unit.ownerId], 'pyromancy')) {
+        const splashRsq = 30 * 30;
+        const splashDmg = uDamage * 0.5;
+        const splashHits = [];
+        for (const u2 of Object.values(gameState.units)) {
+          if (u2.id === target.id || u2.id === unit.id) continue;
+          if (friendly(u2.ownerId, unit.ownerId)) continue;
+          if (toDelete.has(u2.id) || u2.hp <= 0) continue;
+          const dsq = (u2.x - target.x) ** 2 + (u2.y - target.y) ** 2;
+          if (dsq <= splashRsq) {
+            u2.hp = Math.max(0, u2.hp - splashDmg);
+            splashHits.push({ id: u2.id, x: u2.x, y: u2.y, killed: u2.hp <= 0 });
+            if (u2.hp <= 0) {
+              u2._killedByType = unit.type;
+              u2._killedByOwner = unit.ownerId;
+              toDelete.add(u2.id);
+              const killer = gameState.players[unit.ownerId];
+              if (killer && !killer.eliminated) killer.kills++;
+            }
+          }
+        }
+        if (splashHits.length) attackEntry.magicSplash = { hits: splashHits, center: { x: target.x, y: target.y } };
+      }
 
       // ── Tech 'arcane_ricochet' : tirs magiques rebondissent 1× sur ennemi <120 px (×0.6 dmg) ──
       if (unit.attackTargetType === 'unit'
@@ -2921,40 +2947,58 @@ setInterval(() => {
         io.emit('pilgrimExplosion', { x: dead.x, y: dead.y, ownerId: dead.ownerId });
       }
     }
-    // d) Si tué par necro/lich → résurrection alliée du killer
-    if (dead._killedByType === 'necromancer' || dead._killedByType === 'lich') {
-      const summonedType = dead._killedByType === 'lich' ? 'skeleton_knight' : 'skeleton';
-      const def = UNIT_TYPES[summonedType];
-      if (def && dead._killedByOwner) {
-        newSummons.push({
-          ownerId: dead._killedByOwner,
-          x: dead.x, y: dead.y,
-          type: summonedType,
-          def,
-          source: 'necro',
-        });
-      }
-    }
-
-    // d.bis) Tech 'soul_harvest' : chaque kill par une unité MAGIQUE invoque
-    // un squelette ami faible (HP 25, dmg 4, 15s, cap 5 par joueur).
-    else if (dead._killedByType
-             && MAGIC_UNDEAD.has(dead._killedByType)
-             && dead._killedByOwner
-             && hasTech(gameState.players[dead._killedByOwner], 'soul_harvest')) {
+    // d) Résurrection par Nécromancien (refonte v3)
+    //  - Sans tech : squelette standard (60s)
+    //  - Tech 'necromancy' : squelette +20 % HP/dmg, cap d'undeads +3
+    //  - Tech 'lich' : CLONE de la victime à -40 % HP/dmg (durée 30s, prend priorité)
+    if (dead._killedByType === 'necromancer' && dead._killedByOwner) {
       const owner = gameState.players[dead._killedByOwner];
-      const active = Object.values(gameState.units).filter(u =>
-        u.ownerId === dead._killedByOwner && u._soulHarvest === true
+      const hasLich = owner && hasTech(owner, 'lich');
+      const hasNecromancy = owner && hasTech(owner, 'necromancy');
+      // Cap d'undeads actifs pour ce joueur (anti-spam)
+      const undeadCap = hasNecromancy ? 12 : 9;
+      const activeUndeads = Object.values(gameState.units).filter(u =>
+        u.ownerId === dead._killedByOwner && u._summonedByNecro === true
       ).length;
-      if (active < 5) {
-        newSummons.push({
-          ownerId: dead._killedByOwner,
-          x: dead.x, y: dead.y,
-          type: 'skeleton',
-          // Surcharge stats (faibles) — pas le squelette standard
-          override: { hp: 25, damage: 4, speed: 80, range: 30, lifetime: 15000 },
-          source: 'soul_harvest',
-        });
+      if (activeUndeads < undeadCap) {
+        if (hasLich) {
+          // Clone de la victime : prend type/stats de la victime à -40 %
+          const victimDef = UNIT_TYPES[dead.type];
+          if (victimDef) {
+            newSummons.push({
+              ownerId: dead._killedByOwner,
+              x: dead.x, y: dead.y,
+              type: dead.type,
+              override: {
+                hp: Math.max(10, Math.round((dead.maxHp || victimDef.hp) * 0.6)),
+                damage: Math.max(1, Math.round((victimDef.damage || 0) * 0.6)),
+                speed: victimDef.speed,
+                range: victimDef.range,
+                lifetime: 30000,
+              },
+              source: 'lich_clone',
+            });
+          }
+        } else {
+          // Pas de tech lich : squelette standard (boost si tech necromancy)
+          const def = UNIT_TYPES.skeleton;
+          newSummons.push({
+            ownerId: dead._killedByOwner,
+            x: dead.x, y: dead.y,
+            type: 'skeleton',
+            override: hasNecromancy ? {
+              hp: Math.round(def.hp * 1.2),
+              damage: Math.round(def.damage * 1.2),
+              speed: def.speed, range: def.range,
+              lifetime: 60000,
+            } : {
+              hp: def.hp, damage: def.damage,
+              speed: def.speed, range: def.range,
+              lifetime: 60000,
+            },
+            source: 'necro',
+          });
+        }
       }
     }
   }
@@ -2975,9 +3019,10 @@ setInterval(() => {
       lastAttackTime: 0,
       mode: 'defend', defendX: s.x, defendY: s.y, defendRadius: 320,
       spawnTime: nowMs,
-      // Tag soul_harvest : permet (a) le cap de 5, (b) le visuel néon spécifique côté client.
-      _soulHarvest: s.source === 'soul_harvest' ? true : undefined,
-      _soulHarvestLifetime: s.override && s.override.lifetime,
+      // Tag pour le cap d'undeads (toutes les invocations du nécro) + visuel client.
+      _summonedByNecro: true,
+      _summonSource: s.source,
+      _summonLifetime: s.override && s.override.lifetime,
     };
     io.emit('unitSummoned', {
       unitId, type: s.type, x: s.x, y: s.y, ownerId: s.ownerId,
@@ -2989,8 +3034,8 @@ setInterval(() => {
   for (const uid of Object.keys(gameState.units)) {
     const u = gameState.units[uid];
     if (toDelete.has(uid)) continue;
-    // soul_harvest : lifetime court (15s) prioritaire sur le défaut du type
-    const lifetime = u._soulHarvestLifetime || SUMMONED_LIFETIMES[u.type];
+    // Override lifetime (revive/lich_clone) prioritaire sur le défaut du type.
+    const lifetime = u._summonLifetime || SUMMONED_LIFETIMES[u.type];
     if (!lifetime) continue;
     u.spawnTime = u.spawnTime || nowMs;
     if (nowMs - u.spawnTime >= lifetime) toDelete.add(uid);
