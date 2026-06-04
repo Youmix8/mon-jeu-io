@@ -47,7 +47,7 @@ const TECH_TREE = {
   },
   construction: {
     id: 'construction', axis: 'science', tier: 1, name: 'Construction', icon: '🛠',
-    desc: 'Débloque les chemins (Voies) et la marine.',
+    desc: 'Débloque les chemins (Voies) et la balistique.',
     cost: 10, requires: [],
     unlocks: {},
     pos: pos('science', 1, 1),
@@ -74,11 +74,11 @@ const TECH_TREE = {
     unlocks: { buildings: ['road'] },
     pos: pos('science', 2, 0.5),
   },
-  marine: {
-    id: 'marine', axis: 'science', tier: 2, name: 'Marine', icon: '⛵',
-    desc: 'Débloque le Port (à venir : transport sur l\'eau).',
+  ballistics: {
+    id: 'ballistics', axis: 'science', tier: 2, name: 'Balistique', icon: '🎯',
+    desc: '+25% cadence de tir sur toutes les unités à projectile (archer, arbalétrier, catapulte, canon, tour, bombarde).',
     cost: 40, requires: ['construction'],
-    unlocks: { buildings: ['port'] },
+    unlocks: { passives: ['rate_of_fire'] },
     pos: pos('science', 2, 1.5),
   },
 
@@ -103,11 +103,11 @@ const TECH_TREE = {
     unlocks: { units: ['settler'] },
     pos: pos('science', 3, 0.5),
   },
-  cartography: {
-    id: 'cartography', axis: 'science', tier: 3, name: 'Cartographie', icon: '🗺',
-    desc: 'Révèle l\'intégralité de la map (fog of war levé pour toi).',
-    cost: 40, requires: ['marine'],
-    unlocks: { passives: ['full_map_reveal'] },
+  reconnaissance: {
+    id: 'reconnaissance', axis: 'science', tier: 3, name: 'Reconnaissance', icon: '🔭',
+    desc: '+30% vision sur toutes tes unités et +15% de portée pour toutes les unités à distance.',
+    cost: 40, requires: ['ballistics'],
+    unlocks: { passives: ['recon_vision_range'] },
     pos: pos('science', 3, 1.5),
   },
 
@@ -253,11 +253,11 @@ const TECH_TREE = {
     unlocks: { passives: ['magic_hp_boost'] },
     pos: pos('magic', 4, 0),
   },
-  curses: {
-    id: 'curses', axis: 'magic', tier: 4, name: 'Malédictions', icon: '🧪',
-    desc: 'Maledictions : ennemis a <150px de tes mages subissent -15% degats.',
+  arcane_ricochet: {
+    id: 'arcane_ricochet', axis: 'magic', tier: 4, name: 'Ricochet arcanique', icon: '💫',
+    desc: 'Les tirs de tes mages (sorcier, nécromancien, liche) rebondissent 1× sur l\'ennemi le plus proche (<120 px du 1er impact, dégâts ×0.6).',
     cost: 80, requires: ['enchantment'],
-    unlocks: { passives: ['magic_curse_aura'] },
+    unlocks: { passives: ['arcane_ricochet'] },
     pos: pos('magic', 4, 1.2),
   },
 
@@ -270,15 +270,15 @@ const TECH_TREE = {
   },
   lich: {
     id: 'lich', axis: 'magic', tier: 5, name: 'Liche', icon: '☠️',
-    desc: 'Upgrade le Nécromancien en Liche (HP 120, dmg 15, ressuscite des Chevaliers squelettes).',
+    desc: 'Upgrade le Nécromancien en Liche (HP 120, dmg 15) + Récolte d\'âmes : chaque kill par une unité magique invoque un squelette ami (HP 25, dmg 4, 15s, cap 5).',
     cost: 180, requires: ['necromancy'],
-    unlocks: { units: ['lich'], passives: ['necro_upgrade'] },
+    unlocks: { units: ['lich'], passives: ['necro_upgrade', 'soul_harvest'] },
     pos: pos('magic', 5, 0),
   },
   time_mastery: {
     id: 'time_mastery', axis: 'magic', tier: 5, name: 'Maîtrise du temps', icon: '⏳',
     desc: 'Maitrise du temps : cooldown d attaque de tes unites magie -20%.',
-    cost: 180, requires: ['illusion', 'curses'],
+    cost: 180, requires: ['illusion', 'arcane_ricochet'],
     unlocks: { passives: ['magic_atk_speed'] },
     pos: pos('magic', 5, 1),
   },
