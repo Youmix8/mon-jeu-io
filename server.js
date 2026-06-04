@@ -794,15 +794,47 @@ function unitHpMult(player, typeId) {
   return mult;
 }
 
-// Rayon de vision d'une unité — boosté par le passif 'magic_speed_vision' (lightning)
-// pour les unités magie / undead : +30 %.
+// Rayon de vision d'une unité — boosté par les passifs :
+//   - 'lightning' (magie/undead) : +30 %
+//   - 'reconnaissance' (toutes unités) : +30 %
+// Les bonus se cumulent multiplicativement.
 function unitVisionRadius(unit) {
   if (!unit) return VISION_UNIT;
   const owner = gameState.players && gameState.players[unit.ownerId];
-  if (owner && MAGIC_UNDEAD.has(unit.type) && hasTech(owner, 'lightning')) {
-    return Math.round(VISION_UNIT * 1.30);
+  let mult = 1;
+  if (owner && MAGIC_UNDEAD.has(unit.type) && hasTech(owner, 'lightning')) mult *= 1.30;
+  if (owner && hasTech(owner, 'reconnaissance')) mult *= 1.30;
+  return Math.round(VISION_UNIT * mult);
+}
+
+// ── Catégorie "unités à projectile" (impactée par ballistics / reconnaissance) ──
+const RANGED_UNIT_TYPES = new Set(['archer', 'crossbowman', 'catapult', 'cannon']);
+const RANGED_BUILDING_TYPES = new Set(['tower', 'bombard']);
+
+// Portée effective d'une unité, incluant le passif 'reconnaissance' (+15 % pour
+// les unités à distance) et les autres bonus existants (déjà appliqués via
+// crossbows etc. ailleurs dans le code).
+function effectiveRange(unit) {
+  if (!unit) return 0;
+  const owner = gameState.players && gameState.players[unit.ownerId];
+  let range = unit.range || 0;
+  if (owner && hasTech(owner, 'reconnaissance') && RANGED_UNIT_TYPES.has(unit.type)) {
+    range = Math.round(range * 1.15);
   }
-  return VISION_UNIT;
+  return range;
+}
+
+// Cadence de tir effective (cooldown en ms) — réduite de 25 % par 'ballistics'
+// pour les unités à projectile (archer/crossbow/catapulte/canon) et les tours.
+function effectiveCooldown(ownerId, type, baseCooldownMs) {
+  if (!baseCooldownMs) return baseCooldownMs;
+  const owner = gameState.players && gameState.players[ownerId];
+  if (!owner) return baseCooldownMs;
+  if (!hasTech(owner, 'ballistics')) return baseCooldownMs;
+  if (RANGED_UNIT_TYPES.has(type) || RANGED_BUILDING_TYPES.has(type)) {
+    return Math.round(baseCooldownMs * 0.8);
+  }
+  return baseCooldownMs;
 }
 
 // ────────── Bot IA ──────────
@@ -2537,8 +2569,10 @@ setInterval(() => {
     if (MAGIC_UNDEAD.has(unit.type) && hasTech(gameState.players[unit.ownerId], 'time_mastery')) {
       atkCooldown *= 0.8;
     }
+    // Tech 'ballistics' : +25% cadence sur les unités à projectile (cooldown ×0.8)
+    atkCooldown = effectiveCooldown(unit.ownerId, unit.type, atkCooldown);
     if (nowMs - unit.lastAttackTime < atkCooldown) continue;
-    const uRange  = unit.range  || 80;
+    const uRange  = effectiveRange(unit) || unit.range || 80;
     // Aura Général : +25% dégâts pour les unités proches d'un Général allié
     let uDamage = (unit.damage || 5) * generalAuraDmgBonus(unit);
     // Inquisiteur : ×2 dmg vs unités magiques/undead
@@ -2568,18 +2602,8 @@ setInterval(() => {
             && hasTech(gameState.players[target.ownerId], 'unwavering_faith')) {
           uDamage *= 0.75;
         }
-        // Passif 'magic_curse_aura' (CIBLE) : si la cible est <150 d'un mage du défenseur
-        //  ET le défenseur a tech 'curses' → l'attaquant ennemi inflige -15% dmg.
-        if (target.ownerId && target.ownerId !== unit.ownerId
-            && hasTech(gameState.players[target.ownerId], 'curses')) {
-          const def = gameState.players[target.ownerId];
-          // Cherche un mage allié au défenseur dans le rayon 150 de la cible
-          for (const mage of Object.values(gameState.units)) {
-            if (mage.ownerId !== def.id) continue;
-            if (!MAGIC_UNDEAD.has(mage.type)) continue;
-            if (Math.hypot(mage.x - target.x, mage.y - target.y) <= 150) { uDamage *= 0.85; break; }
-          }
-        }
+        // 'curses' a été remplacée par 'arcane_ricochet' (cf. arbre tech v3).
+        // Le rebond est appliqué après l'impact (voir section ricochet plus bas).
         // Passif 'religion_curse_aura' (CIBLE) : idem pour les unités religion, -20%.
         if (target.ownerId && target.ownerId !== unit.ownerId
             && hasTech(gameState.players[target.ownerId], 'excommunication')) {
@@ -2651,6 +2675,34 @@ setInterval(() => {
         targetType: unit.attackTargetType, targetId: target.id,
         targetX: target.x, targetY: target.y,
       };
+
+      // ── Tech 'arcane_ricochet' : tirs magiques rebondissent 1× sur ennemi <120 px (×0.6 dmg) ──
+      if (unit.attackTargetType === 'unit'
+          && MAGIC_UNDEAD.has(unit.type)
+          && hasTech(gameState.players[unit.ownerId], 'arcane_ricochet')) {
+        let ric = null, ricDsq = 120 * 120;
+        for (const u2 of Object.values(gameState.units)) {
+          if (u2.id === target.id || u2.id === unit.id) continue;
+          if (friendly(u2.ownerId, unit.ownerId)) continue;
+          if (toDelete.has(u2.id) || u2.hp <= 0) continue;
+          const dsq = (u2.x - target.x) ** 2 + (u2.y - target.y) ** 2;
+          if (dsq < ricDsq) { ric = u2; ricDsq = dsq; }
+        }
+        if (ric) {
+          const ricDmg = uDamage * 0.6;
+          ric.hp = Math.max(0, ric.hp - ricDmg);
+          attackEntry.ricochet = { targetId: ric.id, x: ric.x, y: ric.y, dmg: ricDmg };
+          if (ric.hp <= 0) {
+            ric._killedByType  = unit.type;
+            ric._killedByOwner = unit.ownerId;
+            toDelete.add(ric.id);
+            attackEntry.ricochet.killed = true;
+            const killer = gameState.players[unit.ownerId];
+            if (killer && !killer.eliminated) killer.kills++;
+            onNeutralUnitKilled(ric, unit.ownerId, attackEntry);
+          }
+        }
+      }
 
       if (unit.attackTargetType === 'unit' && target.hp <= 0) {
         // Tag pour résurrection au kill (necro/lich) — voir section 3.6
@@ -2743,7 +2795,9 @@ setInterval(() => {
     if (b.hp <= 0) continue;
     const def = BUILDING_TYPES[b.type];
     if (!def || !def.damage || def.damage <= 0) continue;
-    if (nowMs - b.lastAttackTime < (def.cooldownMs || 1000)) continue;
+    // Tech 'ballistics' : tower/bombard cadence +25% (cooldown ×0.8)
+    const bCooldown = effectiveCooldown(b.ownerId, b.type, def.cooldownMs || 1000);
+    if (nowMs - b.lastAttackTime < bCooldown) continue;
     let bestTarget = null, bestDist = def.range;
     for (const u of Object.values(gameState.units)) {
       if (u.ownerId === b.ownerId || toDelete.has(u.id)) continue;
@@ -2877,32 +2931,66 @@ setInterval(() => {
           x: dead.x, y: dead.y,
           type: summonedType,
           def,
+          source: 'necro',
+        });
+      }
+    }
+
+    // d.bis) Tech 'soul_harvest' : chaque kill par une unité MAGIQUE invoque
+    // un squelette ami faible (HP 25, dmg 4, 15s, cap 5 par joueur).
+    else if (dead._killedByType
+             && MAGIC_UNDEAD.has(dead._killedByType)
+             && dead._killedByOwner
+             && hasTech(gameState.players[dead._killedByOwner], 'soul_harvest')) {
+      const owner = gameState.players[dead._killedByOwner];
+      const active = Object.values(gameState.units).filter(u =>
+        u.ownerId === dead._killedByOwner && u._soulHarvest === true
+      ).length;
+      if (active < 5) {
+        newSummons.push({
+          ownerId: dead._killedByOwner,
+          x: dead.x, y: dead.y,
+          type: 'skeleton',
+          // Surcharge stats (faibles) — pas le squelette standard
+          override: { hp: 25, damage: 4, speed: 80, range: 30, lifetime: 15000 },
+          source: 'soul_harvest',
         });
       }
     }
   }
   for (const s of newSummons) {
     const unitId = `unit_${nextUnitId++}`;
+    const stats = s.override || {
+      hp: s.def && s.def.hp, damage: s.def && s.def.damage,
+      speed: s.def && s.def.speed, range: s.def && s.def.range,
+    };
     gameState.units[unitId] = {
       id: unitId, ownerId: s.ownerId,
       x: s.x, y: s.y,
       type: s.type,
-      hp: s.def.hp, maxHp: s.def.hp,
-      speed: s.def.speed, range: s.def.range, damage: s.def.damage, cost: 0,
+      hp: stats.hp, maxHp: stats.hp,
+      speed: stats.speed, range: stats.range, damage: stats.damage, cost: 0,
       targetX: null, targetY: null,
       attackTargetId: null, attackTargetType: null,
       lastAttackTime: 0,
       mode: 'defend', defendX: s.x, defendY: s.y, defendRadius: 320,
       spawnTime: nowMs,
+      // Tag soul_harvest : permet (a) le cap de 5, (b) le visuel néon spécifique côté client.
+      _soulHarvest: s.source === 'soul_harvest' ? true : undefined,
+      _soulHarvestLifetime: s.override && s.override.lifetime,
     };
-    io.emit('unitSummoned', { unitId, type: s.type, x: s.x, y: s.y, ownerId: s.ownerId });
+    io.emit('unitSummoned', {
+      unitId, type: s.type, x: s.x, y: s.y, ownerId: s.ownerId,
+      source: s.source,
+    });
   }
 
   // e) Lifetime decay (summoned units)
   for (const uid of Object.keys(gameState.units)) {
     const u = gameState.units[uid];
     if (toDelete.has(uid)) continue;
-    const lifetime = SUMMONED_LIFETIMES[u.type];
+    // soul_harvest : lifetime court (15s) prioritaire sur le défaut du type
+    const lifetime = u._soulHarvestLifetime || SUMMONED_LIFETIMES[u.type];
     if (!lifetime) continue;
     u.spawnTime = u.spawnTime || nowMs;
     if (nowMs - u.spawnTime >= lifetime) toDelete.add(uid);
