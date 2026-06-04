@@ -2392,9 +2392,9 @@ setInterval(() => {
     // Frozen : 0.3× (gel magique) — Feared : 0.5× (aura god_avatar)
     const speedMult = isFrozen ? 0.3 : (isFeared ? 0.5 : speedBonus);
     const uSpeed    = baseSpeed * speedMult;
-    const uRange = unit.range || 80;
+    const uRange = effectiveRange(unit) || unit.range || 80;
     const step = uSpeed / TICK_RATE;
-    const effectiveRange = uRange - UNIT_RADIUS;
+    const attackReach = uRange - UNIT_RADIUS;
     let goalX, goalY, skipPlayerId = null, skipBuildingId = null;
 
     if (unit.attackTargetId !== null) {
@@ -2406,18 +2406,18 @@ setInterval(() => {
       } else if (unit.attackTargetType === 'village') {
         const target = gameState.villages.find(vv => vv.id === unit.attackTargetId);
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        if (unitToVillageDist(unit, target) <= effectiveRange) continue;
+        if (unitToVillageDist(unit, target) <= attackReach) continue;
         goalX = target.x; goalY = target.y;
       } else if (unit.attackTargetType === 'building') {
         const target = gameState.buildings.find(bb => bb.id === unit.attackTargetId);
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        if (unitToBuildingDist(unit, target) <= effectiveRange) continue;
+        if (unitToBuildingDist(unit, target) <= attackReach) continue;
         goalX = target.x; goalY = target.y;
         skipBuildingId = unit.attackTargetId;
       } else {
         const target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        if (unitToHdvDist(unit, target) <= effectiveRange) continue;
+        if (unitToHdvDist(unit, target) <= attackReach) continue;
         goalX = target.x; goalY = target.y;
         skipPlayerId = unit.attackTargetId;
       }
@@ -2576,7 +2576,7 @@ setInterval(() => {
     // Aura Général : +25% dégâts pour les unités proches d'un Général allié
     let uDamage = (unit.damage || 5) * generalAuraDmgBonus(unit);
     // Inquisiteur : ×2 dmg vs unités magiques/undead
-    const effectiveRange = uRange - UNIT_RADIUS;
+    const attackReach = uRange - UNIT_RADIUS;
 
     // Tech 'crossbows' : archer +50% dmg, -20% portée
     if (unit.type === 'archer' && hasTech(gameState.players[unit.ownerId], 'crossbows')) {
@@ -2629,15 +2629,15 @@ setInterval(() => {
       } else if (unit.attackTargetType === 'village') {
         target = gameState.villages.find(vv => vv.id === unit.attackTargetId);
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        inRange = unitToVillageDist(unit, target) <= effectiveRange;
+        inRange = unitToVillageDist(unit, target) <= attackReach;
       } else if (unit.attackTargetType === 'building') {
         target = gameState.buildings.find(bb => bb.id === unit.attackTargetId);
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        inRange = unitToBuildingDist(unit, target) <= effectiveRange;
+        inRange = unitToBuildingDist(unit, target) <= attackReach;
       } else {
         target = gameState.players[unit.attackTargetId];
         if (!target || target.hp <= 0) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        inRange = unitToHdvDist(unit, target) <= effectiveRange;
+        inRange = unitToHdvDist(unit, target) <= attackReach;
       }
       if (!inRange) continue;
 
@@ -2749,7 +2749,7 @@ setInterval(() => {
         if (player.id === unit.ownerId || player.hp <= 0) continue;
         if (areAllied(player.id, unit.ownerId)) continue;
         const edgeDist = unitToHdvDist(unit, player);
-        if (edgeDist <= effectiveRange && edgeDist < bestDist) {
+        if (edgeDist <= attackReach && edgeDist < bestDist) {
           best = player; bestDist = edgeDist; bestType = 'hdv';
         }
       }
