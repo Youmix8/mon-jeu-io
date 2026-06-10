@@ -74,13 +74,12 @@ const BuildingInfoPanel = (() => {
       if (eCfg.faithGen) lines.push(`✚ Génère <b>+${eCfg.faithGen} foi/sec</b>`);
       if (eCfg.produces) lines.push(`🏭 Permet de produire : <b>${eCfg.produces}</b>`);
     }
-    // (port retiré — système eau supprimé)
     if (type === 'wall') lines.push(`🧱 Bloque le passage des unités (HP élevé)`);
     if (type === 'altar')     lines.push(`🕯 Petit générateur de foi (axe Religion)`);
     if (type === 'temple')    lines.push(`⛩ Générateur intermédiaire de foi`);
     if (type === 'cathedral') lines.push(`⛪ Générateur majeur de foi`);
     if (type === 'sanctum')   lines.push(`✦ Petit générateur de mana (axe Magie)`);
-    if (type === 'mage_tower')lines.push(`🧙 Générateur intermédiaire de mana + produit des Sorciers`);
+    if (type === 'mage_tower')lines.push(`✦ Générateur majeur de mana (+1/s)`);
     return lines.length ? lines.join('<br/>') : '<i>Bâtiment passif</i>';
   }
 

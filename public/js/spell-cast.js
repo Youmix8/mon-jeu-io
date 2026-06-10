@@ -18,6 +18,8 @@ const SpellCast = (() => {
   function _onKey(e) {
     // Skip si on tape dans un input ou un overlay actif (build mode, tech tree)
     if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    // Skip si un modificateur est enfoncé (Ctrl+F = recherche navigateur, etc.)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (typeof BuildMode !== 'undefined' && BuildMode.isActive()) return;
     if (typeof TechTreeOverlay !== 'undefined' && TechTreeOverlay.isOpen && TechTreeOverlay.isOpen()) return;
 

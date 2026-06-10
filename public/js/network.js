@@ -2,8 +2,7 @@ const Network = (() => {
   let socket = null;
   let state  = { players: {}, units: {}, matchState: 'waiting', winnerId: null, playerSummary: [], fog: null };
   let myId   = null;
-  let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50, mapType: 'continental', mapSize: 'medium' };
-  let waterTiles = null;  // Uint8Array, set par init
+  let mapInfo = { mapWidth: 2000, mapHeight: 2000, tileSize: 40, gridW: 50, gridH: 50, mapType: 'no_water', mapSize: 'medium' };
   let config  = {
     unitTypes: {}, techTree: {}, hdvLevels: [],
     villageRadius: 70, villageCaptureTicks: 200, villageMaxHp: 300,
@@ -64,12 +63,6 @@ const Network = (() => {
       if (data.gridH)     mapInfo.gridH     = data.gridH;
       if (data.mapType)   mapInfo.mapType   = data.mapType;
       if (data.mapSize)   mapInfo.mapSize   = data.mapSize;
-      // waterTiles : ArrayBuffer venant du serveur → Uint8Array
-      if (data.waterTiles) {
-        waterTiles = data.waterTiles instanceof ArrayBuffer
-          ? new Uint8Array(data.waterTiles)
-          : new Uint8Array(data.waterTiles);
-      }
       if (data.unitTypes)   config.unitTypes   = data.unitTypes;
       if (data.techTree)    config.techTree    = data.techTree;
       if (data.hdvLevels)   config.hdvLevels   = data.hdvLevels;
@@ -296,7 +289,9 @@ const Network = (() => {
         const isWin     = p.id === data.winnerId;
         const rowClass  = isMe ? 'my-row' : isWin ? 'winner-row' : p.eliminated ? 'eliminated-row' : '';
         const medal     = medals[i] || `${i + 1}`;
-        const nameStyle = `color:${p.color}; font-weight:bold;`;
+        // Couleur cohérente avec la palette néon en jeu (slot client, pas couleur serveur)
+        const pColor    = (typeof Theme !== 'undefined') ? Theme.factionColorStr(p.id) : p.color;
+        const nameStyle = `color:${pColor}; font-weight:bold;`;
         const prefix    = p.eliminated ? '💀 ' : '';
         return `<tr class="${rowClass}">
           <td class="rank-medal">${medal}</td>
@@ -346,19 +341,6 @@ const Network = (() => {
   function sellBuilding(buildingId) {
     if (socket) socket.emit('sellBuilding', { buildingId });
   }
-  function embarkBoat(boatId, unitIds) {
-    if (socket) socket.emit('embarkBoat', { boatId, unitIds });
-  }
-  function disembarkBoat(boatId, destX, destY) {
-    if (socket) socket.emit('disembarkBoat', { boatId, destX, destY });
-  }
-  function isWaterAt(wx, wy) {
-    if (!waterTiles || !mapInfo.gridW || !mapInfo.tileSize) return false;
-    const tx = Math.floor(wx / mapInfo.tileSize);
-    const ty = Math.floor(wy / mapInfo.tileSize);
-    if (tx < 0 || tx >= mapInfo.gridW || ty < 0 || ty >= mapInfo.gridH) return false;
-    return waterTiles[ty * mapInfo.gridW + tx] === 1;
-  }
   function debugSpawn(entityType, x, y) {
     if (socket) socket.emit('debugSpawn', { entityType, x, y });
   }
@@ -383,13 +365,11 @@ const Network = (() => {
   function getMyId()                 { return myId; }
   function getMapInfo()              { return mapInfo; }
   function getConfig()               { return config; }
-  function getWaterTiles()           { return waterTiles; }
 
   return {
-    init, getState, getMyId, getMapInfo, getConfig, getWaterTiles,
+    init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
     upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty,
-    embarkBoat, disembarkBoat, isWaterAt,
     debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnBarbarianRaid, setOnCampCleared, setOnInitReceived, setOnUnitSummoned,

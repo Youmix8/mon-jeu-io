@@ -53,16 +53,15 @@ const Theme = (() => {
   };
 
   // ── Mapping serveur → axe d'unité (sci/mag/rel) ──
-  // Pour les types absents serveur (ex: dragon), garde la shape disponible si jamais ils apparaissent.
   const AXIS = {
     // Science
     soldier:'sci', archer:'sci', knight:'sci', catapult:'sci', settler:'sci',
     heavy_knight:'sci', crossbowman:'sci', general:'sci', cannon:'sci', elite_guard:'sci',
     // Magie
-    wizard:'mag', necromancer:'mag', skeleton:'mag', lich:'mag',
-    skeleton_cavalry:'mag', fire_elemental:'mag', arcane_dragon:'mag',
+    necromancer:'mag', skeleton:'mag', skeleton_knight:'mag',
+    fire_elemental:'mag', arcane_dragon:'mag',
     // Religion
-    pilgrim:'rel', inquisitor:'rel', holy_knight:'rel', paladin:'rel',
+    pilgrim:'rel', inquisitor:'rel', holy_knight:'rel',
     angel:'rel', god_avatar:'rel',
   };
 
@@ -82,18 +81,15 @@ const Theme = (() => {
     elite_guard:    { sh:'hex',     sz:12,  ax:'sci' },
     settler:        { sh:'tri',     sz: 9,  ax:'sci' },
     // ── Magie ──
-    wizard:         { sh:'star',    sz: 9,  ax:'mag' },
     necromancer:    { sh:'star',    sz:10,  ax:'mag' },
     skeleton:       { sh:'tri',     sz: 8,  ax:'mag' },
-    lich:           { sh:'star',    sz:12,  ax:'mag' },
-    skeleton_cavalry:{ sh:'chevron',sz: 9,  ax:'mag' },
+    skeleton_knight:{ sh:'chevron', sz: 9,  ax:'mag' },
     fire_elemental: { sh:'boss',    sz:14,  ax:'mag' },
     arcane_dragon:  { sh:'boss',    sz:20,  ax:'mag', fly:true },
     // ── Religion ──
     pilgrim:        { sh:'ring',    sz: 9,  ax:'rel' },
     inquisitor:     { sh:'ring',    sz:10,  ax:'rel' },
     holy_knight:    { sh:'ring',    sz:11,  ax:'rel' },
-    paladin:        { sh:'ring',    sz:11,  ax:'rel' },
     angel:          { sh:'boss',    sz:15,  ax:'rel', fly:true },
     god_avatar:     { sh:'boss',    sz:22,  ax:'rel' },
   };
@@ -148,9 +144,9 @@ const Theme = (() => {
   // ── Beams (projectiles) ──
   // Source → couleur du tir.
   const BEAM = {
-    magic:    0xa78bfa, // sorcier, nécro, liche, élémentaire, dragon
-    holy:     0xfcd34d, // inquisiteur
-    ranged:   0xe2e8f0, // archer, arbalétrier, catapulte, canon, archer tower générique
+    magic:    0xa78bfa, // nécro, élémentaire, dragon
+    holy:     0xfcd34d, // inquisiteur, ange, avatar divin
+    ranged:   0xe2e8f0, // archer, arbalétrier, catapulte, canon
     melee:    null,     // pas de beam : juste particules d'impact
     duration: 120,      // ms
     width:    2,        // px écran
@@ -158,10 +154,10 @@ const Theme = (() => {
   // Mapping type d'unité → catégorie beam
   const BEAM_BY_TYPE = {
     soldier:'melee', knight:'melee', heavy_knight:'melee', elite_guard:'melee',
-    skeleton:'melee', skeleton_cavalry:'melee', holy_knight:'melee', paladin:'melee', general:'melee',
+    skeleton:'melee', skeleton_knight:'melee', holy_knight:'melee', general:'melee',
     settler:'melee', pilgrim:'melee',
     archer:'ranged', crossbowman:'ranged', catapult:'ranged', cannon:'ranged',
-    wizard:'magic', necromancer:'magic', lich:'magic', fire_elemental:'magic', arcane_dragon:'magic',
+    necromancer:'magic', fire_elemental:'magic', arcane_dragon:'magic',
     inquisitor:'holy', angel:'holy', god_avatar:'holy',
   };
 

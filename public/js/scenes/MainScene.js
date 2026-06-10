@@ -1,8 +1,3 @@
-const UNIT_RADIUS = 15;
-const BAR_W       = 30;
-const BAR_H       = 4;
-const BAR_Y       = -(UNIT_RADIUS + 8);
-
 class MainScene extends Phaser.Scene {
   constructor() {
     super({ key: 'MainScene' });
@@ -27,12 +22,6 @@ class MainScene extends Phaser.Scene {
 
   preload() {
     // Direction artistique néon : 100% procédural. Aucun PNG n'est chargé.
-    this.assetMissing = {};
-  }
-
-  _hasAsset(key) {
-    // Aucun asset PNG en mode néon — toujours faux pour forcer la voie procédurale.
-    return false;
   }
 
   create() {
@@ -85,8 +74,9 @@ class MainScene extends Phaser.Scene {
       }
     }, { passive: false });
 
-    // ── F — vue d'ensemble (fit map) ──────────────────────────────
-    this.input.keyboard.on('keydown-F', () => {
+    // ── V — vue d'ensemble (fit map) ──────────────────────────────
+    // (était F, mais F = hotkey du sort Boule de feu → conflit de raccourcis)
+    this.input.keyboard.on('keydown-V', () => {
       if (!this.mapBuilt) return;
       const cam = this.cameras.main;
       this._recomputeMinZoom();
@@ -120,29 +110,40 @@ class MainScene extends Phaser.Scene {
     });
 
     Network.setOnPlayerEliminated((data) => {
-      this._addKillFeedEntry(`💀 ${data.name} éliminé !`, data.color);
+      this._addKillFeedEntry(`💀 ${data.name} éliminé !`, Theme.factionColorStr(data.playerId));
     });
 
-    // Soul Harvest — pop néon vert lime quand un squelette ami apparaît au point d'un kill magique.
-    Network.setOnUnitSummoned && Network.setOnUnitSummoned((data) => {
-      if (data.source !== 'soul_harvest') return;
+    // Pop néon d'invocation (résurrection nécro / clone de liche).
+    // Squelette ('necro') = violet magie ; clone ('lich_clone') = couleur d'équipe
+    // du propriétaire (le clone garde la forme de la victime → la couleur dit le camp).
+    Network.setOnUnitSummoned((data) => {
       if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
-      const lime = 0xa3e635; // couleur soul_harvest (cohérence palette néon)
+      const color = data.source === 'lich_clone'
+        ? Theme.factionColorInt(data.ownerId)
+        : Theme.BEAM.magic;
       // Halo expansif
-      const halo = this.add.circle(data.x, data.y, 14, lime, 0).setDepth(56);
-      halo.setStrokeStyle(2.5, lime, 1).setBlendMode(Phaser.BlendModes.ADD);
+      const halo = this.add.circle(data.x, data.y, 14, color, 0).setDepth(56);
+      halo.setStrokeStyle(2.5, color, 1).setBlendMode(Phaser.BlendModes.ADD);
       this.tweens.add({
         targets: halo, scale: { from: 0.3, to: 2.4 }, alpha: { from: 1, to: 0 },
         duration: 520, ease: 'Quad.easeOut', onComplete: () => halo.destroy(),
       });
-      // Burst de particules néon lime
+      // Burst de particules néon
       const emitter = this.add.particles(data.x, data.y, 'particle', {
-        tint: lime, speed: { min: 40, max: 90 },
+        tint: color, speed: { min: 40, max: 90 },
         scale: { start: 1.2, end: 0 }, alpha: { start: 1, end: 0 },
         lifespan: 500, blendMode: Phaser.BlendModes.ADD, emitting: false,
       });
       emitter.explode(12);
       this.time.delayedCall(600, () => emitter.destroy());
+    });
+
+    // PvE : raids barbares et camps nettoyés dans le kill feed
+    Network.setOnBarbarianRaid((data) => {
+      this._addKillFeedEntry(`⌖ Raid barbare → ${data.targetName}`, Theme.factionColorStr(data.targetPlayerId));
+    });
+    Network.setOnCampCleared((data) => {
+      this._addKillFeedEntry(`✦ ${data.byName} nettoie un camp (+${data.rewardGold} ◈)`, Theme.factionColorStr(data.byPlayerId));
     });
 
     Network.setOnVillageCaptured((data) => {
@@ -460,9 +461,9 @@ class MainScene extends Phaser.Scene {
     for (const b of buildings) {
       seen.add(b.id);
       const def = (cfg.buildingTypes || {})[b.type] || {};
-      // Rempart : couleur fixe gris. Sinon : faction.
-      const isRampart = b.type === 'rampart';
-      const tintColor = isRampart ? Theme.BUILDING.rampart : Theme.factionColorInt(b.ownerId);
+      // Rempart ('wall' côté serveur) : couleur fixe gris. Sinon : faction.
+      const isWall = b.type === 'wall';
+      const tintColor = isWall ? Theme.BUILDING.rampart : Theme.factionColorInt(b.ownerId);
       let s = this.buildingSprites[b.id];
       if (!s) {
         // Carré tinté équipe + glow
@@ -717,62 +718,6 @@ class MainScene extends Phaser.Scene {
     console.log(`Map built: ${this.MAP_W}×${this.MAP_H}, grid ${info.gridW}×${info.gridH}, minZoom ${this.minZoom.toFixed(3)}`);
   }
 
-  // ── Décor procédural — DÉSACTIVÉ (look néon, terrain plat) ──
-  _placeDecor_DEPRECATED() {
-    const cfg = Network.getConfig();
-    const spawns = (cfg.spawnPositions || []);
-    const SAFE_RADIUS = 220; // évite ce rayon autour des spawns
-
-    // Pseudo-random déterministe basé sur (x, y)
-    const seedRand = (x, y, k) => {
-      const s = Math.sin(x * (12345 + k * 7) + y * (54321 + k * 11)) * 43758.5453;
-      return s - Math.floor(s); // [0, 1)
-    };
-
-    const types = [
-      { key: 'tree',    size: 80, weight: 0.35 },
-      { key: 'rock',    size: 60, weight: 0.20 },
-      { key: 'bush',    size: 50, weight: 0.25 },
-      { key: 'flowers', size: 40, weight: 0.20 },
-    ];
-
-    const step = 200;
-    let placed = 0;
-    for (let gy = step / 2; gy < this.MAP_H; gy += step) {
-      for (let gx = step / 2; gx < this.MAP_W; gx += step) {
-        // Pseudo-random : 60% des cellules ont du décor
-        if (seedRand(gx, gy, 0) > 0.6) continue;
-
-        const ox = (seedRand(gx, gy, 1) - 0.5) * 80;
-        const oy = (seedRand(gx, gy, 2) - 0.5) * 80;
-        const x = gx + ox, y = gy + oy;
-
-        // Évite la zone autour des spawns
-        let nearSpawn = false;
-        for (const s of spawns) {
-          if (Math.hypot(s.x - x, s.y - y) < SAFE_RADIUS) { nearSpawn = true; break; }
-        }
-        if (nearSpawn) continue;
-
-        // Choix du type pondéré
-        const r = seedRand(gx, gy, 3);
-        let acc = 0, picked = types[0];
-        for (const t of types) { acc += t.weight; if (r <= acc) { picked = t; break; } }
-
-        if (!this._hasAsset(picked.key)) continue;
-        const sprite = this.add.image(x, y, picked.key)
-          .setDisplaySize(picked.size, picked.size)
-          .setDepth(10);
-        // Légère variation d'angle pour les arbres/buissons
-        if (picked.key === 'tree' || picked.key === 'bush' || picked.key === 'flowers') {
-          sprite.setAngle((seedRand(gx, gy, 4) - 0.5) * 20);
-        }
-        placed++;
-      }
-    }
-    console.log(`Décor placé : ${placed} éléments`);
-  }
-
   // ── Fog of war ────────────────────────────────────────────────────
 
   _redrawFog(fog) {
@@ -987,12 +932,8 @@ class MainScene extends Phaser.Scene {
           .setOrigin(0.5, 0.5)
           .setDisplaySize(displaySize, displaySize)
           .setDepth(50);
-        // Couleur : faction pour joueur, couleur propre pour bête,
-        // vert lime néon pour les squelettes soul_harvest (signature visuelle distincte).
-        let tintColor;
-        if (unit._soulHarvest) tintColor = 0xa3e635;
-        else if (isBeast) tintColor = Theme.BEAST[unit.type].color;
-        else tintColor = colorInt;
+        // Couleur : faction pour joueur, couleur propre pour bête.
+        const tintColor = isBeast ? Theme.BEAST[unit.type].color : colorInt;
         sprite.setTint(tintColor);
         // Glow néon via preFX (postFX désactivé dans ce build Phaser)
         const gp = isBoss ? Theme.GLOW.unitBoss : Theme.GLOW.unit;
@@ -1159,9 +1100,11 @@ class MainScene extends Phaser.Scene {
       const by = sprite._baseScaleY || sprite.scaleY;
       if (bx && by) sprite.setScale(bx, by * (1 + wobble * 0.025));
 
-      // Effet gel : disque cyan semi-transparent autour de l'unité si freeze > 0
+      // Effet gel : disque cyan semi-transparent tant que frozenUntil (timestamp
+      // serveur, epoch ms) n'est pas écoulé. (Fix : l'ancien check `u.freeze`
+      // testait un champ qui n'a jamais existé côté serveur.)
       const u = stateUnits[id];
-      const isFrozen = u && u.freeze && u.freeze > 0;
+      const isFrozen = u && u.frozenUntil && u.frozenUntil > Date.now();
       let freezeObj = sprites[5];
       if (isFrozen) {
         const sz = (Theme.unitShape(sprite._unitType) || { sz: 9 }).sz;
@@ -1370,17 +1313,6 @@ class MainScene extends Phaser.Scene {
       onComplete: () => g.destroy(),
     });
     return g;
-  }
-
-  // ── Animation déclenchée par un bâtiment (tour, etc.) : beam couleur équipe ──
-  _playArrowAnimation(ax, ay, tx, ty) {
-    // En néon : un beam droit, couleur d'équipe du bâtiment attaquant.
-    // L'attaquant.ownerId arrive depuis le serveur via data.attackerOwnerId, mais
-    // l'API setOnAttack ne fournit pas l'ownerId direct pour les bâtiments — on utilise
-    // une couleur ranged (blanc cassé) par défaut. Pour les tours, c'est très proche
-    // visuellement, et la couleur d'équipe sera idéalement injectée plus tard.
-    const color = Theme.BEAM.ranged;
-    this._drawBeam(ax, ay, tx, ty, color);
   }
 
   // ── Projectile néon volant : sprite tinté qui vole de attacker → target en 280ms ──

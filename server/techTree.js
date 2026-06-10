@@ -36,7 +36,7 @@ function pos(axis, tier, spread) {
 
 const TECH_TREE = {
   // ============================================================
-  // 🔬 SCIENCE (militaire / civilisation) — 18 nœuds
+  // 🔬 SCIENCE (militaire / civilisation) — 19 nœuds
   // ============================================================
   agriculture: {
     id: 'agriculture', axis: 'science', tier: 1, name: 'Agriculture', icon: '🌾',
@@ -151,7 +151,7 @@ const TECH_TREE = {
     id: 'gunpowder', axis: 'science', tier: 5, name: 'Poudre noire', icon: '💥',
     desc: 'Débloque le Canon (mobile) et la Bombarde (défensive).',
     cost: 140, requires: ['steel_forge', 'siege_engineering'],
-    unlocks: { units: ['cannon'], buildings: ['bombard'] },
+    unlocks: { units: ['cannon'], buildings: ['bombard_tower'] },
     pos: pos('science', 5, 1),
   },
 

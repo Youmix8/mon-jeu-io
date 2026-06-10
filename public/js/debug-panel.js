@@ -9,7 +9,7 @@
 //           Le scale s'applique IMMÉDIATEMENT sur toutes les instances du type.
 //           Bouton EXPORTER CONFIG → console.log d'un bloc prêt à coller.
 //
-// Touche H : toggle visibilité du panneau.
+// Touche ` (backtick) : toggle visibilité du panneau.
 // ════════════════════════════════════════════════════════════════════
 
 const DebugPanel = (() => {

@@ -15,7 +15,7 @@ const MAP_SIZES = {
   medium: { width: 4500, height: 4500, villageMin: 10, villageMax: 16 },
   large:  { width: 6000, height: 6000, villageMin: 16, villageMax: 24 },
 };
-const DEFAULT_MAP_TYPE = 'continental'; // 'no_water' | 'lakes' | 'continental' | 'island'
+const DEFAULT_MAP_TYPE = 'no_water'; // l'eau a été retirée du jeu — seul type valide
 const DEFAULT_MAP_SIZE = 'medium';
 
 // Variables courantes (initialisées dans regenerateMap, peuvent changer entre parties)
@@ -120,10 +120,6 @@ const SUMMONED_LIFETIMES = {
   god_avatar: 999999,
 };
 
-// Compat ancien système : ces 4 clés étaient utilisées dans le code legacy.
-// On les garde vides pour pas tout casser ; la vraie source = NEW_TECH_TREE.
-const TECH_TREE = {};
-
 // hdvLevel 1 = état de départ
 // goldPerSec : taux de gold passif de l'HDV à ce niveau
 // buildRadius : rayon de la zone constructible (plus petit que la vision)
@@ -177,7 +173,7 @@ const BUILDING_TYPES = {
     range: 0, damage: 0, cooldownMs: 0,
     halfSize: 26,
     requiresTech: 'mage_tower',
-    desc: '+1 mana/sec. Permet de produire des Sorciers.',
+    desc: '+1 mana/sec. Le moteur de ton économie de mana.',
   },
   // ── Religion ──
   altar: {
@@ -286,7 +282,15 @@ const SPELLS = {
 // Unités "magie/undead" (cibles bonus de Lumière purificatrice + Inquisiteur)
 const MAGIC_UNDEAD = new Set(['necromancer', 'skeleton', 'skeleton_knight', 'fire_elemental', 'arcane_dragon']);
 // Unités "religion" pour aura d'excommunication (religion_curse_aura)
-const RELIGION_UNITS = new Set(['holy_knight', 'inquisitor', 'pilgrim', 'paladin', 'angel', 'god_avatar']);
+const RELIGION_UNITS = new Set(['holy_knight', 'inquisitor', 'pilgrim', 'angel', 'god_avatar']);
+// Unités uniquement INVOQUÉES (revive nécro) — jamais productibles via spawnUnit/village.
+// Le client les cache déjà ; ce set ferme aussi la porte côté serveur (anti-cheat).
+const SUMMONED_ONLY_TYPES = new Set(['skeleton', 'skeleton_knight']);
+// Unités à dégâts de zone autour de leur cible (appliqués en section 3.6.b du game loop)
+const SPLASH_AOE_UNITS = {
+  fire_elemental: { radius: 40, damage: 15 },
+  god_avatar:     { radius: 60, damage: 20 },
+};
 
 // ────────── Villages neutres (modèle Polytopia : base secondaire conquérable) ──────────
 const VILLAGE_RADIUS         = 70;              // rayon de capture
@@ -343,7 +347,7 @@ function rallyNearbyAllies(originUnit, enemyId, enemyType) {
   for (const ally of Object.values(gameState.units)) {
     if (ally.id === originUnit.id) continue;
     if (ally.attackTargetId !== null) continue;        // déjà engagé
-    if ((ally.damage || 0) <= 0) continue;             // non-combattant (pèlerin, colon, bateau)
+    if ((ally.damage || 0) <= 0) continue;             // non-combattant (pèlerin, colon)
     if (ally.mode !== 'defend' && ally.mode !== 'attack') continue; // ne hijacke pas les ordres de déplacement / la faune
     if (!sameSide(ally.ownerId, originUnit.ownerId)) continue;
     const dx = ally.x - originUnit.x, dy = ally.y - originUnit.y;
@@ -391,59 +395,19 @@ const FAUNA_WANDER_MS      = 8000;
 const FAUNA_MIN_DIST_HDV   = 400;
 const FAUNA_TYPES          = ['boar', 'wolf'];
 
-// ────────── Eau & génération de map ──────────────────────────────
-// gameState.waterTiles : Uint8Array de longueur GRID_W*GRID_H, 1 = eau, 0 = terre.
-// Types de map : 'no_water' | 'lakes' | 'continental' | 'island'.
-
-function _fillCircle(arr, gw, gh, cx, cy, r) {
-  const yMin = Math.max(0, Math.floor(cy - r));
-  const yMax = Math.min(gh - 1, Math.ceil(cy + r));
-  const xMin = Math.max(0, Math.floor(cx - r));
-  const xMax = Math.min(gw - 1, Math.ceil(cx + r));
-  const r2 = r * r;
-  for (let ty = yMin; ty <= yMax; ty++) {
-    for (let tx = xMin; tx <= xMax; tx++) {
-      const dx = tx - cx, dy = ty - cy;
-      if (dx*dx + dy*dy <= r2) arr[ty * gw + tx] = 1;
-    }
-  }
-}
-
-// L'eau a été retirée du jeu — on garde la fonction comme stub no-op
-// pour ne pas casser les appelants (renvoie toujours un Uint8Array vide).
-function generateWaterTiles(_type, gw, gh) {
-  return new Uint8Array(gw * gh); // tout à 0 = pas d'eau
-}
-
-// waterTiles : Uint8Array global, recréé à chaque applyMapConfig
-let waterTiles = new Uint8Array(0);
-
-// L'eau a été retirée du jeu : tous les helpers renvoient des valeurs neutres.
-function isWaterTile(_tx, _ty) { return false; }
-function isWaterAt(_x, _y) { return false; }
-// Pathfinding eau supprimé : pas d'eau dans le jeu, fonctions stub.
-function pathHasWaterCount(_fromX, _fromY, _toX, _toY) { return 0; }
-function findWaypointAroundWater(_fromX, _fromY, _toX, _toY) { return null; }
-
-// Cherche une position de spawn libre (non-eau) autour de (cx, cy).
-// Pour unités terrestres : essaie 16 angles, retourne la 1ère position grass.
-// Pour bateaux (preferWater=true) : retourne la 1ère position water.
-// Fallback : centre exact si rien trouvé.
-function findFreeSpawnPos(cx, cy, baseRadius = 80, preferWater = false) {
+// Cherche une position de spawn libre autour de (cx, cy) : essaie 16 angles,
+// élargit le rayon si les premiers échouent, fallback au centre exact.
+function findFreeSpawnPos(cx, cy, baseRadius = 80) {
   for (let attempt = 0; attempt < 16; attempt++) {
     const angle = (attempt / 16) * Math.PI * 2 + Math.random() * 0.2;
     const dist  = baseRadius + (attempt > 7 ? 40 : 0); // si proches échouent, élargit
     const x = cx + Math.cos(angle) * dist;
     const y = cy + Math.sin(angle) * dist;
     if (x < 30 || x > MAP_WIDTH - 30 || y < 30 || y > MAP_HEIGHT - 30) continue;
-    const isW = isWaterAt(x, y);
-    if (preferWater ? isW : !isW) return { x: Math.round(x), y: Math.round(y) };
+    return { x: Math.round(x), y: Math.round(y) };
   }
   return { x: Math.round(cx), y: Math.round(cy) };
 }
-
-// L'eau a été retirée : ce helper renvoie toujours false.
-function hasWaterNeighbor(_x, _y) { return false; }
 
 // Recalcule TOUT en fonction du type/size de map. Appelé au démarrage et
 // quand le 1er joueur (ou un reset) déclenche une nouvelle config.
@@ -459,7 +423,6 @@ function applyMapConfig(type, size) {
   currentMapType = 'no_water';
   GRID_W = Math.floor(MAP_WIDTH  / TILE_SIZE);
   GRID_H = Math.floor(MAP_HEIGHT / TILE_SIZE);
-  waterTiles = generateWaterTiles(currentMapType, GRID_W, GRID_H);
   console.log(`[map] config: type=${currentMapType} size=${currentMapSize} (${MAP_WIDTH}x${MAP_HEIGHT}, grid ${GRID_W}x${GRID_H})`);
 }
 
@@ -475,8 +438,6 @@ function generateVillages(spawns) {
     attempts++;
     const x = 200 + Math.random() * (MAP_WIDTH  - 400);
     const y = 200 + Math.random() * (MAP_HEIGHT - 400);
-    // Refuse les positions sur l'eau (les villages sont terrestres)
-    if (isWaterAt(x, y)) continue;
     if (spawns.some(s => Math.hypot(s.x - x, s.y - y) < VILLAGE_MIN_DIST_HDV)) continue;
     if (villages.some(v => Math.hypot(v.x - x, v.y - y) < VILLAGE_MIN_DIST_OTHER)) continue;
     villages.push({
@@ -493,9 +454,6 @@ function generateVillages(spawns) {
   console.log(`Villages générés: ${villages.length} (${count} demandés)`);
   return villages;
 }
-
-// ensureCoastalVillages a été retiré (plus d'eau dans le jeu).
-function ensureCoastalVillages(_villages, _spawns, _minCoastal) { /* no-op */ }
 
 function villageAllowsUnit(village, player, typeId) {
   const def = UNIT_TYPES[typeId];
@@ -538,7 +496,6 @@ function generateCamps(spawns, villages) {
     attempts++;
     const x = 300 + Math.random() * (MAP_WIDTH  - 600);
     const y = 300 + Math.random() * (MAP_HEIGHT - 600);
-    if (isWaterAt(x, y)) continue;
     if (spawns.some(s => Math.hypot(s.x - x, s.y - y) < CAMP_MIN_DIST_HDV)) continue;
     if (villages.some(v => Math.hypot(v.x - x, v.y - y) < CAMP_MIN_DIST_VILLAGE)) continue;
     if (camps.some(c => Math.hypot(c.x - x, c.y - y) < CAMP_MIN_DIST_OTHER)) continue;
@@ -585,7 +542,7 @@ function rewardCampClear(camp, player) {
   player.gold += CAMP_REWARD_GOLD; player.totalGoldEarned += CAMP_REWARD_GOLD;
   const freeType = unitTypeUnlocked(player, 'knight') ? 'knight' : 'soldier';
   const def = UNIT_TYPES[freeType];
-  const pos = findFreeSpawnPos(player.x, player.y, 70 + Math.random() * 30, false);
+  const pos = findFreeSpawnPos(player.x, player.y, 70 + Math.random() * 30);
   const unitId = `unit_${nextUnitId++}`;
   gameState.units[unitId] = {
     id: unitId, ownerId: player.id, x: pos.x, y: pos.y, type: freeType,
@@ -608,7 +565,6 @@ function spawnAllFauna(spawns) {
     attempts++;
     const ox = 200 + Math.random() * (MAP_WIDTH  - 400);
     const oy = 200 + Math.random() * (MAP_HEIGHT - 400);
-    if (isWaterAt(ox, oy)) continue;
     if (spawns.some(s => Math.hypot(s.x - ox, s.y - oy) < FAUNA_MIN_DIST_HDV)) continue;
     const packType = FAUNA_TYPES[Math.floor(Math.random() * FAUNA_TYPES.length)];
     const n = FAUNA_PER_PACK_MIN + Math.floor(Math.random() * (FAUNA_PER_PACK_MAX - FAUNA_PER_PACK_MIN + 1));
@@ -772,11 +728,6 @@ function computeFaithRate(player) {
   return rate;
 }
 
-function unitHpBonusFromVillages(_player) {
-  // Plus de bonus HP via village (les villages ne sont plus typés)
-  return 0;
-}
-
 // Multiplicateur HP max appliqué au spawn selon les techs passives du propriétaire.
 // Centralise les bonus pour qu'ils s'appliquent depuis HDV / village / bot / spawn invoqué.
 function unitHpMult(player, typeId) {
@@ -807,15 +758,18 @@ function unitVisionRadius(unit) {
 
 // ── Catégorie "unités à projectile" (impactée par ballistics / reconnaissance) ──
 const RANGED_UNIT_TYPES = new Set(['archer', 'crossbowman', 'catapult', 'cannon']);
-const RANGED_BUILDING_TYPES = new Set(['tower', 'bombard']);
+const RANGED_BUILDING_TYPES = new Set(['tower', 'bombard_tower']);
 
-// Portée effective d'une unité, incluant le passif 'reconnaissance' (+15 % pour
-// les unités à distance) et les autres bonus existants (déjà appliqués via
-// crossbows etc. ailleurs dans le code).
+// Portée effective d'une unité :
+//   - 'crossbows' (archer_buff) : archer -20 % de portée (le +50 % dmg est en combat)
+//   - 'reconnaissance' : +15 % pour toutes les unités à distance
 function effectiveRange(unit) {
   if (!unit) return 0;
   const owner = gameState.players && gameState.players[unit.ownerId];
   let range = unit.range || 0;
+  if (owner && unit.type === 'archer' && hasTech(owner, 'crossbows')) {
+    range = Math.round(range * 0.8);
+  }
   if (owner && hasTech(owner, 'reconnaissance') && RANGED_UNIT_TYPES.has(unit.type)) {
     range = Math.round(range * 1.15);
   }
@@ -833,6 +787,41 @@ function effectiveCooldown(ownerId, type, baseCooldownMs) {
     return Math.round(baseCooldownMs * 0.8);
   }
   return baseCooldownMs;
+}
+
+// Multiplicateurs OFFENSIFS de l'attaquant contre une unité cible
+// (inquisiteur anti-magie, pyromancie, pénalité siège anti-unité).
+// Appelés UNIQUEMENT quand l'attaque est à portée (jamais pendant la poursuite).
+function offensiveDamageMult(attacker, target) {
+  const owner = gameState.players[attacker.ownerId];
+  let mult = 1;
+  // Inquisiteur : ×2 dmg vs magique/undead, ×3 si tech 'purifying_light'
+  if (attacker.type === 'inquisitor' && MAGIC_UNDEAD.has(target.type)) {
+    mult *= (owner && hasTech(owner, 'purifying_light')) ? 3 : 2;
+  }
+  // Tech 'pyromancy' : +45 % dmg pour les unités magie/undead du joueur
+  if (owner && MAGIC_UNDEAD.has(attacker.type) && hasTech(owner, 'pyromancy')) mult *= 1.45;
+  // Catapulte/Canon : gros vs bâtiments, pénalisés contre les unités
+  if (attacker.type === 'catapult' || attacker.type === 'cannon') mult *= 0.4;
+  return mult;
+}
+
+// Multiplicateurs DÉFENSIFS côté victime (unwavering_faith, excommunication).
+// Centralisé pour s'appliquer aussi aux dégâts dérivés (splash pyromancy, ricochet).
+function defensiveDamageMult(attacker, victim) {
+  const victimOwner = victim.ownerId && gameState.players[victim.ownerId];
+  if (!victimOwner) return 1;
+  let mult = 1;
+  // 'unwavering_faith' : -25 % de dégâts magiques reçus
+  if (MAGIC_UNDEAD.has(attacker.type) && hasTech(victimOwner, 'unwavering_faith')) mult *= 0.75;
+  // 'excommunication' : -20 % si une unité Religion alliée est à <150 px de la victime
+  if (victim.ownerId !== attacker.ownerId && hasTech(victimOwner, 'excommunication')) {
+    for (const rel of Object.values(gameState.units)) {
+      if (rel.ownerId !== victim.ownerId || !RELIGION_UNITS.has(rel.type)) continue;
+      if (Math.hypot(rel.x - victim.x, rel.y - victim.y) <= 150) { mult *= 0.80; break; }
+    }
+  }
+  return mult;
 }
 
 // ────────── Bot IA ──────────
@@ -855,12 +844,9 @@ function addBot() {
     eliminated: false, eliminatedAt: null,
     kills: 0, unitsCreated: 0, totalGoldEarned: 0, joinTime: Date.now(),
     hdvLevel: 1,
-    // Tech tree v2 : ressources et déblocages
+    // Tech tree : ressources et déblocages
     researchPoints: 0, mana: 0, faith: 0,
     unlockedTechs: [],
-    // Legacy compat (encore référencés par du code non migré)
-    techPoints: 0, researchedTechs: [],
-    activeSpells: [],
     allies: [], // ids des joueurs avec pacte de non-agression
     vision: HDV_LEVELS[0].vision,
     populationUsed: 0, populationMax: BASE_POPULATION,
@@ -895,11 +881,17 @@ function addBot() {
 // ── Stratégies de tech par spécialité bot ──
 // Chaque bot reçoit aléatoirement une spécialité au spawn (science/magic/religion).
 // Il suit en priorité sa branche, mais débloque aussi les techs économiques de base.
+// IMPORTANT : chaque route doit contenir TOUS les prérequis de ses nœuds, dans
+// l'ordre — le bot recherche séquentiellement et saute les nœuds dont les
+// `requires` ne sont pas satisfaits. (Fix : avant, 'construction' / 'roads' /
+// 'diplomacy' / 'teleportation' manquaient → ballistics, empire, renaissance,
+// time_mastery… étaient inaccessibles à vie pour les bots.)
 const BOT_TECH_PRIORITY_SCIENCE = [
-  'agriculture', 'archery', 'riding', 'military_architecture',
-  'ballistics', 'reconnaissance', 'empire',
-  'steel_forge', 'crossbows', 'war_academy', 'siege_engineering',
-  'gunpowder', 'citadel', 'renaissance',
+  'agriculture', 'construction', 'archery', 'riding',
+  'roads', 'ballistics', 'military_architecture', 'reconnaissance',
+  'siege_engineering', 'colonization', 'diplomacy',
+  'steel_forge', 'crossbows', 'empire', 'war_academy',
+  'gunpowder', 'printing', 'citadel', 'renaissance',
 ];
 const BOT_TECH_PRIORITY_MAGIC = [
   // Économie de base d'abord
@@ -909,7 +901,7 @@ const BOT_TECH_PRIORITY_MAGIC = [
   // Militaire de base pour ne pas être démuni en early
   'archery', 'riding',
   // Magie avancée
-  'lightning', 'enchantment', 'cryomancy',
+  'lightning', 'enchantment', 'cryomancy', 'teleportation',
   'necromancy', 'illusion', 'arcane_ricochet',
   'lich', 'elemental_summon', 'time_mastery',
   'arcane_avatar',
@@ -934,6 +926,26 @@ const BOT_UNITS_BY_SPECIALTY = {
   religion: ['god_avatar', 'angel', 'holy_knight', 'inquisitor', 'pilgrim', 'knight', 'archer', 'soldier'],
 };
 
+// Plans de construction par spécialité : bâtiments d'ÉCONOMIE (mana/foi) d'abord,
+// défense (tour) ensuite. Sans ça, les bots magic/religion n'avaient JAMAIS de
+// mana/foi et ne produisaient jamais leurs unités de spécialité.
+const BOT_BUILD_PLANS = {
+  science: [
+    { type: 'tower',      tech: 'military_architecture', max: 2 },
+  ],
+  magic: [
+    { type: 'sanctum',    tech: 'elements_study',        max: 2 },
+    { type: 'mage_tower', tech: 'mage_tower',            max: 2 },
+    { type: 'tower',      tech: 'military_architecture', max: 2 },
+  ],
+  religion: [
+    { type: 'altar',      tech: 'animism',               max: 2 },
+    { type: 'temple',     tech: 'temple',                max: 2 },
+    { type: 'cathedral',  tech: 'cathedral',             max: 1 },
+    { type: 'tower',      tech: 'military_architecture', max: 2 },
+  ],
+};
+
 // Choix aléatoire de spécialité au moment du spawn d'un bot.
 function pickBotSpecialty() {
   const r = Math.random();
@@ -946,8 +958,6 @@ function botTick(bot) {
   if (bot.eliminated) return;
   bot.botState = bot.botState || {
     lastWaveTime: 0, lastBuildTime: 0, lastVillageScout: 0,
-    lastPortTime: 0, lastBoatSpawnTime: 0, lastNavalWaveTime: 0,
-    hasNavalAmbition: null,
   };
   const nowMs = Date.now();
 
@@ -992,39 +1002,40 @@ function botTick(bot) {
     }
   }
 
-  // 3. CONSTRUCTION DÉFENSIVE (tour près du HDV) ──────────────────
-  // Construit jusqu'à 2 tours d'archer à environ 130px du HDV.
-  if (hasTech(bot, 'military_architecture') && bot.gold > 80
-      && nowMs - bot.botState.lastBuildTime > 3000) {
-    const myTowers = gameState.buildings.filter(b => b.ownerId === bot.id && b.type === 'tower');
-    const towerDef = BUILDING_TYPES.tower;
-    if (myTowers.length < 2 && bot.gold >= towerDef.cost) {
-      // Trouve une position libre autour du HDV (8 directions)
+  // 3. CONSTRUCTION ────────────────────────────────────────────────
+  // Économie de spécialité d'abord (sanctum/mage_tower/autel/temple…),
+  // défense (tour) ensuite — cf. BOT_BUILD_PLANS.
+  if (nowMs - bot.botState.lastBuildTime > 3000) {
+    const plans = BOT_BUILD_PLANS[specialty] || BOT_BUILD_PLANS.science;
+    for (const plan of plans) {
+      if (!hasTech(bot, plan.tech)) continue;
+      const def = BUILDING_TYPES[plan.type];
+      if (!def) continue;
+      const count = gameState.buildings.filter(b => b.ownerId === bot.id && b.type === plan.type).length;
+      if (count >= plan.max) continue;
+      if (bot.gold < def.cost + 40) continue; // garde une marge pour les unités
+      // Trouve une position libre autour du HDV (8 directions, rayon croissant)
       const buildRadius = baseBuildRadius('hdv', bot);
-      for (let attempt = 0; attempt < 8; attempt++) {
+      let built = false;
+      for (let attempt = 0; attempt < 8 && !built; attempt++) {
         const angle = (attempt / 8) * Math.PI * 2 + Math.random() * 0.4;
-        const dist = Math.min(buildRadius - 30, 130);
-        const px = bot.x + Math.cos(angle) * dist;
-        const py = bot.y + Math.sin(angle) * dist;
-        const snap = snapToGrid(px, py);
-        // Vérifie qu'on ne pose pas sur l'eau, qu'on ne chevauche pas un autre bâtiment,
-        // et qu'on respecte la distance min au HDV
-        if (isWaterAt(snap.x, snap.y)) continue;
+        const dist = Math.min(buildRadius - 30, 110 + attempt * 12);
+        const snap = snapToGrid(bot.x + Math.cos(angle) * dist, bot.y + Math.sin(angle) * dist);
         if (Math.hypot(bot.x - snap.x, bot.y - snap.y) < BUILDING_MIN_DIST_HDV) continue;
         if (gameState.buildings.some(b => b.x === snap.x && b.y === snap.y)) continue;
-        // OK, construis
-        bot.gold -= towerDef.cost;
+        bot.gold -= def.cost;
         gameState.buildings.push({
           id: `b_${nextBuildingId++}`,
-          ownerId: bot.id, type: 'tower',
+          ownerId: bot.id, type: plan.type,
           x: snap.x, y: snap.y,
-          hp: towerDef.hp, maxHp: towerDef.hp,
+          hp: def.hp, maxHp: def.hp,
           lastAttackTime: 0,
         });
         bot.botState.lastBuildTime = nowMs;
-        console.log(`[Bot ${bot.name}] construit une Tour en (${snap.x}, ${snap.y})`);
-        break;
+        console.log(`[Bot ${bot.name}] construit ${plan.type} en (${snap.x}, ${snap.y})`);
+        built = true;
       }
+      if (built) break;
     }
   }
 
@@ -1044,11 +1055,13 @@ function botTick(bot) {
       if (def.manaCost && (bot.mana || 0) < def.manaCost) continue;
       if (def.faithCost && (bot.faith || 0) < def.faithCost) continue;
       if (botPopUsed + (def.populationCost || 1) > botPopMax) continue;
+      // Cap pèlerins : précieux pour la foi mais inutiles en combat — max 4.
+      if (typeId === 'pilgrim' && myUnits.filter(u => u.type === 'pilgrim').length >= 4) continue;
       bot.gold -= def.cost;
       if (def.manaCost)  bot.mana  = Math.max(0, (bot.mana  || 0) - def.manaCost);
       if (def.faithCost) bot.faith = Math.max(0, (bot.faith || 0) - def.faithCost);
       bot.unitsCreated++;
-      const pos = findFreeSpawnPos(bot.x, bot.y, 70 + Math.random() * 30, false);
+      const pos = findFreeSpawnPos(bot.x, bot.y, 70 + Math.random() * 30);
       const unitId = `unit_${nextUnitId++}`;
       const botHp = Math.round(def.hp * unitHpMult(bot, typeId));
       gameState.units[unitId] = {
@@ -1066,9 +1079,11 @@ function botTick(bot) {
     }
   }
 
-  // Unités au repos disponibles pour des ordres (proches du HDV)
+  // Unités COMBATTANTES au repos disponibles pour des ordres (proches du HDV).
+  // Les non-combattants (pèlerins, colons) restent à la base.
   const armyAtBase = myUnits.filter(u =>
     u.mode === 'defend' && u.attackTargetId === null
+    && (u.damage || 0) > 0
     && Math.hypot(u.x - bot.x, u.y - bot.y) < 400
   );
 
@@ -1083,10 +1098,13 @@ function botTick(bot) {
   if (threatNear) bot.botState.defenseUntil = nowMs + BOT_DEFENSE_MS;
   if ((bot.botState.defenseUntil || 0) > nowMs) {
     // Rappel des unités offensives vers le HDV, pas de nouvelle offensive.
+    // On annule aussi attackTargetId : sinon le rappel était sans effet
+    // (le mouvement suit la cible d'attaque quel que soit le mode).
     for (const u of myUnits) {
       if (u.mode === 'move') {
         u.mode = 'defend'; u.defendX = bot.x; u.defendY = bot.y; u.defendRadius = 360;
         u.targetX = null; u.targetY = null;
+        u.attackTargetId = null; u.attackTargetType = null;
       }
     }
     return;
@@ -1122,6 +1140,7 @@ function botTick(bot) {
   // Quand au moins 10 unités au HDV ET 6s depuis dernière wave
   const stillAtBase = myUnits.filter(u =>
     u.mode === 'defend' && u.attackTargetId === null
+    && (u.damage || 0) > 0
     && Math.hypot(u.x - bot.x, u.y - bot.y) < 400
   );
   if (stillAtBase.length >= 10 && nowMs - bot.botState.lastWaveTime > 6000) {
@@ -1154,8 +1173,6 @@ function botTick(bot) {
       console.log(`[Bot ${bot.name}] WAVE de ${wave.length} unités sur ${target.name} (HP ${target.hp}/${target.maxHp})`);
     }
   }
-
-  // 7. WAVE NAVALE — RETIRÉE (système eau supprimé).
 }
 
 // Reverse-map unité → tech qui la débloque (via node.unlocks.units ou node.unitType).
@@ -1173,6 +1190,8 @@ for (const [tid, node] of Object.entries(NEW_TECH_TREE)) {
 function unitTypeUnlocked(player, typeId) {
   const def = UNIT_TYPES[typeId];
   if (!def) return false;
+  // Invocations pures (squelettes) : jamais productibles directement
+  if (SUMMONED_ONLY_TYPES.has(typeId)) return false;
   if (def.requiresTech) return hasTech(player, def.requiresTech);
   // Tech indirecte via l'arbre (unlocks.units) — ex. unités boss
   const indirect = UNIT_UNLOCK_TECH[typeId];
@@ -1183,9 +1202,6 @@ function unitTypeUnlocked(player, typeId) {
 // Fallback en coin DYNAMIQUE (relatif à la taille actuelle de la map).
 // Bug fix : auparavant hardcodé { x:500, y:500 }, { x:4000, y:500 }… ce qui
 // envoyait 3 HDV sur 4 HORS de la map quand celle-ci faisait 3000 (Petite).
-// `isWaterTile` retourne false pour les tiles hors-grille → la boucle de
-// correction "push vers le centre" ne se déclenchait pas, et le HDV du bot
-// finissait positionné à (4000, …) hors de la map 3000×3000.
 function fallbackSpawns() {
   const m = SPAWN_MARGIN;
   return [
@@ -1196,7 +1212,10 @@ function fallbackSpawns() {
   ];
 }
 
-const COLORS = ['#ff6b6b', '#4dabf7', '#69db7c', '#ffd43b']; // rouge corail, bleu ciel, vert pomme, jaune solaire
+// Palette néon alignée sur le client (theme.js FCOL_STR) : cyan, rose-rouge, violet, lime.
+// NB : le client recalcule ses propres couleurs par slot (joueur local = cyan) ;
+// ces valeurs servent de fallback pour les payloads qui transportent une couleur.
+const COLORS = ['#22d3ee', '#fb7185', '#c084fc', '#a3e635'];
 
 // Génère MAX_PLAYERS points avec distance min entre eux (rejection sampling).
 // Fallback aux coins si on n'arrive pas à placer.
@@ -1207,41 +1226,22 @@ function generateSpawns() {
     attempts++;
     const x = SPAWN_MARGIN + Math.random() * (MAP_WIDTH  - 2 * SPAWN_MARGIN);
     const y = SPAWN_MARGIN + Math.random() * (MAP_HEIGHT - 2 * SPAWN_MARGIN);
-    // Refuse les spawns sur l'eau ou avec une water tile dans les 3 tiles autour
-    if (isWaterAt(x, y)) continue;
-    let nearWater = false;
-    for (let dy = -2; dy <= 2 && !nearWater; dy++) {
-      for (let dx = -2; dx <= 2 && !nearWater; dx++) {
-        if (isWaterAt(x + dx * TILE_SIZE, y + dy * TILE_SIZE)) nearWater = true;
-      }
-    }
-    if (nearWater) continue;
     const ok = spawns.every(s => Math.hypot(s.x - x, s.y - y) >= MIN_SPAWN_DIST);
     if (ok) spawns.push({ x: Math.round(x), y: Math.round(y) });
   }
   if (spawns.length < MAX_PLAYERS) {
     console.warn(`generateSpawns: only placed ${spawns.length}/${MAX_PLAYERS} after ${attempts} tries, using fallback corners`);
-    // Fallback : utilise les coins mais vérifie qu'ils sont sur terre, sinon les pousse vers le centre.
-    // Les coins sont recalculés à partir de la taille de map ACTUELLE (cf. fallbackSpawns).
-    return fallbackSpawns().map(s => {
-      let x = s.x, y = s.y;
-      // Clamp dans la map (sécurité supplémentaire)
-      x = Math.max(SPAWN_MARGIN, Math.min(MAP_WIDTH  - SPAWN_MARGIN, x));
-      y = Math.max(SPAWN_MARGIN, Math.min(MAP_HEIGHT - SPAWN_MARGIN, y));
-      // Évite l'eau : pousse vers le centre par pas de 20 %
-      let safety = 20;
-      while (isWaterAt(x, y) && safety-- > 0) {
-        x += (MAP_WIDTH/2 - x) * 0.2;
-        y += (MAP_HEIGHT/2 - y) * 0.2;
-      }
-      return { x: Math.round(x), y: Math.round(y) };
-    });
+    // Fallback : coins recalculés à partir de la taille de map ACTUELLE, clampés.
+    return fallbackSpawns().map(s => ({
+      x: Math.round(Math.max(SPAWN_MARGIN, Math.min(MAP_WIDTH  - SPAWN_MARGIN, s.x))),
+      y: Math.round(Math.max(SPAWN_MARGIN, Math.min(MAP_HEIGHT - SPAWN_MARGIN, s.y))),
+    }));
   }
   console.log('Random spawns:', spawns.map(s => `(${s.x},${s.y})`).join(' '));
   return spawns;
 }
 
-// Initialisation map (waterTiles, dimensions, grid)
+// Initialisation map (dimensions, grid)
 applyMapConfig(DEFAULT_MAP_TYPE, DEFAULT_MAP_SIZE);
 let currentSpawns = generateSpawns();
 let initialVillages = generateVillages(currentSpawns);
@@ -1584,13 +1584,10 @@ function resetMatch() {
   resetVisibilityAll();
   for (const p of Object.values(gameState.players)) {
     p.hdvLevel        = 1;
-    p.techPoints      = 0;
-    p.researchedTechs = [];
     p.researchPoints  = 0;
     p.mana            = 0;
     p.faith           = 0;
     p.unlockedTechs   = [];
-    p.activeSpells    = [];
     p.allies          = [];
     p.hp              = HDV_LEVELS[0].maxHp;
     p.maxHp           = HDV_LEVELS[0].maxHp;
@@ -1689,12 +1686,9 @@ io.on('connection', (socket) => {
     unitsCreated: 0,
     totalGoldEarned: 0,
     joinTime: Date.now(),
-    // Tech tree v2
     hdvLevel: 1,
     researchPoints: 0, mana: 0, faith: 0,
     unlockedTechs: [],
-    techPoints: 0, researchedTechs: [], // legacy compat
-    activeSpells: [],
     allies: [],
     vision: HDV_LEVELS[0].vision,
     populationUsed: 0, populationMax: BASE_POPULATION,
@@ -1715,9 +1709,7 @@ io.on('connection', (socket) => {
     gridH: GRID_H,
     mapType: currentMapType,
     mapSize: currentMapSize,
-    waterTiles: Buffer.from(waterTiles.buffer, waterTiles.byteOffset, waterTiles.byteLength),
     unitTypes: UNIT_TYPES,
-    techTree: TECH_TREE,
     hdvLevels: HDV_LEVELS,
     villageRadius: VILLAGE_RADIUS,
     villageCaptureTicks: VILLAGE_CAPTURE_TICKS,
@@ -1728,7 +1720,7 @@ io.on('connection', (socket) => {
     villageHalfSize: VILLAGE_HALF_SIZE,
     spawnPositions: currentSpawns,
     buildingTypes: BUILDING_TYPES,
-    techTree: NEW_TECH_TREE, // arbre tech v2 radial
+    techTree: NEW_TECH_TREE, // arbre tech radial (3 axes)
     spells: SPELLS,
     buildGrid: BUILD_GRID,
     buildingMinDistHdv: BUILDING_MIN_DIST_HDV,
@@ -1767,12 +1759,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Système eau retiré : on spawn toujours sur terre autour du HDV.
-    let spawnX, spawnY;
-    {
-      const pos = findFreeSpawnPos(p.x, p.y, 70 + Math.random() * 30, false);
-      spawnX = pos.x; spawnY = pos.y;
-    }
+    const pos = findFreeSpawnPos(p.x, p.y, 70 + Math.random() * 30);
 
     p.gold -= def.cost;
     if (def.manaCost)  p.mana  = Math.max(0, (p.mana  || 0) - def.manaCost);
@@ -1781,15 +1768,14 @@ io.on('connection', (socket) => {
     const unitId = `unit_${nextUnitId++}`;
 
     const hpBase = Math.round(def.hp * unitHpMult(p, typeId));
-    const hpBonus = unitHpBonusFromVillages(p) + (hpBase - def.hp);
     gameState.units[unitId] = {
       id: unitId,
       ownerId: socket.id,
-      x: spawnX,
-      y: spawnY,
+      x: pos.x,
+      y: pos.y,
       type: typeId,
-      hp: def.hp + hpBonus,
-      maxHp: def.hp + hpBonus,
+      hp: hpBase,
+      maxHp: hpBase,
       speed: def.speed,
       range: def.range,
       damage: def.damage,
@@ -1905,9 +1891,6 @@ io.on('connection', (socket) => {
     // Broadcast immédiat pour que le client voie le nouvel état sans attendre le tick
     broadcastFilteredState();
   });
-  // Legacy alias (ancien event, plus utilisé mais garde la compat)
-  socket.on('researchTech', () => { /* no-op : remplacé par unlockTech */ });
-
   socket.on('moveUnits', ({ unitIds, targetX, targetY }) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
@@ -1927,8 +1910,6 @@ io.on('connection', (socket) => {
       unit.attackTargetId   = null;
       unit.attackTargetType = null;
       unit.mode = 'move';
-      // Pathfinding eau retiré.
-      unit.waypoint = null;
     }
   });
 
@@ -1950,12 +1931,6 @@ io.on('connection', (socket) => {
       unit.mode = 'attack';
     }
   });
-
-  // ── Construction d'un bâtiment dans la zone d'une base (HDV/village) ──
-  // ── Transport bateau retiré (système eau supprimé) ──
-  // Les handlers embarkBoat/disembarkBoat restent en stub pour compat client legacy.
-  socket.on('embarkBoat', () => {});
-  socket.on('disembarkBoat', () => {});
 
   // Vendre un bâtiment : rembourse 50% du coût initial, détruit le bâtiment.
   socket.on('sellBuilding', ({ buildingId } = {}) => {
@@ -2025,11 +2000,6 @@ io.on('connection', (socket) => {
         socket.emit('spawnFailed', { reason: 'too_close_to_base' });
         return;
       }
-    }
-    // Port retiré (système eau supprimé) — empêche explicitement la construction.
-    if (type === 'port') {
-      socket.emit('spawnFailed', { reason: 'building_disabled' });
-      return;
     }
     // Coût
     if (p.gold < def.cost) {
@@ -2107,7 +2077,7 @@ io.on('connection', (socket) => {
     if (def.manaCost)  p.mana  = Math.max(0, (p.mana  || 0) - def.manaCost);
     if (def.faithCost) p.faith = Math.max(0, (p.faith || 0) - def.faithCost);
     p.unitsCreated++;
-    const pos = findFreeSpawnPos(v.x, v.y, 55 + Math.random() * 25, false);
+    const pos = findFreeSpawnPos(v.x, v.y, 55 + Math.random() * 25);
     const unitId = `unit_${nextUnitId++}`;
     const vHp = Math.round(def.hp * unitHpMult(p, typeId));
     gameState.units[unitId] = {
@@ -2387,20 +2357,37 @@ setInterval(() => {
         }
       }
     } else if (unit.mode === 'move') {
-      // Engagement opportuniste : si un ennemi entre à portée+40 sur le chemin → attaque
-      const scanR = (unit.range || 80) + 40;
-      let nearest = null, nearestDist = scanR;
-      for (const other of Object.values(gameState.units)) {
-        if (friendly(other.ownerId, unit.ownerId)) continue;
-        const d = Math.hypot(other.x - unit.x, other.y - unit.y);
-        if (d < nearestDist) { nearest = other; nearestDist = d; }
+      if (unit.targetX === null) {
+        // Arrivé à destination (ou route perdue) : passe en garde SUR PLACE.
+        // → un attack-move se termine en mode garde au lieu de laisser le pion inerte.
+        unit.mode = 'defend';
+        unit.defendX = unit.x;
+        unit.defendY = unit.y;
+        unit.defendRadius = unit.defendRadius || 320;
+      } else if ((unit.damage || 0) > 0) {
+        // Engagement opportuniste : si un ennemi entre à portée+40 sur le chemin → attaque
+        const scanR = (unit.range || 80) + 40;
+        let nearest = null, nearestDist = scanR;
+        for (const other of Object.values(gameState.units)) {
+          if (friendly(other.ownerId, unit.ownerId)) continue;
+          const d = Math.hypot(other.x - unit.x, other.y - unit.y);
+          if (d < nearestDist) { nearest = other; nearestDist = d; }
+        }
+        if (nearest) {
+          unit.attackTargetId = nearest.id;
+          unit.attackTargetType = 'unit';
+          rallyNearbyAllies(unit, nearest.id, 'unit');
+          // On garde targetX/targetY : après le kill, la cible est null et le pion reprend sa route
+        }
       }
-      if (nearest) {
-        unit.attackTargetId = nearest.id;
-        unit.attackTargetType = 'unit';
-        rallyNearbyAllies(unit, nearest.id, 'unit');
-        // On garde targetX/targetY : après le kill, la cible est null et le pion reprend sa route
-      }
+    } else if (unit.mode === 'attack') {
+      // Combat terminé (cible morte ou perdue) : ré-ancre une défense SUR PLACE.
+      // Fix "statue" : avant, une unité passée en mode attack (riposte, rally,
+      // ordre joueur) restait inerte pour toujours une fois sa cible morte.
+      unit.mode = 'defend';
+      unit.defendX = unit.x;
+      unit.defendY = unit.y;
+      unit.defendRadius = unit.defendRadius || 320;
     } else if (unit.mode === 'wander') {
       // Faune : erre lentement autour de son origine. Passive (la riposte est gérée
       // par le code de riposte générique à la prise de dégâts).
@@ -2413,7 +2400,7 @@ setInterval(() => {
         unit.wanderNextMs = nowW + FAUNA_WANDER_MS + Math.random() * 2000;
       }
     }
-    // mode === 'attack' ou non défini : aucune auto-cible (comportement existant)
+    // mode non défini : aucune auto-cible
   }
 
   // 1. Move (ATTACK_MOVE / MOVE / IDLE) — stats par unité
@@ -2460,17 +2447,9 @@ setInterval(() => {
         skipPlayerId = unit.attackTargetId;
       }
     } else if (unit.targetX !== null) {
-      // Waypoint actif (contournement d'eau) → on vise le waypoint d'abord
-      if (unit.waypoint) {
-        goalX = unit.waypoint.x; goalY = unit.waypoint.y;
-        if (Math.hypot(unit.x - goalX, unit.y - goalY) < 40) {
-          unit.waypoint = null; // waypoint atteint → cap sur la vraie cible
-        }
-      } else {
-        goalX = unit.targetX; goalY = unit.targetY;
-      }
+      goalX = unit.targetX; goalY = unit.targetY;
       const dist = Math.hypot(unit.targetX - unit.x, unit.targetY - unit.y);
-      if (!unit.waypoint && dist <= step) {
+      if (dist <= step) {
         unit.x = unit.targetX; unit.y = unit.targetY;
         unit.targetX = null;   unit.targetY = null;
         // Colon arrivé à destination : fonde un village
@@ -2486,7 +2465,6 @@ setInterval(() => {
     const [nx, ny] = computeDesiredDir(unit, goalX, goalY, skipPlayerId, skipBuildingId);
     unit.x += nx * step;
     unit.y += ny * step;
-    // L'eau a été retirée : aucune collision sol/eau à gérer.
   }
 
   // 1.5. Colons arrivés : transforme en village
@@ -2577,8 +2555,6 @@ setInterval(() => {
     unit.y = Math.max(UNIT_RADIUS, Math.min(MAP_HEIGHT - UNIT_RADIUS, unit.y));
   }
 
-  // Push-out eau retiré (système eau supprimé).
-
   // 3. Combat (ATTACK_MOVE: specific target | IDLE: nearest enemy | MOVE: skip)
   const toDelete = new Set();
   const attacks  = [];
@@ -2602,6 +2578,9 @@ setInterval(() => {
 
   for (const unit of Object.values(gameState.units)) {
     if (toDelete.has(unit.id)) continue;
+    // Non-combattants (pèlerin, colon) : jamais d'attaque, même en idle.
+    // Fix : avant, les fallbacks `|| 5` et `|| 80` leur donnaient 5 dmg / 80 de portée.
+    if ((unit.damage || 0) <= 0) continue;
     // Cooldown d'attaque — réduit de 20% pour les unités magie/undead si tech 'time_mastery'
     let atkCooldown = ATTACK_COOLDOWN_MS;
     if (MAGIC_UNDEAD.has(unit.type) && hasTech(gameState.players[unit.ownerId], 'time_mastery')) {
@@ -2612,11 +2591,10 @@ setInterval(() => {
     if (nowMs - unit.lastAttackTime < atkCooldown) continue;
     const uRange  = effectiveRange(unit) || unit.range || 80;
     // Aura Général : +25% dégâts pour les unités proches d'un Général allié
-    let uDamage = (unit.damage || 5) * generalAuraDmgBonus(unit);
-    // Inquisiteur : ×2 dmg vs unités magiques/undead
+    let uDamage = unit.damage * generalAuraDmgBonus(unit);
     const attackReach = uRange - UNIT_RADIUS;
 
-    // Tech 'crossbows' : archer +50% dmg, -20% portée
+    // Tech 'crossbows' : archer +50% dmg (le -20% de portée est dans effectiveRange)
     if (unit.type === 'archer' && hasTech(gameState.players[unit.ownerId], 'crossbows')) {
       uDamage *= 1.5;
     }
@@ -2626,43 +2604,6 @@ setInterval(() => {
       if (unit.attackTargetType === 'unit') {
         target = gameState.units[unit.attackTargetId];
         if (!target || toDelete.has(target.id)) { unit.attackTargetId = null; unit.attackTargetType = null; continue; }
-        // Inquisiteur : ×2 dmg vs magique/undead, ×3 si tech 'purifying_light' débloquée
-        if (unit.type === 'inquisitor' && MAGIC_UNDEAD.has(target.type)) {
-          const owner = gameState.players[unit.ownerId];
-          uDamage *= hasTech(owner, 'purifying_light') ? 3 : 2;
-        }
-        // Tech 'pyromancy' : +45% dmg pour unités magie/undead du joueur
-        if (MAGIC_UNDEAD.has(unit.type) && hasTech(gameState.players[unit.ownerId], 'pyromancy')) {
-          uDamage *= 1.45;
-        }
-        // Tech 'unwavering_faith' (côté CIBLE) : -25% dmg reçus si l'attaquant est magie/undead
-        if (MAGIC_UNDEAD.has(unit.type) && target.ownerId
-            && hasTech(gameState.players[target.ownerId], 'unwavering_faith')) {
-          uDamage *= 0.75;
-        }
-        // 'curses' a été remplacée par 'arcane_ricochet' (cf. arbre tech v3).
-        // Le rebond est appliqué après l'impact (voir section ricochet plus bas).
-        // Passif 'religion_curse_aura' (CIBLE) : idem pour les unités religion, -20%.
-        if (target.ownerId && target.ownerId !== unit.ownerId
-            && hasTech(gameState.players[target.ownerId], 'excommunication')) {
-          const def = gameState.players[target.ownerId];
-          for (const rel of Object.values(gameState.units)) {
-            if (rel.ownerId !== def.id) continue;
-            if (!RELIGION_UNITS.has(rel.type)) continue;
-            if (Math.hypot(rel.x - target.x, rel.y - target.y) <= 150) { uDamage *= 0.80; break; }
-          }
-        }
-        // Passif 'magic_slow_chance' (cryomancy) : à chaque tir magique, 20% chance
-        //  d'appliquer un freeze de 2s sur la cible.
-        if (MAGIC_UNDEAD.has(unit.type)
-            && hasTech(gameState.players[unit.ownerId], 'cryomancy')
-            && Math.random() < 0.20) {
-          target.frozenUntil = nowMs + 2000;
-        }
-        // Catapulte/Canon : pénalité contre unités (gros vs bâtiments seulement)
-        if ((unit.type === 'catapult' || unit.type === 'cannon') && target.type) {
-          uDamage *= 0.4;
-        }
         inRange = Math.hypot(target.x - unit.x, target.y - unit.y) <= uRange;
       } else if (unit.attackTargetType === 'village') {
         target = gameState.villages.find(vv => vv.id === unit.attackTargetId);
@@ -2679,6 +2620,22 @@ setInterval(() => {
       }
       if (!inRange) continue;
 
+      // ── Modificateurs de dégâts — calculés UNIQUEMENT une fois à portée ──
+      // offDamage = dégâts offensifs pré-défense : base des dégâts dérivés
+      // (splash pyromancy, ricochet), chacun ré-appliquant la défense de SA victime.
+      let offDamage = uDamage;
+      if (unit.attackTargetType === 'unit') {
+        offDamage = uDamage * offensiveDamageMult(unit, target);
+        uDamage   = offDamage * defensiveDamageMult(unit, target);
+        // Passif 'magic_slow_chance' (cryomancy) : 20% de chance de gel 2s par TIR.
+        // (après le check inRange — avant, le roll tournait à 20 Hz pendant la
+        // poursuite → gel quasi permanent à n'importe quelle distance)
+        if (MAGIC_UNDEAD.has(unit.type)
+            && hasTech(gameState.players[unit.ownerId], 'cryomancy')
+            && Math.random() < 0.20) {
+          target.frozenUntil = nowMs + 2000;
+        }
+      }
       // Tech 'crusade' : +25% dégâts sur HDV / bâtiments / villages
       if ((unit.attackTargetType === 'hdv' || unit.attackTargetType === 'building'
            || unit.attackTargetType === 'village')
@@ -2688,8 +2645,8 @@ setInterval(() => {
 
       unit.lastAttackTime = nowMs;
       target.hp = Math.max(0, target.hp - uDamage);
-      // Fire elemental : tag pour AoE splash (traité en section 3.6)
-      if (unit.type === 'fire_elemental' && unit.attackTargetType === 'unit') {
+      // AoE de zone (fire_elemental / god_avatar) : tag pour la section 3.6.b
+      if (SPLASH_AOE_UNITS[unit.type] && unit.attackTargetType === 'unit') {
         unit._aoeAroundTarget = { x: target.x, y: target.y };
       }
       // Riposte automatique : si la cible est une unité capable d'attaquer et n'a
@@ -2720,7 +2677,6 @@ setInterval(() => {
           && MAGIC_UNDEAD.has(unit.type)
           && hasTech(gameState.players[unit.ownerId], 'pyromancy')) {
         const splashRsq = 30 * 30;
-        const splashDmg = uDamage * 0.5;
         const splashHits = [];
         for (const u2 of Object.values(gameState.units)) {
           if (u2.id === target.id || u2.id === unit.id) continue;
@@ -2728,6 +2684,8 @@ setInterval(() => {
           if (toDelete.has(u2.id) || u2.hp <= 0) continue;
           const dsq = (u2.x - target.x) ** 2 + (u2.y - target.y) ** 2;
           if (dsq <= splashRsq) {
+            // Défense de CHAQUE victime périphérique (unwavering_faith, excommunication)
+            const splashDmg = offDamage * 0.5 * defensiveDamageMult(unit, u2);
             u2.hp = Math.max(0, u2.hp - splashDmg);
             splashHits.push({ id: u2.id, x: u2.x, y: u2.y, killed: u2.hp <= 0 });
             if (u2.hp <= 0) {
@@ -2736,6 +2694,9 @@ setInterval(() => {
               toDelete.add(u2.id);
               const killer = gameState.players[unit.ownerId];
               if (killer && !killer.eliminated) killer.kills++;
+              // Drops PvE + décompte de camp — sinon un camp dont le dernier
+              // mob meurt au splash restait "innettoyable" à jamais.
+              onNeutralUnitKilled(u2, unit.ownerId, null);
             }
           }
         }
@@ -2755,7 +2716,7 @@ setInterval(() => {
           if (dsq < ricDsq) { ric = u2; ricDsq = dsq; }
         }
         if (ric) {
-          const ricDmg = uDamage * 0.6;
+          const ricDmg = offDamage * 0.6 * defensiveDamageMult(unit, ric);
           ric.hp = Math.max(0, ric.hp - ricDmg);
           attackEntry.ricochet = { targetId: ric.id, x: ric.x, y: ric.y, dmg: ricDmg };
           if (ric.hp <= 0) {
@@ -2823,8 +2784,12 @@ setInterval(() => {
       if (!best) continue;
 
       unit.lastAttackTime = nowMs;
+      // Mêmes modificateurs que le chemin ciblé (inquisiteur, pyromancie, défenses)
+      if (bestType === 'unit') {
+        uDamage = uDamage * offensiveDamageMult(unit, best) * defensiveDamageMult(unit, best);
+      }
       best.hp = Math.max(0, best.hp - uDamage);
-      if (unit.type === 'fire_elemental' && bestType === 'unit') {
+      if (SPLASH_AOE_UNITS[unit.type] && bestType === 'unit') {
         unit._aoeAroundTarget = { x: best.x, y: best.y };
       }
       // Riposte automatique pour les unités attaquées en IDLE auto-attack
@@ -2925,35 +2890,34 @@ setInterval(() => {
 
   // ── 3.6 Behaviors spéciaux ────────────────────────────────────────
   // a) god_avatar fear aura : marque ennemis dans rayon 400 comme "feared" (slow 50%)
-  // b) fire_elemental : dégâts AoE rayon 40 autour de sa cible (au moment du tick d'attaque)
+  // b) fire_elemental / god_avatar : dégâts AoE autour de la cible (cf. SPLASH_AOE_UNITS)
   // c) Pilgrim mort : explosion de soin AoE 200 HP rayon 100 alliés
-  // d) Necromancer/Lich : résurrection au kill (skeleton / skeleton_knight, 60s)
+  // d) Nécromancien : résurrection au kill (squelette, ou clone si tech 'lich')
   // e) Lifetime decay : summoned units meurent après leur durée de vie
   // f) Angel heal aura : appliquée dans la section 1/s plus bas
 
-  // a) Fear aura (god_avatar)
+  // a) Fear aura (god_avatar) — épargne les alliés diplomatiques (friendly)
   for (const u of Object.values(gameState.units)) {
     if (u.type !== 'god_avatar') continue;
     for (const other of Object.values(gameState.units)) {
-      if (other.ownerId === u.ownerId || toDelete.has(other.id)) continue;
+      if (friendly(other.ownerId, u.ownerId) || toDelete.has(other.id)) continue;
       if (Math.hypot(other.x - u.x, other.y - u.y) <= 400) {
         other.fearedUntil = nowMs + 200; // refresh chaque tick (~50ms)
       }
     }
   }
 
-  // b) AoE damage du fire_elemental autour de sa cible
-  // (réapplique à chaque tick d'attaque réussie — on tag dans la boucle combat ci-dessus
-  //  via _aoeAroundTarget — fallback : pass)
+  // b) AoE de zone autour de la cible (tag _aoeAroundTarget posé en boucle combat)
   for (const u of Object.values(gameState.units)) {
-    if (u.type !== 'fire_elemental' || !u._aoeAroundTarget) continue;
+    const aoe = SPLASH_AOE_UNITS[u.type];
+    if (!aoe || !u._aoeAroundTarget) continue;
     const center = u._aoeAroundTarget;
     u._aoeAroundTarget = null;
     for (const other of Object.values(gameState.units)) {
       if (friendly(other.ownerId, u.ownerId) || toDelete.has(other.id)) continue;
       const d = Math.hypot(other.x - center.x, other.y - center.y);
-      if (d > 0 && d <= 40) {
-        other.hp = Math.max(0, other.hp - 15); // 15 dmg splash
+      if (d > 0 && d <= aoe.radius) {
+        other.hp = Math.max(0, other.hp - aoe.damage);
         if (other.hp <= 0) {
           // Crédite le kill + drops PvE + clear de camp (sinon camp jamais nettoyé si
           // le mob final meurt par splash) + tag résurrection necro/lich.
@@ -3164,12 +3128,7 @@ setInterval(() => {
     }
 
     for (const u of Object.values(gameState.units)) {
-      if (u.hp <= 0 || u.hp >= u.maxHp) {
-        if (u.type === 'holy_knight' && u.hp > 0 && u.hp < u.maxHp) {
-          u.hp = Math.min(u.maxHp, u.hp + 5);
-        }
-        continue;
-      }
+      if (u.hp <= 0 || u.hp >= u.maxHp) continue;
       let heal = 0;
       if (u.type === 'holy_knight') heal += 5;
       const owner = gameState.players[u.ownerId];

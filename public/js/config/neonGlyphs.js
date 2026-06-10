@@ -92,6 +92,7 @@ const NeonGlyphs = (() => {
     settler:          '⚑',
     necromancer:      '✦',
     skeleton:         '▲',
+    skeleton_knight:  '▶',
     fire_elemental:   '✺',
     arcane_dragon:    '✦',
     pilgrim:          '◯',
@@ -106,15 +107,14 @@ const NeonGlyphs = (() => {
 
   // Bâtiments
   const BUILDING = {
-    tower:       '◈',
-    bombard:     '◈',
-    sanctum:     '△',
-    mage_tower:  '△',
-    altar:       '✚',
-    temple:      '⛩',
-    cathedral:   '⛪',
-    rampart:     '═',
-    wall:        '═',
+    tower:         '◈',
+    bombard_tower: '◈',
+    sanctum:       '△',
+    mage_tower:    '△',
+    altar:         '✚',
+    temple:        '⛩',
+    cathedral:     '⛪',
+    wall:          '═',
   };
 
   function tech(id, fallback) { return TECH[id] || fallback || '◆'; }

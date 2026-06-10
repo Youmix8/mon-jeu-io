@@ -72,11 +72,12 @@ const Minimap = (() => {
       ctx.fillRect(px - 3, py - 3, 6, 6);
     }
 
-    // Unités (carré 2×2)
+    // Unités (carré 2×2) — y compris les neutres visibles (barbares rouges, faune)
+    // dont le "propriétaire" n'est pas dans state.players. Theme résout leur couleur.
     for (const u of Object.values(state.units || {})) {
-      const owner = state.players[u.ownerId];
-      if (!owner) continue;
-      ctx.fillStyle = fcol(u.ownerId);
+      ctx.fillStyle = (typeof Theme !== 'undefined')
+        ? Theme.factionColorStr(u.ownerId, u.type)
+        : fcol(u.ownerId);
       ctx.fillRect(u.x * sx - 1, u.y * sy - 1, 2, 2);
     }
 
