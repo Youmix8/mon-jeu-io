@@ -16,7 +16,7 @@ serveur, déployé sur Render.
 - **URL prod** : https://mon-jeu-io-17dn.onrender.com
 - **Repo** : `Youmix8/mon-jeu-io` — auto-deploy depuis `main` via
   `render.yaml` (~3 min).
-- **Dernier commit (session "tech-refonte-magie-bot-rebrand")** : `108461e`.
+- **Dernier commit (session "audit-volet-A")** : `7d73cda`.
 
 ---
 
@@ -56,12 +56,13 @@ joueurs). Le lobby permet de choisir uniquement la TAILLE de carte (l'eau a
 
 Sections principales :
 1. Constantes (`MAP_SIZES`, `UNIT_TYPES`, `BUILDING_TYPES`, `SPELLS`,
-   `HDV_LEVELS`, `VILLAGE_LEVELS`)
+   `HDV_LEVELS`, `VILLAGE_LEVELS`, `SUMMONED_ONLY_TYPES`, `SPLASH_AOE_UNITS`)
 2. Helpers neutres PvE (`isNeutralOwner`, `sameSide`, `areAllied`, `friendly`)
-3. **Helpers eau stubés** (`generateWaterTiles`, `isWaterAt`, etc. — tous
-   no-op depuis la suppression du système naval)
-4. Génération spawns + villages
-5. Bot IA (`botTick`) — diversifié par spécialité (science/magic/religion)
+3. Helpers combat (`effectiveRange`, `effectiveCooldown`,
+   `offensiveDamageMult`, `defensiveDamageMult` — multiplicateurs centralisés)
+4. Génération spawns + villages (le code eau a été **entièrement purgé**
+   en session volet-A — plus aucun stub `isWaterAt`/`waterTiles`)
+5. Bot IA (`botTick`) — spécialité (science/magic/religion) + `BOT_BUILD_PLANS`
 6. Handlers Socket.io
 7. Game loop (20 Hz) : behavior IA → mouvement → combat → behaviors spéciaux
    → résurrection (necro/lich) → ressources passives → broadcast filtré fog
@@ -105,11 +106,25 @@ Sections principales :
 ### Combat (20 Hz)
 - Modes : `defend` (scan zone) / `move` (vers `targetX/Y`) / `attack` (vers `attackTargetId`).
 - **Riposte auto** : unité touchée prend son attaquant comme cible si libre.
-- **AoE** : fire_elemental (40), god_avatar (60). Tag `_aoeAroundTarget` traité section 3.6.
+- **Fin de combat / fin de move** : une unité en mode `attack` sans cible, ou en
+  `move` arrivée à destination, **se ré-ancre en `defend` SUR PLACE** (rayon 320)
+  → plus de "statues" passives après une riposte ou un attack-move.
+- **Non-combattants** (`damage 0` : pèlerin, colon) : skippés dans la boucle
+  combat ET dans l'engagement opportuniste — ils n'attaquent jamais.
+- **AoE** : `SPLASH_AOE_UNITS` = fire_elemental (rayon 40, 15 dmg),
+  god_avatar (rayon 60, 20 dmg). Tag `_aoeAroundTarget` traité section 3.6.b.
 - **Aura général** : +25 % dmg aux alliés <200 d'un Général.
-- **Aura peur god_avatar** : ennemis <400 → speed ×0.5 (`fearedUntil`).
-- **`effectiveRange(unit)`** : +15 % portée si tech `reconnaissance` et type ∈ {archer, crossbowman, catapult, cannon}.
-- **`effectiveCooldown(ownerId, type, base)`** : ×0.8 si tech `ballistics` et type ∈ unités tireuses ou tours (cadence +25 %).
+- **Aura peur god_avatar** : ennemis <400 → speed ×0.5 (`fearedUntil`),
+  épargne les alliés diplomatiques (`friendly`).
+- **`effectiveRange(unit)`** : archer ×0.8 si `crossbows` ; +15 % si
+  `reconnaissance` et type ∈ {archer, crossbowman, catapult, cannon}.
+- **`effectiveCooldown(ownerId, type, base)`** : ×0.8 si tech `ballistics` et
+  type ∈ unités tireuses ou tours (`tower`, `bombard_tower`).
+- **`offensiveDamageMult` / `defensiveDamageMult`** : tous les bonus/malus
+  vs unités (inquisiteur, pyromancy, pénalité siège / unwavering_faith,
+  excommunication) passent par ces 2 helpers — appliqués au tir principal,
+  au splash pyromancy ET au ricochet, et UNIQUEMENT une fois à portée
+  (le proc cryomancy ne roll plus à 20 Hz pendant la poursuite).
 
 ### Tech tree (49 nœuds, 3 axes)
 
@@ -121,11 +136,11 @@ Sections principales :
 | Magie | 15 | **1 seul mage = Nécromancien** + 2 boss (fire_elemental, arcane_dragon) + invocations |
 | Religion | 15 | Soin/auras (5 unités saintes + buffs défensifs) |
 
-**Système eau retiré** (commit `bd7576a`) :
-- Helpers `isWaterAt`/`isWaterTile`/`hasWaterNeighbor`/`pathHasWaterCount` no-op.
+**Système eau retiré** (commit `bd7576a`, purge totale en session volet-A) :
+- Plus AUCUN stub : `isWaterAt`/`waterTiles`/`embarkBoat`/`disembarkBoat`/
+  `waypoint`/champs navals du botState ont été supprimés serveur ET client.
 - `applyMapConfig` force toujours `currentMapType = 'no_water'`.
-- Plus de `port`, `boat`, `embarkBoat`, `disembarkBoat`, `ensureCoastalVillages`, bot naval.
-- `waterTiles` reste un Uint8Array vide dans le payload init (compat client).
+- Le payload init n'envoie plus `waterTiles`.
 
 ### Axe Magie (refonte session magic-bot-rebrand)
 - **Une seule unité magique de base = Nécromancien** (HP 70, dmg 14, range 200,
@@ -138,10 +153,13 @@ Sections principales :
   ressuscite la victime en **CLONE allié -40 % HP/-40 % dmg pendant 30 s**
   (au lieu d'un simple squelette).
 - **Tech `pyromancy`** (T2 magie) : +45 % dmg magique + passif `magic_splash`
-  (mini-AoE 30 px à chaque tir magique, ×0.5 dmg périphérie).
+  (mini-AoE 30 px à chaque tir magique, ×0.5 dmg périphérie — les kills splash
+  créditent bien gold PvE + compteur de camp via `onNeutralUnitKilled`).
 - **Tech `arcane_ricochet`** (T4) : tirs mages rebondissent 1× sur ennemi
   <120 px de la cible (×0.6 dmg).
 - `MAGIC_UNDEAD = {necromancer, skeleton, skeleton_knight, fire_elemental, arcane_dragon}`.
+- `skeleton`/`skeleton_knight` ∈ `SUMMONED_ONLY_TYPES` : refusés par
+  `unitTypeUnlocked()` → injouables via spawnUnit/villageSpawnUnit (anti-cheat).
 
 ### Axes Science / Religion (récap rapide)
 - Science : agriculture, construction, archery, riding, roads, **ballistics**
@@ -163,14 +181,21 @@ Chaque bot reçoit une **spécialité aléatoire** au spawn (`pickBotSpecialty()
 Après épuisement de sa route primaire, le bot enchaîne sur les autres axes
 (snowball late-game). Logué `Bot Atlas added — slot 1 — spécialité magic`.
 
+**Les routes contiennent TOUS les prérequis dans l'ordre** (fix volet-A : avant,
+`construction`/`roads`/`diplomacy`/`teleportation` manquaient → ballistics,
+empire, renaissance, time_mastery étaient inaccessibles à vie).
+
 Boucle (~1.5 s) :
 1. Recherche tech selon spécialité
 2. Upgrade HDV (gold ≥ cost + 100)
-3. Construction tour (max 2 autour HDV)
-4. Spawn unité selon `BOT_UNITS_BY_SPECIALTY[specialty]`
-5. Capture village neutre (army ≥ 4)
-6. **Wave coordonnée** (army ≥ 10) → `attackTargetId = HDV` (fix passivité de
-   l'ancienne wave qui posait juste un `targetX/Y`)
+3. Construction selon `BOT_BUILD_PLANS[specialty]` — **économie d'abord**
+   (magic : 2 sanctums + 2 mage_towers ; religion : 2 autels + 2 temples +
+   1 cathédrale), tours défensives ensuite. C'est ce qui donne mana/foi aux
+   bots — sans ça ils ne produisaient jamais leurs unités de spécialité.
+4. Spawn unité selon `BOT_UNITS_BY_SPECIALTY[specialty]` (pèlerins cap à 4)
+5. Capture village neutre (army ≥ 4 **combattants** — pèlerins/colons exclus)
+6. **Wave coordonnée** (army ≥ 10) → `attackTargetId = HDV`. Le repli défensif
+   anti-raid annule aussi `attackTargetId` (sinon le rappel était sans effet).
 
 ### Direction artistique « obsidienne néon »
 
@@ -192,17 +217,28 @@ Boucle (~1.5 s) :
 **Formes** par type (sprite-factory) :
 - soldat = `tri` sz 9 · archer = `diamond` sz 8 · chevalier = `chevron` sz 10
 - catapulte = `square` sz 11 · heavy_knight/general/elite_guard = `hex`
-- nécromancien = `star` sz 9 · skeleton = `tri` sz 8
+- nécromancien = `star` sz 10 · skeleton = `tri` sz 8 · skeleton_knight = `chevron` sz 9
 - fire_elemental = `boss` sz 14 · arcane_dragon = `boss` sz 20
-- pèlerin/inquisiteur/holy_knight/paladin = `ring`
+- pèlerin/inquisiteur/holy_knight = `ring`
 - ange = `boss` sz 15 · god_avatar = `boss` sz 22
+- (les clés mortes `wizard`/`lich`/`paladin`/`skeleton_cavalry` ont été purgées
+  de theme.js en session volet-A)
 
 **Projectiles différenciés** :
 - archer/crossbow/catapult/cannon → **mini-sprite volant** `sf-projectile`
   (point lumineux 4×4 avec trail particle, 280 ms)
-- sorcier/nécro = beam **laser violet** `#a78bfa` instantané (120 ms fade)
+- nécro/élémentaire/dragon = beam **laser violet** `#a78bfa` instantané (120 ms fade)
 - inquisiteur/ange/avatar = beam **laser or** `#fcd34d`
 - tour de joueur = beam couleur d'équipe
+
+**Invocations** : pop néon à l'apparition — squelette (`source:'necro'`) =
+halo+burst **violet magie**, clone de liche (`source:'lich_clone'`) = halo
+**couleur d'équipe**. Le clone garde la forme de sa victime, la couleur dit
+le camp (l'ancienne signature lime des squelettes créait une confusion avec
+la couleur d'équipe du slot 3).
+
+**Raccourcis** : T arbre tech · **V vue d'ensemble** (était F → conflit avec
+le hotkey Fireball) · ` debug · Ctrl+A tout sélectionner.
 
 **Pop / squash / shake / pulse glow** :
 - Pop apparition unité : scale 0→1 en 180 ms `Back.easeOut`
@@ -211,9 +247,11 @@ Boucle (~1.5 s) :
 - Camera shake HDV propre touché : 120 ms 0.0025
 - Pulse glow boss : `outerStrength` oscille 0.85↔1.15 sur 1.4 s sine yoyo
 
-**Rebrand emojis** : `neonGlyphs.js` substitue 100 % des emojis médiévaux
-par des symboles Unicode néon (◆ ◈ ▤ ✦ ✚ ⌬ ⊕ ⌂ ▰ ◎ ⌨ ⚙) avec classes
-CSS `.g-*` qui appliquent un text-shadow currentColor (glow néon).
+**Rebrand emojis** : `neonGlyphs.js` fournit les glyphes Unicode néon
+(◆ ◈ ▤ ✦ ✚ ⌬ ⊕ ⌂ ▰ ◎ ⌨ ⚙) avec classes CSS `.g-*` (text-shadow currentColor).
+⚠️ Couverture PARTIELLE : HUD (index.html) et tech-tree-overlay seulement.
+Les panneaux HDV/village/bâtiment et le kill feed utilisent encore les emojis
+serveur (`u.icon`) → reste du volet B de l'audit.
 
 ---
 
@@ -297,155 +335,93 @@ ou l'esthétique.
 - **`effectiveRange()` shadow** : ne PAS créer une variable locale nommée
   `effectiveRange` (collision avec le helper global). Utiliser `attackReach`.
 - **Couleurs joueur** : `Theme.factionColorInt(pid, unitType?)` — passer
-  `unitType` pour résoudre correctement les bêtes PvE.
+  `unitType` pour résoudre correctement les bêtes PvE. Ne JAMAIS afficher
+  `player.color` du serveur dans l'UI (palette par slot serveur ≠ slot client) :
+  toujours passer par `Theme.factionColorStr/Int`.
+- **Boucle combat** : les unités `damage <= 0` sont skippées dès l'entrée.
+  Ne pas réintroduire de fallback `(unit.damage || 5)` / `(unit.range || 80)`
+  → c'est ce qui faisait combattre pèlerins et colons à 5 dmg / 80 de portée.
+- **Modificateurs de dégâts** : passer par `offensiveDamageMult` /
+  `defensiveDamageMult` (et les appliquer APRÈS le check `inRange`). Tout effet
+  de bord (proc cryomancy) placé avant `inRange` se déclenche à 20 Hz pendant
+  la poursuite.
+- **`utils/animations.js` et `config/entitiesConfig.js` ne sont PAS chargés
+  dans index.html** : tout code client `typeof Animations !== 'undefined'` ou
+  `typeof ENTITIES_CONFIG !== 'undefined'` est silencieusement mort (volet B :
+  charger ou purger).
 
 ---
 
-## 📝 PROCHAINE TÂCHE — Audit complet
+## 📝 État de l'audit (session volet-A, 10 juin 2026)
 
-Robin veut un **audit en profondeur** sur 3 axes, avec une nouvelle conversation
-sur le modèle le plus puissant (Opus 4). Le prompt est préparé ci-dessous, à
-copier-coller au début de la session.
+L'audit complet en 3 volets a été réalisé, puis le **Volet A (bugs) appliqué
+intégralement**. Récap des fixes livrés :
 
-### Brief de l'audit attendu
+### ✅ Volet A — corrigé
+- 🟥 Bots magic/religion sans économie → `BOT_BUILD_PLANS` (sanctum/mage_tower,
+  altar/temple/cathedral) — vérifié en partie réelle (logs `construit altar/temple`).
+- 🟥 Routes tech bots avec prérequis manquants → routes complétées et ordonnées.
+- 🟥 Proc cryomancy hors-portée (roll 20 Hz pendant la poursuite) → après `inRange`.
+- 🟧 Kills splash pyromancy sans `onNeutralUnitKilled` (camps innettoyables) → fixé.
+- 🟧 AoE god_avatar jamais implémentée → `SPLASH_AOE_UNITS` (rayon 60, 20 dmg).
+- 🟧 Unités "statues" après riposte/kill/move → ré-ancrage `defend` sur place.
+- 🟧 Effet gel client testait `u.freeze` (inexistant) → `u.frozenUntil > Date.now()`.
+- 🟧 Visuel d'invocation gé sur `source==='soul_harvest'` (legacy) → pop violet
+  (squelette) / couleur d'équipe (clone liche).
+- 🟧 skeleton/skeleton_knight spawnables sans tech → `SUMMONED_ONLY_TYPES` (serveur).
+- 🟧 `ballistics` ignorait la bombarde (`'bombard'` vs `bombard_tower`) → fixé
+  (+ `unlocks.buildings` de gunpowder corrigé).
+- 🟩 Crossbows -20 % portée jamais appliqué → dans `effectiveRange`.
+- 🟩 Pèlerins/colons combattaient (fallbacks `|| 5` / `|| 80`) → non-combattants skippés.
+- 🟩 Mur teinté faction (`'rampart'` vs `'wall'`) → gris fixe.
+- 🟩 Conflit touche F (fireball vs vue d'ensemble) → vue = V.
+- 🟩 Aura peur affectait les alliés diplomatiques → `friendly()`.
+- 🟩 unwavering_faith/excommunication ignorés par splash/ricochet →
+  `defensiveDamageMult` par victime.
+- 🟩 Couleurs kill feed / scoreboard = couleurs serveur legacy → `Theme.factionColorStr`.
+- 🟩 Purge totale : code eau/naval/waypoint, `TECH_TREE={}` + clé dupliquée du
+  payload init, champs `techPoints/researchedTechs/activeSpells`, handlers
+  `embarkBoat/disembarkBoat/researchTech`, `_placeDecor_DEPRECATED`,
+  `_playArrowAnimation`, `_hasAsset`, clés theme mortes, consts MainScene mortes.
+- ➕ Bonus : kill feed pour raids barbares + camps nettoyés ; unités neutres
+  visibles sur la minimap ; bots excluent les non-combattants des waves ;
+  village panel "Niveau x / 5" ; COLORS serveur alignées palette néon.
 
-**1. Bugs**
-- Quels comportements observables (visuel, gameplay, réseau) ne sont pas conformes
-  à ce qui est documenté ici ?
-- Quels passifs / techs sont déclarés mais non implémentés (recherche
-  `hasTech('xxx')` vs déclaration dans `techTree.js`) ?
-- Quels chemins de code sont morts (références à `boat`, `port`, `marine`,
-  `cartography` qui auraient survécu au retrait du système eau) ?
-- Quelles erreurs silencieuses dans le code (références à des variables qui
-  n'existent plus après une refonte, etc.) ?
+### 🔜 Volet B — fonctionnalités incomplètes (à traiter, demander à Robin les priorités)
+1. **Sorts actifs** : UI client complète (hotkeys F/G/H/J, preview, coût) mais
+   `castSpell` est un **no-op serveur** (handler legacy conservé sous
+   `_legacyCastSpell_disabled`). Décision : réactiver (rebrancher le handler) ou retirer l'UI.
+2. **Diplomatie** : handlers serveur OK (`proposeTreaty`/`breakTreaty`,
+   `treatySigned`/`treatyBroken`) mais **aucune UI** et aucun listener client.
+3. **TechIndicators** : module chargé mais `init()`/`sync()` jamais appelés → badges HDV morts.
+4. **Renaissance / omniscience** : payload `omniscient` envoyé par le serveur,
+   jamais consommé par `minimap.js`.
+5. **`roads`** : débloque un bâtiment `road` qui n'existe pas ; +30 % vitesse
+   non implémenté. Tech = taxe de 20 PR (mais prérequis de colonization).
+6. **`utils/animations.js` + `config/entitiesConfig.js`** non chargés dans
+   index.html → visuel `pilgrimExplosion` (martyrs) mort, lignes mana/foi du
+   building-info-panel mortes.
+7. **Feedback `spawnFailed`** : seul `not_enough_gold` a un retour visuel
+   (pop cap / mana / foi : aucun feedback).
+8. Rebrand glyphes incomplet (panneaux + kill feed encore en emojis).
+9. Tutoriel, audio, contrôles tactiles : manquants.
 
-**2. Fonctionnalités non activées correctement**
-- Diplomatie (`proposeTreaty`) — UI complète ? handler serveur ?
-- Sorts actifs (`castSpell` Fireball/Freeze/Bénédiction/Lumière) — calibrage,
-  visuel, son ?
-- Renaissance (omniscience minimap) — implémenté ?
-- Tech `roads` (chemins) — passif décoratif ou réel boost de vitesse ?
-- Pacte de non-agression — UI accessible ?
-- `martyrs` (Pèlerin explose en heal AoE) — vraie AoE ?
-- Tutoriel intégré — manquant.
-- Audio — manquant entièrement.
-
-**3. Pistes d'amélioration**
-- Game feel : hit-stop, damage numbers flottants, kill streaks.
-- UX : tutoriel, tooltips, info bulles sur les unités/passifs.
-- Métagame : matchmaking, classement, replay.
-- Performance : nombre d'unités max, garbage collection des particles.
-- Architecture : `server.js` ~3000 l. en un fichier — découpe utile ?
-
-### Fichiers à privilégier dans l'audit
-
-| Catégorie | Fichiers |
-|---|---|
-| Logique serveur | `server.js`, `server/techTree.js` |
-| Render principal | `public/js/scenes/MainScene.js` |
-| Config DA | `public/js/config/theme.js`, `public/js/config/neonGlyphs.js`, `public/js/config/entitiesConfig.js` |
-| Tech tree client | `public/js/tech-tree-overlay.js`, `public/js/tech-indicators.js` |
-| Panneaux | `public/js/hdv-panel.js`, `public/js/village-panel.js`, `public/js/building-info-panel.js` |
-| Interactions | `public/js/build-mode.js`, `public/js/radial-menu.js`, `public/js/spell-cast.js`, `public/js/debug-panel.js` |
-| Réseau | `public/js/network.js` |
-
-### Méthodologie attendue
-
-1. Lecture exhaustive (TOUT le code, pas juste les fichiers les plus
-   évidents).
-2. Croisement déclaration / implémentation des passifs et techs.
-3. Recherche de chemins morts (eau, boat, port, marine, cartography, wizard,
-   lich unit, soul_harvest legacy fields).
-4. Test mental du game loop : un tick complet, une wave de bot, une
-   capture de village, un kill de mage avec tech lich.
-5. Rapport structuré final : tableau **Bugs** / **Features non terminées**
-   / **Améliorations proposées** (avec priorité 🟥 🟧 🟩 et effort 🛠).
-
----
-
-## 📦 Prompt à copier dans la nouvelle conversation Opus
-
-```
-Audite ce projet — repo `mon-jeu-io`, branche `main`.
-
-Lis CLAUDE.md en intégralité D'ABORD : il documente toute l'architecture,
-la palette néon, les conventions, les pièges techniques connus et les
-sections gameplay à jour (le système eau a été retiré, l'axe magie a
-été refondu, les bots sont diversifiés par spécialité, le rebrand
-néon-glyphes est en place).
-
-Puis fais un AUDIT COMPLET en TROIS volets :
-
-### 1. BUGS
-   - Comportements non conformes à la doc.
-   - Passifs / techs déclarés mais non implémentés
-     (croiser `unlocks.passives` dans `server/techTree.js` avec les
-     occurrences `hasTech(player, 'xxx')` dans `server.js`).
-   - Chemins de code morts : références résiduelles à `boat`, `port`,
-     `marine`, `cartography`, `wizard`, `lich` (unit), `soul_harvest`,
-     `_soulHarvest`, naval, water, embark, disembark, hasNavalAmbition.
-   - Erreurs silencieuses : variables non définies après refonte
-     (`softTint`, `unitSize`, `scaleMult`, `cfg.flying`, `iconOverlay`,
-     `isPrimaryPlaceholder`, etc.).
-   - Bugs UI : kill feed couleurs, panel HDV broken, tech tree pan/zoom.
-
-### 2. FONCTIONNALITÉS NON ACTIVÉES OU INCOMPLÈTES
-   - Diplomatie (`proposeTreaty`, `acceptTreaty`) — UI accessible ?
-   - Sorts actifs (Fireball F, Freeze G, Bénédiction H, Lumière J) — calibrage,
-     dégâts, visuels OK ?
-   - Renaissance (omniscience minimap) — actif ?
-   - `roads` (chemins) — passif décoratif ou réel boost de vitesse ?
-   - `martyrs` — AoE heal effective ?
-   - Tutoriel — manquant.
-   - Audio — manquant entièrement.
-   - Visuel ricochet / soul_harvest spawn / squelette néon — bien rendu ?
-   - Wave de bot — engagement réel sur HDV après le fix `attackTargetId` ?
-
-### 3. PISTES D'AMÉLIORATION
-   - Game feel : hit-stop, damage numbers flottants, kill streaks, screen flash
-     sur kill important, idle bob ±1 px.
-   - UX : tutoriel intégré (3 tooltips guidés), info bulles passifs/unités,
-     onboarding lobby.
-   - Métagame : matchmaking, classement, replay, mode spectateur amélioré.
-   - Performance : cap unités, GC particles, throttle broadcast.
-   - Architecture : découpe `server.js` (~3000 l.) en modules
-     (`server/combat.js`, `server/bot.js`, `server/handlers.js`,
-     `server/economy.js`).
-   - Équilibrage : voir si la magie reste viable après suppression de
-     wizard+lich (1 seul mage = nécromancien).
-
-### Format du rapport
-
-Présente le rapport en 3 tableaux distincts. Chaque ligne :
-
-| # | Sujet | Description courte | Cause / preuve | Priorité | Effort |
-|---|-------|---------------------|------------------|----------|---------|
-
-- Priorité : 🟥 critique / 🟧 important / 🟩 nice-to-have
-- Effort : 🛠 (< 30 min) / 🛠🛠 (< 2 h) / 🛠🛠🛠 (demi-journée) /
-  🛠🛠🛠🛠 (journée+)
-- Cause / preuve : numéro de ligne + extrait minimal du code (≤ 5 l.).
-
-Ensuite, **résume en 5 bullets max** les actions ultra-prioritaires
-(🟥 + 🛠 ou 🛠🛠) que je devrais traiter dès la prochaine session.
-
-### Contraintes
-
-- NE fixe RIEN tant que je n'ai pas validé. Audit en lecture seule.
-- Privilégie la PRÉCISION (citer les lignes, montrer les vrais snippets)
-  sur le volume.
-- Communique en FRANÇAIS.
-- Si tu doutes d'un comportement, signale-le comme "à vérifier en jeu réel"
-  plutôt que de l'inventer.
-```
+### 🔜 Volet C — améliorations (backlog)
+- Game feel : hit-stop, damage numbers, kill streaks, screen flash.
+- Perf : cap global d'unités, collisions O(n²), GC particules, throttle broadcast.
+- Architecture : découpe de server.js en modules (`server/combat.js`,
+  `server/bot.js`, `server/pve.js`, `server/handlers.js`, `server/economy.js`).
+- Équilibrage magie post-refonte (1 seul mage) — observer les bots magic
+  maintenant qu'ils ont une économie.
 
 ---
 
-**Dernière mise à jour** : commit `108461e` (session
-"tech-refonte-magie-bot-rebrand") — magie refondue (1 seul mage, lich =
-clone -40 %), bots avec spécialité aléatoire + fix passivité wave,
-rebrand emojis → glyphes néon. Prochain chantier : **audit Opus** —
-exécuter le prompt ci-dessus dans une nouvelle conversation.
+**Dernière mise à jour** : commit `7d73cda` (session "audit-volet-A",
+10 juin 2026) — audit complet réalisé puis Volet A (21 bugs) corrigé en
+intégralité et validé par 2 parties simulées avec bots. Prochain chantier :
+**Volet B** (sorts actifs, diplomatie UI, TechIndicators, omniscience
+minimap, roads — voir section "État de l'audit" ci-dessus ; demander à
+Robin ses priorités avant de coder).
 
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier
 commit de ta session.
