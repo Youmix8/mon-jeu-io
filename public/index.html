@@ -12,30 +12,77 @@
 <body>
   <div id="game"></div>
 
-  <!-- Lobby -->
+  <!-- Lobby (écran à étapes : créer / rejoindre par code / parties publiques) -->
   <div id="lobby-overlay" class="fullscreen-overlay">
     <div class="overlay-box lobby-box">
-      <div class="lobby-icon">⚔️</div>
+      <div class="lobby-icon">⚔</div>
       <h1 class="lobby-title">Mon Jeu .io</h1>
       <p class="lobby-sub">RTS multijoueur — détruisez les HDV adverses !</p>
       <input id="name-input" class="name-input" type="text" maxlength="20" placeholder="Ton pseudo..." autocomplete="off" />
 
-      <div class="lobby-config">
-        <div class="lobby-config-title">🗺 Taille de la carte</div>
-        <div class="lobby-config-row">
-          <div class="lobby-map-sizes">
-            <button type="button" class="map-size-btn" data-size="small">Petite (3000)</button>
-            <button type="button" class="map-size-btn selected" data-size="medium">Moyenne (4500)</button>
-            <button type="button" class="map-size-btn" data-size="large">Grande (6000)</button>
-          </div>
-        </div>
+      <!-- Étape 1 : choix de l'action -->
+      <div id="lobby-actions">
+        <button id="lobby-action-create" class="lobby-action-btn">◆ Créer une partie</button>
+        <button id="lobby-action-join" class="lobby-action-btn">⊕ Rejoindre par code</button>
+        <button id="lobby-action-list" class="lobby-action-btn">▤ Parties publiques</button>
       </div>
 
-      <button id="play-btn" class="primary-btn">Jouer ▶</button>
+      <!-- Panneau CRÉER -->
+      <div id="lobby-panel-create" class="lobby-panel" style="display:none;">
+        <div class="lobby-config">
+          <div class="lobby-config-title"><span class="g-pr">▤</span> Taille de la carte</div>
+          <div class="lobby-config-row">
+            <div class="lobby-map-sizes">
+              <button type="button" class="map-size-btn" data-size="small">Petite (3000)</button>
+              <button type="button" class="map-size-btn selected" data-size="medium">Moyenne (4500)</button>
+              <button type="button" class="map-size-btn" data-size="large">Grande (6000)</button>
+            </div>
+          </div>
+          <div class="lobby-config-title"><span class="g-ring">◎</span> Visibilité</div>
+          <div class="lobby-visibility">
+            <button type="button" class="visibility-btn selected" data-vis="public">Publique</button>
+            <button type="button" class="visibility-btn" data-vis="private">Privée</button>
+          </div>
+        </div>
+        <button id="create-room-btn" class="primary-btn">Créer ▶</button>
+        <div id="lobby-error-create" class="lobby-error"></div>
+        <button type="button" class="lobby-back-btn">◄ Retour</button>
+      </div>
+
+      <!-- Panneau REJOINDRE (code 5 caractères) -->
+      <div id="lobby-panel-join" class="lobby-panel" style="display:none;">
+        <input id="room-code-input" class="room-code-input" type="text" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" />
+        <button id="join-room-btn" class="primary-btn">Rejoindre ▶</button>
+        <div id="lobby-error-join" class="lobby-error"></div>
+        <button type="button" class="lobby-back-btn">◄ Retour</button>
+      </div>
+
+      <!-- Panneau LISTE (parties publiques, auto-refresh 4 s) -->
+      <div id="lobby-panel-list" class="lobby-panel" style="display:none;">
+        <div id="room-list" class="room-list"></div>
+        <div id="lobby-error-list" class="lobby-error"></div>
+        <button type="button" class="lobby-back-btn">◄ Retour</button>
+      </div>
+
       <div class="lobby-hint">
-        🏛 Clic HDV : production & recherche &nbsp;|&nbsp; Drag : sélectionner &nbsp;|&nbsp; Clic droit : déplacer/attaquer<br/>
-        ⌨️ ZQSD / 2 doigts : caméra &nbsp;|&nbsp; Pinch / Ctrl+scroll : zoom &nbsp;|&nbsp; Ctrl+A : tout sélectionner<br/>
-        ⌨️ Espace : recentrer · ×2 : dernière attaque &nbsp;|&nbsp; Clic milieu : caméra &nbsp;|&nbsp; Double-clic : sélectionner le type
+        <span class="g-base">⌂</span> Clic HDV : production & recherche &nbsp;|&nbsp; Drag : sélectionner &nbsp;|&nbsp; Clic droit : déplacer/attaquer<br/>
+        <span class="g-kbd">⌨</span> ZQSD / 2 doigts : caméra &nbsp;|&nbsp; Pinch / Ctrl+scroll : zoom &nbsp;|&nbsp; Ctrl+A : tout sélectionner<br/>
+        <span class="g-kbd">⌨</span> Espace : recentrer · ×2 : dernière attaque &nbsp;|&nbsp; Clic milieu : caméra &nbsp;|&nbsp; Double-clic : sélectionner le type
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay d'attente de room (après create/join, tant que matchState === 'waiting') -->
+  <div id="room-wait-overlay" class="fullscreen-overlay" style="display:none;">
+    <div class="overlay-box room-wait-box">
+      <div class="room-wait-label">Code de la partie</div>
+      <div id="room-code-display"></div>
+      <button id="copy-link-btn" class="hud-btn">⧉ Copier le lien</button>
+      <div id="room-players" class="room-players"></div>
+      <div class="room-wait-hint">La partie démarre dès qu'un 2e joueur (ou bot) arrive</div>
+      <div class="room-wait-actions">
+        <button id="room-add-bot-btn" class="hud-btn" style="display:none;">◇ Ajouter un bot</button>
+        <button id="room-view-map-btn" class="hud-btn">▶ Voir la carte</button>
       </div>
     </div>
   </div>
@@ -43,6 +90,7 @@
   <!-- HUD -->
   <div id="ui">
     <div id="player-count">Joueurs : <span id="count">0</span> / 4 &nbsp;|&nbsp; <span class="g-hp">❤</span> Vivants : <span id="alive">0</span> / <span id="total">0</span></div>
+    <div id="room-code-line" style="display:none;" title="Copier le lien d'invitation"><span class="g-base">⌂</span> Salon <span id="room-code-hud">—</span> <span id="room-code-copy-hint" class="room-code-hint">(clic : copier le lien)</span></div>
     <div id="spectator-label" style="display:none;"><span class="g-spec">◯</span> Mode spectateur</div>
     <div id="my-stats">
       <span id="my-gold-row"><span class="g-gold">◈</span> Gold : <span id="my-gold">0</span></span><br />
@@ -171,9 +219,15 @@
       </table>
 
       <div style="font-size:12px; color:#999; margin-bottom:4px; margin-top:16px;">Tous les joueurs encore connectés repartent à zéro.</div>
-      <button class="primary-btn" onclick="Network.requestRestart()">🔄 Rejouer</button>
+      <div class="gameover-actions">
+        <button class="primary-btn" onclick="Network.requestRestart()">🔄 Rejouer</button>
+        <button class="secondary-btn" onclick="location.href = location.pathname">◄ Retour au lobby</button>
+      </div>
     </div>
   </div>
+
+  <!-- Bouton plein écran (fixe bas-droite, visible dans le lobby ET en jeu) -->
+  <button id="fullscreen-btn" class="hud-btn" title="Plein écran (recommandé : corrige le défilement au bord haut)">⛶</button>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
@@ -193,6 +247,7 @@
   <script src="/js/tech-indicators.js"></script>
   <script src="/js/scenes/MainScene.js"></script>
   <script src="/js/debug-panel.js"></script>
+  <script src="/js/lobby.js"></script>
   <script src="/js/game.js"></script>
 </body>
 </html>

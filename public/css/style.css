@@ -243,8 +243,11 @@ hr {
 }
 
 .lobby-icon {
-  font-size: 64px;
+  font-size: 56px;
+  line-height: 1;
   margin-bottom: 8px;
+  color: var(--accent-cyan);
+  text-shadow: 0 0 20px rgba(34, 211, 238, 0.6);
   filter: drop-shadow(0 0 16px rgba(34, 211, 238, 0.4));
 }
 
@@ -619,18 +622,18 @@ hr {
   padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 11px;
 }
 
-/* Lobby — Configuration de carte */
+/* Lobby — Configuration de carte (restyle obsidienne néon) */
 .lobby-config {
   margin: 14px 0;
   padding: 12px;
-  background: rgba(15, 23, 42, 0.05);
+  background: rgba(16, 33, 45, 0.45);
   border-radius: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--border);
 }
 .lobby-config-title {
   font-weight: 700;
   font-size: 13px;
-  color: #475569;
+  color: var(--text-soft);
   margin-bottom: 8px;
   text-align: center;
 }
@@ -638,38 +641,6 @@ hr {
   margin-bottom: 10px;
 }
 .lobby-config-row:last-child { margin-bottom: 0; }
-.lobby-config-label {
-  font-size: 11px;
-  color: #64748b;
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
-}
-.lobby-map-types {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
-.map-type-btn {
-  background: #fff;
-  border: 2px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 8px 4px;
-  cursor: pointer;
-  transition: all 0.15s;
-  text-align: center;
-  font-family: "Quicksand", sans-serif;
-}
-.map-type-btn:hover { border-color: #94a3b8; background: #f8fafc; }
-.map-type-btn.selected {
-  border-color: #3b82f6;
-  background: #eff6ff;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-}
-.map-type-btn .mt-emoji { font-size: 22px; }
-.map-type-btn .mt-label { font-size: 12px; font-weight: 700; color: #1e293b; }
-.map-type-btn .mt-desc  { font-size: 9px; color: #64748b; line-height: 1.2; }
 
 .lobby-map-sizes {
   display: grid;
@@ -677,22 +648,22 @@ hr {
   gap: 6px;
 }
 .map-size-btn {
-  background: #fff;
-  border: 2px solid #e2e8f0;
+  background: rgba(16, 33, 45, 0.8);
+  border: 2px solid var(--border);
   border-radius: 8px;
   padding: 6px 4px;
   cursor: pointer;
   font-size: 11px;
   font-weight: 600;
-  color: #334155;
-  font-family: "Quicksand", sans-serif;
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
   transition: all 0.15s;
 }
-.map-size-btn:hover { border-color: #94a3b8; background: #f8fafc; }
+.map-size-btn:hover { border-color: var(--border-hi); background: var(--bg-card-hi); }
 .map-size-btn.selected {
-  border-color: #3b82f6;
-  background: #eff6ff;
-  color: #1e40af;
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.35);
 }
 
 /* Building Info Panel — apparait au clic d'un bâtiment */
@@ -991,4 +962,279 @@ hr {
   26%  { transform: translateX(-50%) scale(1); }
   72%  { opacity: 1; transform: translateX(-50%) scale(1); }
   100% { opacity: 0; transform: translateX(-50%) scale(0.95); }
+}
+
+/* ════════════ Lobby — système de rooms ════════════ */
+
+/* Étape 1 : les 3 boutons d'action (créer / code / liste) */
+#lobby-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+.lobby-action-btn {
+  background: rgba(16, 33, 45, 0.8);
+  border: 1px solid var(--border-hi);
+  color: var(--text);
+  padding: 13px 18px;
+  font-size: 15px;
+  font-family: inherit;
+  font-weight: 700;
+  border-radius: 10px;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: all 0.15s;
+}
+.lobby-action-btn:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.3);
+}
+
+.lobby-panel { margin-top: 4px; }
+
+.lobby-back-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-soft);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 12px;
+  padding: 4px 8px;
+}
+.lobby-back-btn:hover { color: var(--text); }
+
+/* Toggle Publique/Privée (segmented control) */
+.lobby-visibility {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.visibility-btn {
+  background: rgba(16, 33, 45, 0.8);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  transition: all 0.15s;
+}
+.visibility-btn:hover { border-color: var(--border-hi); background: var(--bg-card-hi); }
+.visibility-btn.selected {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.35);
+}
+
+/* Champ code de room (5 caractères, auto-uppercase) */
+.room-code-input {
+  width: 100%;
+  padding: 14px 18px;
+  font-size: 22px;
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-align: center;
+  text-transform: uppercase;
+  border: 1.5px solid var(--border-hi);
+  background: rgba(15, 30, 42, 0.6);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  outline: none;
+  color: var(--accent-cyan);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.room-code-input::placeholder { color: var(--text-dim); letter-spacing: 4px; }
+.room-code-input:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.2), 0 0 12px rgba(34, 211, 238, 0.25);
+}
+
+/* Ligne d'erreur sous le formulaire actif */
+.lobby-error {
+  display: none;
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+/* Liste des parties publiques */
+.room-list {
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  text-align: left;
+}
+.room-row {
+  display: flex;
+  flex-wrap: wrap; /* viewport étroit : les colonnes passent à la ligne au lieu de déborder */
+  align-items: center;
+  gap: 6px 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(16, 33, 45, 0.6);
+  border: 1px solid var(--border);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.room-row-code {
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent-cyan);
+}
+.room-row-host {
+  flex: 1;
+  min-width: 110px; /* ne s'écrase jamais à 0 : wrap à la place */
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.room-row-meta  { color: var(--text-soft); white-space: nowrap; }
+.room-row-state { font-weight: 700; font-size: 11px; white-space: nowrap; }
+.room-row-state.waiting { color: var(--accent-or); }
+.room-row-state.playing { color: var(--green); }
+.room-row-join {
+  background: rgba(34, 211, 238, 0.12);
+  color: var(--accent-cyan);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.room-row-join:hover { background: rgba(34, 211, 238, 0.25); }
+.room-list-empty {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 13px;
+  padding: 18px 4px;
+  text-align: center;
+}
+
+/* ════════════ Overlay d'attente de room ════════════ */
+#room-wait-overlay {
+  /* Plus transparent que les autres overlays : la carte reste visible derrière */
+  background: rgba(4, 8, 12, 0.72);
+}
+.room-wait-box { max-width: 420px; }
+.room-wait-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+#room-code-display {
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: 6px;
+  color: var(--accent-cyan);
+  text-shadow: 0 0 18px rgba(34, 211, 238, 0.6);
+  margin-bottom: 14px;
+}
+.room-players {
+  margin: 16px 0;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+}
+.room-player-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 5px;
+}
+.room-player-swatch {
+  width: 12px; height: 12px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+  box-shadow: 0 0 6px currentColor;
+}
+.room-player-me    { color: var(--accent-cyan); font-size: 11px; }
+.room-player-empty { color: var(--text-dim); font-style: italic; }
+.room-wait-hint {
+  font-size: 12px;
+  color: var(--text-soft);
+  margin: 4px 0 14px;
+}
+.room-wait-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+/* Ligne "Salon <CODE>" permanente dans le HUD (clic : copier le lien) */
+#room-code-line {
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  margin-bottom: 6px;
+}
+#room-code-line:hover { text-shadow: 0 0 8px rgba(34, 211, 238, 0.5); }
+#room-code-line .room-code-hint { color: var(--text-dim); font-weight: 400; font-size: 11px; }
+#room-code-hud {
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  letter-spacing: 2px;
+  font-weight: 700;
+}
+
+/* ════════════ Bouton plein écran (lobby + jeu) ════════════ */
+#fullscreen-btn {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 1100; /* au-dessus des overlays plein écran (z-1000) */
+  font-size: 17px;
+  line-height: 1;
+  padding: 9px 12px;
+}
+#fullscreen-btn.active {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.35);
+}
+
+/* ════════════ Game over — actions (Rejouer / Retour lobby) ════════════ */
+.gameover-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.gameover-actions .primary-btn { width: auto; flex: 1; }
+.secondary-btn {
+  background: rgba(16, 33, 45, 0.8);
+  color: var(--text);
+  border: 1px solid var(--border-hi);
+  padding: 14px 24px;
+  font-size: 15px;
+  font-family: inherit;
+  font-weight: 700;
+  border-radius: 10px;
+  cursor: pointer;
+  flex: 1;
+  transition: all 0.15s;
+}
+.secondary-btn:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.3);
 }

@@ -51,12 +51,34 @@ const Network = (() => {
     el.classList.add(cls);
   }
 
-  function init(playerName, mapOptions) {
-    const auth = { name: playerName || '' };
-    if (mapOptions && mapOptions.mapType) auth.mapType = mapOptions.mapType;
-    if (mapOptions && mapOptions.mapSize) auth.mapSize = mapOptions.mapSize;
-    socket = io({ auth });
+  // ── Connexion & rooms ────────────────────────────────────────
+  // connect() ouvre le socket SANS auth : le joueur n'entre dans une
+  // partie qu'au lobby:create / lobby:join (acks ci-dessous). L'event
+  // 'init' habituel arrive juste avant l'ack et démarre le jeu normalement.
+  function connect() {
+    if (socket) return; // idempotent (déjà connecté)
+    socket = io();
+    _registerListeners();
+  }
 
+  // Crée une room { name, mapSize, visibility } → ack { ok, code, isHost } ou { error }
+  function createRoom(opts, cb) {
+    connect();
+    socket.emit('lobby:create', opts, (ack) => { if (cb) cb(ack); });
+  }
+  // Rejoint une room par code (insensible à la casse, le serveur uppercase)
+  // → ack { ok, code, isHost } ou { error }
+  function joinRoom(code, name, cb) {
+    connect();
+    socket.emit('lobby:join', { name, code }, (ack) => { if (cb) cb(ack); });
+  }
+  // Liste des parties publiques → ack { rooms: [{ code, hostName, count, max, mapSize, state }] }
+  function listRooms(cb) {
+    connect();
+    socket.emit('lobby:list', {}, (ack) => { if (cb) cb(ack); });
+  }
+
+  function _registerListeners() {
     socket.on('init', (data) => {
       myId = data.playerId;
       if (data.mapWidth)  mapInfo.mapWidth  = data.mapWidth;
@@ -157,9 +179,12 @@ const Network = (() => {
       const elWaiting = document.getElementById('waiting-msg');
       if (elWaiting) elWaiting.style.display = state.matchState === 'waiting' ? 'block' : 'none';
 
-      // Bouton "Ajouter un bot" visible tant qu'il reste de la place
+      // Bouton "Ajouter un bot" : réservé à l'hôte de la room, tant qu'il reste de la place
       const elAddBot = document.getElementById('add-bot-btn');
-      if (elAddBot) elAddBot.style.display = summary.length < 4 ? 'inline-block' : 'none';
+      if (elAddBot) {
+        const amHost = (typeof Lobby !== 'undefined') ? Lobby.isHost() : true;
+        elAddBot.style.display = (summary.length < 4 && amHost) ? 'inline-block' : 'none';
+      }
 
       // Rafraîchit le panneau HDV s'il est ouvert (gold, HP, techs en temps réel)
       if (typeof HdvPanel !== 'undefined' && HdvPanel.isVisible()) HdvPanel.refresh();
@@ -384,7 +409,8 @@ const Network = (() => {
   function getConfig()               { return config; }
 
   return {
-    init, getState, getMyId, getMapInfo, getConfig,
+    connect, createRoom, joinRoom, listRooms,
+    getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
     upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty, breakTreaty,
     debugSpawn, debugCastPortal,
