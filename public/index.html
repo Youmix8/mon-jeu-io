@@ -61,12 +61,13 @@
       ► Clic droit court : déplacer / attaquer<br />
       <span class="g-ring">◎</span> <strong>Maintien clic droit</strong> : roue (Attaquer / Déplacer / Défendre)<br />
       <span class="g-kbd">⌨</span> ZQSD : caméra &nbsp; <strong>V</strong> : vue d'ensemble &nbsp; <span class="g-ring">◎</span> Ctrl+scroll : zoom<br />
-      <span class="g-tree">⌬</span> <strong>T</strong> : arbre tech<br />
+      <span class="g-tree">⌬</span> <strong>T</strong> : arbre tech &nbsp; <span class="g-mana">✦</span> <strong>F/G/H/J</strong> : sorts<br />
       <span class="g-debug">⚙</span> <strong>`</strong> debug panel (spawn / tuning)<br />
       ✓ Ctrl+A : tout
     </div>
     <div id="waiting-msg" style="display:none; margin-top:8px; font-size:12px; color:#aaaaaa;">⌛ En attente d'au moins 2 joueurs…</div>
     <button id="add-bot-btn" class="hud-btn" onclick="Network.addBot()" style="margin-top:8px;">◇ Ajouter un bot</button>
+    <button id="diplomacy-btn" class="hud-btn" onclick="DiplomacyPanel.toggle()" style="margin-top:8px;">⊕ Diplomatie (P)</button>
   </div>
 
   <!-- Kill feed -->
@@ -183,6 +184,7 @@
   <script src="/js/radial-menu.js"></script>
   <script src="/js/build-mode.js"></script>
   <script src="/js/building-info-panel.js"></script>
+  <script src="/js/diplomacy-panel.js"></script>
   <script src="/js/spell-cast.js"></script>
   <script src="/js/tech-tree-overlay.js"></script>
   <script src="/js/minimap.js"></script>

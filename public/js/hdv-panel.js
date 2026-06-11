@@ -125,14 +125,16 @@ const HdvPanel = (() => {
     const cfg = Network.getConfig();
     if (!cfg.unitTypes || !cfg.techTree) return false;
 
+    const uGlyph = (u) => (typeof NeonGlyphs !== 'undefined') ? NeonGlyphs.unit(u.id, u.icon) : u.icon;
+    const bGlyph = (b) => (typeof NeonGlyphs !== 'undefined') ? NeonGlyphs.building(b.id, b.icon) : b.icon;
     prodEl.innerHTML = Object.values(cfg.unitTypes).map(u => {
-      const extraCost = u.manaCost ? ` + ${u.manaCost} 🔮`
-                      : u.faithCost ? ` + ${u.faithCost} 🙏`
+      const extraCost = u.manaCost ? ` + ${u.manaCost} ✦`
+                      : u.faithCost ? ` + ${u.faithCost} ✚`
                       : '';
       const popCost = u.populationCost || 1;
       return `
       <div class="unit-card" data-unit-id="${u.id}">
-        <div class="unit-card-icon">${u.icon}</div>
+        <div class="unit-card-icon">${uGlyph(u)}</div>
         <div class="unit-card-name">${u.name}</div>
         <div class="unit-card-stats">❤ ${u.hp} &nbsp; ▶ ${u.damage} &nbsp; ◎ ${u.range} &nbsp; ⌬ ${popCost}</div>
         <div class="unit-card-cost">${u.cost} ◈${extraCost}</div>
@@ -155,7 +157,7 @@ const HdvPanel = (() => {
     if (buildEl && cfg.buildingTypes) {
       buildEl.innerHTML = Object.values(cfg.buildingTypes).map(b => `
         <div class="unit-card" data-building-type="${b.id}">
-          <div class="unit-card-icon">${b.icon}</div>
+          <div class="unit-card-icon">${bGlyph(b)}</div>
           <div class="unit-card-name">${b.name}</div>
           <div class="unit-card-stats">${b.desc || ''}</div>
           <div class="unit-card-cost">${b.cost} ◈</div>

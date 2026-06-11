@@ -178,6 +178,32 @@ hr {
   100% { opacity: 0; transform: translateX(0); }
 }
 
+/* Toast HUD éphémère (erreurs d'action : ressources, pop, verrou, recharge) */
+#hud-toast {
+  position: fixed;
+  bottom: 86px;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  background: var(--bg-panel-hi);
+  backdrop-filter: blur(6px);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 9px;
+  border: 1.5px solid rgba(251, 113, 133, 0.55);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5), 0 0 18px rgba(251, 113, 133, 0.18);
+  z-index: 960;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+#hud-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* ─── Overlays plein écran (lobby, gameover) ──────────────────── */
 .fullscreen-overlay {
   position: fixed;
@@ -865,3 +891,104 @@ hr {
 .g-debug    { color: var(--text-soft); }
 .g-shield   { color: #c4a47a; }
 .g-spec     { color: var(--text-soft); }
+
+/* ════════════ Panneau Diplomatie ════════════ */
+#diplomacy-panel {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 340px;
+  background: var(--bg-panel-hi);
+  backdrop-filter: blur(8px);
+  border: 1.5px solid var(--accent-cyan);
+  border-radius: 12px;
+  padding: 14px 16px;
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  z-index: 1200;
+  box-shadow: 0 10px 36px rgba(0,0,0,0.6), 0 0 28px rgba(34,211,238,0.16);
+}
+#diplomacy-panel .diplo-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+#diplomacy-panel .diplo-title {
+  font-size: 17px; font-weight: 700; color: var(--accent-cyan);
+  text-shadow: 0 0 10px rgba(34,211,238,0.4);
+}
+#diplomacy-panel .diplo-close {
+  background: transparent; border: none; color: var(--text-soft);
+  font-size: 22px; cursor: pointer; line-height: 1; padding: 0 4px;
+}
+#diplomacy-panel .diplo-close:hover { color: var(--text); }
+#diplomacy-panel .diplo-hint {
+  font-size: 11px; color: var(--text-soft); line-height: 1.45;
+  margin-bottom: 10px;
+}
+#diplomacy-panel .diplo-locked {
+  font-size: 12px; color: var(--accent-or); line-height: 1.45;
+  margin-bottom: 10px; padding: 7px 9px;
+  background: rgba(252,211,77,0.08); border-radius: 7px;
+  border: 1px solid rgba(252,211,77,0.3);
+}
+#diplomacy-panel .diplo-empty {
+  color: var(--text-dim); font-style: italic; padding: 10px 2px;
+}
+#diplomacy-panel .diplo-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 6px; border-radius: 7px;
+  background: rgba(255,255,255,0.02);
+  margin-bottom: 6px;
+}
+#diplomacy-panel .diplo-swatch {
+  width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto;
+  box-shadow: 0 0 6px currentColor;
+}
+#diplomacy-panel .diplo-name {
+  flex: 1; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+#diplomacy-panel .diplo-status { font-size: 11px; font-weight: 600; }
+#diplomacy-panel .diplo-status.allied  { color: var(--green); }
+#diplomacy-panel .diplo-status.pending  { color: var(--accent-or); }
+#diplomacy-panel .diplo-status.neutral  { color: var(--text-soft); }
+#diplomacy-panel .diplo-btn {
+  flex: 0 0 auto;
+  background: rgba(34,211,238,0.12); color: var(--accent-cyan);
+  border: 1px solid var(--accent-cyan); border-radius: 6px;
+  font-family: inherit; font-size: 11px; font-weight: 600;
+  padding: 5px 9px; cursor: pointer; transition: background 0.15s;
+}
+#diplomacy-panel .diplo-btn:hover:not(:disabled) { background: rgba(34,211,238,0.25); }
+#diplomacy-panel .diplo-btn.break {
+  background: rgba(251,113,133,0.12); color: var(--red); border-color: var(--red);
+}
+#diplomacy-panel .diplo-btn.break:hover { background: rgba(251,113,133,0.25); }
+#diplomacy-panel .diplo-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ════════════ Bannière kill-streak (game feel) ════════════ */
+#kill-streak {
+  position: fixed;
+  top: 22%; left: 50%;
+  transform: translateX(-50%) scale(0.6);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 34px;
+  letter-spacing: 1px;
+  z-index: 970;
+  pointer-events: none;
+  opacity: 0;
+  text-transform: uppercase;
+}
+#kill-streak.show {
+  animation: killStreakPop 1.4s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+@keyframes killStreakPop {
+  0%   { opacity: 0; transform: translateX(-50%) scale(0.5); }
+  14%  { opacity: 1; transform: translateX(-50%) scale(1.12); }
+  26%  { transform: translateX(-50%) scale(1); }
+  72%  { opacity: 1; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) scale(0.95); }
+}

@@ -27,6 +27,9 @@ const Network = (() => {
   let onCampClearedCallback      = null;
   let onTechUnlockedCallback     = null;
   let onInitReceivedCallback     = null;
+  let onPilgrimExplosionCallback = null;
+  let onTreatySignedCallback     = null;
+  let onTreatyBrokenCallback     = null;
   let initReceived = false;
 
   // ── Bump animation pour les compteurs HUD (Phase 6 glassmorphism) ──
@@ -214,20 +217,28 @@ const Network = (() => {
 
     socket.on('spellCast', (data) => {
       if (typeof SpellCast !== 'undefined') SpellCast.playCastAnim(data);
-      // Anim visuelle (sprite spell_*) via Animations helper si scène disponible
-      if (typeof Animations !== 'undefined' && window.game && window.game.scene && window.game.scene.scenes) {
-        const main = window.game.scene.scenes.find(s => s.scene && s.scene.key === 'MainScene');
-        if (main && main.add) Animations.animateSpellCast(main, data.spellId, data.x, data.y);
-      }
     });
     socket.on('pilgrimExplosion', (data) => {
-      if (typeof Animations !== 'undefined' && window.game && window.game.scene && window.game.scene.scenes) {
-        const main = window.game.scene.scenes.find(s => s.scene && s.scene.key === 'MainScene');
-        if (main && main.add) Animations.animateSpellCast(main, 'purifying_light', data.x, data.y);
-      }
+      if (onPilgrimExplosionCallback) onPilgrimExplosionCallback(data);
     });
     socket.on('unitSummoned', (data) => {
       if (onUnitSummonedCallback) onUnitSummonedCallback(data);
+    });
+
+    socket.on('treatySigned', (data) => {
+      // Maj immédiate des alliances locales (sans attendre le prochain gameState)
+      if (state.players) {
+        if (state.players[data.a]) { state.players[data.a].allies = state.players[data.a].allies || []; if (!state.players[data.a].allies.includes(data.b)) state.players[data.a].allies.push(data.b); }
+        if (state.players[data.b]) { state.players[data.b].allies = state.players[data.b].allies || []; if (!state.players[data.b].allies.includes(data.a)) state.players[data.b].allies.push(data.a); }
+      }
+      if (onTreatySignedCallback) onTreatySignedCallback(data);
+    });
+    socket.on('treatyBroken', (data) => {
+      if (state.players) {
+        if (state.players[data.a] && Array.isArray(state.players[data.a].allies)) state.players[data.a].allies = state.players[data.a].allies.filter(x => x !== data.b);
+        if (state.players[data.b] && Array.isArray(state.players[data.b].allies)) state.players[data.b].allies = state.players[data.b].allies.filter(x => x !== data.a);
+      }
+      if (onTreatyBrokenCallback) onTreatyBrokenCallback(data);
     });
 
     socket.on('gameOver', (data) => {
@@ -332,6 +343,9 @@ const Network = (() => {
   function proposeTreaty(targetId) {
     if (socket) socket.emit('proposeTreaty', { targetId });
   }
+  function breakTreaty(targetId) {
+    if (socket) socket.emit('breakTreaty', { targetId });
+  }
   function addBot()         { if (socket) socket.emit('addBot'); }
   function upgradeVillage(villageId)  { if (socket) socket.emit('upgradeVillage', { villageId }); }
   function villageSpawnUnit(villageId, unitType) { if (socket) socket.emit('villageSpawnUnit', { villageId, unitType }); }
@@ -360,6 +374,9 @@ const Network = (() => {
   function setOnTechUnlocked(cb)     { onTechUnlockedCallback = cb; }
   function setOnInitReceived(cb)     { onInitReceivedCallback = cb; if (initReceived && cb) cb(); }
   function setOnUnitSummoned(cb)     { onUnitSummonedCallback = cb; }
+  function setOnPilgrimExplosion(cb) { onPilgrimExplosionCallback = cb; }
+  function setOnTreatySigned(cb)     { onTreatySignedCallback = cb; }
+  function setOnTreatyBroken(cb)     { onTreatyBrokenCallback = cb; }
   function isInitReceived()          { return initReceived; }
   function getState()                { return state; }
   function getMyId()                 { return myId; }
@@ -369,10 +386,11 @@ const Network = (() => {
   return {
     init, getState, getMyId, getMapInfo, getConfig,
     spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
-    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty,
+    upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty, breakTreaty,
     debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,
     setOnPlayerEliminated, setOnGameOver, setOnMatchRestarted, setOnVillageCaptured, setOnVillageDestroyed, setOnTechUnlocked, setOnBarbarianRaid, setOnCampCleared, setOnInitReceived, setOnUnitSummoned,
+    setOnPilgrimExplosion, setOnTreatySigned, setOnTreatyBroken,
     isInitReceived,
   };
 })();

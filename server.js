@@ -209,73 +209,45 @@ const MAX_UNIT_BATCH        = 500; // cap d'unités par appel moveUnits/attackTa
 // ────────── Sorts actifs (axe Magie) ──────────
 const SPELLS = {
   // ── Magie (mana) ──
+  // Les sorts d'invocation ont été retirés : les boss (élémentaire, ange,
+  // dragon, avatar) se produisent via spawnUnit. Il ne reste que les sorts
+  // ACTIFS ciblés au sol, chacun avec un hotkey et un cooldown propre.
   fireball: {
     id: 'fireball', name: 'Boule de feu', icon: '🔥',
     type: 'aoe_damage', costType: 'mana',
-    cost: 30,
-    radius: 80, damage: 30,
+    cost: 30, cooldownMs: 4000,
+    radius: 90, damage: 32,
     requiresTech: 'pyromancy',
     hotkey: 'F',
-    desc: 'AoE 80, 30 dmg, 30 mana.',
+    desc: 'AoE 90, 32 dmg, 30 mana (recharge 4s).',
   },
   freeze: {
     id: 'freeze', name: 'Gel', icon: '❄️',
     type: 'aoe_slow', costType: 'mana',
-    cost: 25,
-    radius: 90, durationMs: 5000, slowFactor: 0.3,
+    cost: 25, cooldownMs: 5000,
+    radius: 100, durationMs: 5000, slowFactor: 0.3,
     requiresTech: 'cryomancy',
     hotkey: 'G',
-    desc: 'AoE 90, ralentit 70% pendant 5s, 25 mana.',
+    desc: 'AoE 100, ralentit 70% pendant 5s, 25 mana (recharge 5s).',
   },
   // ── Religion (foi) ──
   blessing: {
     id: 'blessing', name: 'Bénédiction', icon: '✝️',
     type: 'aoe_heal', costType: 'faith',
-    cost: 30,
-    radius: 140, heal: 50,
+    cost: 30, cooldownMs: 4000,
+    radius: 150, heal: 55,
     requiresTech: 'blessing',
     hotkey: 'H',
-    desc: 'AoE 140, +50 HP instantanés à tes unités, 30 foi.',
+    desc: 'AoE 150, +55 HP instantanés à tes unités, 30 foi (recharge 4s).',
   },
   purifying_light: {
     id: 'purifying_light', name: 'Lumière purificatrice', icon: '🌟',
     type: 'aoe_purify', costType: 'faith',
-    cost: 25,
-    radius: 110, damage: 15, magicMult: 3, // ×3 dmg vs magie/undead
+    cost: 25, cooldownMs: 4000,
+    radius: 120, damage: 16, magicMult: 3, // ×3 dmg vs magie/undead
     requiresTech: 'purifying_light',
     hotkey: 'J',
-    desc: 'AoE 110, 15 dmg (×3 vs magie/undead), 25 foi.',
-  },
-  // ── Sorts d'invocation (étape branchement arbre tech) ──
-  summon_elemental: {
-    id: 'summon_elemental', name: 'Convocation élémentaire', icon: '🌋',
-    type: 'summon_unit', costType: 'mana',
-    cost: 80, unitType: 'fire_elemental',
-    requiresTech: 'elemental_summon',
-    desc: 'Invoque un Élémentaire de feu (60s, 250 HP).',
-  },
-  summon_angel: {
-    id: 'summon_angel', name: 'Ange gardien', icon: '👼',
-    type: 'summon_unit', costType: 'faith',
-    cost: 100, unitType: 'angel',
-    requiresTech: 'guardian_angel',
-    desc: 'Invoque un Ange (90s, 300 HP, aura soin alliés).',
-  },
-  arcane_dragon: {
-    id: 'arcane_dragon', name: 'Avatar des Arcanes', icon: '🐲',
-    type: 'summon_unit', costType: 'mana',
-    cost: 150, unitType: 'arcane_dragon',
-    requiresTech: 'arcane_avatar',
-    oncePerMatch: true,
-    desc: 'Invoque le Dragon arcanique (1× par partie, 60s, 800 HP).',
-  },
-  divine_avatar: {
-    id: 'divine_avatar', name: 'Avatar divin', icon: '🌟',
-    type: 'summon_unit', costType: 'faith',
-    cost: 200, unitType: 'god_avatar',
-    requiresTech: 'divine_invocation',
-    oncePerMatch: true,
-    desc: 'Invoque l\'Avatar du Dieu (1× par partie, 1500 HP, aura peur).',
+    desc: 'AoE 120, 16 dmg (×3 vs magie/undead), 25 foi (recharge 4s).',
   },
 };
 
@@ -2157,14 +2129,11 @@ io.on('connection', (socket) => {
     broadcastFilteredState();
   });
 
-  // ── Sorts actifs ──── DÉSACTIVÉS ──
-  // Les sorts ont été remplacés par des passifs / unit unlocks dans l'arbre tech.
-  // Les unités boss (élémentaire, ange, dragon, avatar divin) se produisent
-  // désormais via spawnUnit normal (gold + mana/foi + population).
-  // L'event reste en place pour compat client mais ne fait rien.
-  socket.on('castSpell', () => { /* no-op : sorts supprimés */ });
-  socket.on('_legacyCastSpell_disabled', ({ spellId, x, y } = {}) => {
-    if (process.env.NODE_ENV === 'production') return; // surface morte en prod (sorts retirés)
+  // ── Sorts actifs ciblés au sol (hotkeys F/G/H/J) ──
+  // AoE dégâts (fireball), ralentissement (freeze), soin (blessing),
+  // purification anti-magie (purifying_light). Limités par coût ressource
+  // + un cooldown propre à chaque sort. Les invocations passent par spawnUnit.
+  socket.on('castSpell', ({ spellId, x, y } = {}) => {
     const p = gameState.players[socket.id];
     if (!p || p.eliminated) return;
     const spell = SPELLS[spellId];
@@ -2173,10 +2142,13 @@ io.on('connection', (socket) => {
       socket.emit('spawnFailed', { reason: 'spell_locked' });
       return;
     }
-    // Cooldown serveur (anti-spam)
+    // Cooldown propre au sort
     p.spellCooldowns = p.spellCooldowns || {};
     const lastCast = p.spellCooldowns[spellId] || 0;
-    if (Date.now() - lastCast < 400) return;
+    if (Date.now() - lastCast < (spell.cooldownMs || 1000)) {
+      socket.emit('spawnFailed', { reason: 'spell_cooldown' });
+      return;
+    }
     const costType = spell.costType || 'mana';
     if ((p[costType] || 0) < spell.cost) {
       socket.emit('spawnFailed', { reason: costType === 'faith' ? 'not_enough_faith' : 'not_enough_mana' });
@@ -2189,69 +2161,46 @@ io.on('connection', (socket) => {
     p[costType] -= spell.cost;
     p.spellCooldowns[spellId] = Date.now();
 
-    const isAlly = (u) => u.ownerId === p.id || (p.allies && p.allies.includes(u.ownerId));
+    const r2 = spell.radius * spell.radius;
+    const inRadius = (u) => {
+      const dx = u.x - x, dy = u.y - y;
+      return dx * dx + dy * dy <= r2;
+    };
+    // Crédite un kill par sort (+ drops PvE / clear de camp) et supprime l'unité.
+    const killBySpell = (u) => {
+      u.hp = 0;
+      delete gameState.units[u.id];
+      if (!p.eliminated) p.kills++;
+      onNeutralUnitKilled(u, p.id, null);
+    };
 
     if (spell.type === 'aoe_damage') {
       for (const u of Object.values(gameState.units)) {
-        if (isAlly(u)) continue;
-        if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
-          u.hp -= spell.damage;
-        }
+        if (friendly(u.ownerId, p.id) || !inRadius(u)) continue;
+        u.hp = Math.max(0, u.hp - spell.damage);
+        if (u.hp <= 0) killBySpell(u);
       }
     } else if (spell.type === 'aoe_slow') {
       const until = Date.now() + spell.durationMs;
       for (const u of Object.values(gameState.units)) {
-        if (isAlly(u)) continue;
-        if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
-          u.frozenUntil = until;
-        }
+        if (friendly(u.ownerId, p.id) || !inRadius(u)) continue;
+        u.frozenUntil = until;
       }
     } else if (spell.type === 'aoe_heal') {
       for (const u of Object.values(gameState.units)) {
-        if (!isAlly(u)) continue;
-        if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
-          u.hp = Math.min(u.maxHp || u.hp, u.hp + spell.heal);
-        }
+        if (!friendly(u.ownerId, p.id) || !inRadius(u)) continue;
+        u.hp = Math.min(u.maxHp || u.hp, u.hp + spell.heal);
       }
     } else if (spell.type === 'aoe_purify') {
       for (const u of Object.values(gameState.units)) {
-        if (isAlly(u)) continue;
-        if (Math.hypot(u.x - x, u.y - y) <= spell.radius) {
-          const dmg = spell.damage * (MAGIC_UNDEAD.has(u.type) ? (spell.magicMult || 1) : 1);
-          u.hp -= dmg;
-        }
+        if (friendly(u.ownerId, p.id) || !inRadius(u)) continue;
+        const mult = MAGIC_UNDEAD.has(u.type) ? (spell.magicMult || 1) : 1;
+        u.hp = Math.max(0, u.hp - spell.damage * mult);
+        if (u.hp <= 0) killBySpell(u);
       }
-    } else if (spell.type === 'summon_unit') {
-      // Invocation : crée une unité du type spécifié, propriétaire du caster
-      const udef = UNIT_TYPES[spell.unitType];
-      if (!udef) return;
-      // 1×/partie : refuse si déjà cast
-      if (spell.oncePerMatch) {
-        p.spellsUsedOnce = p.spellsUsedOnce || {};
-        if (p.spellsUsedOnce[spellId]) {
-          // Rembourse la ressource (déjà débitée plus haut)
-          p[costType] += spell.cost;
-          socket.emit('spawnFailed', { reason: 'spell_once_per_match' });
-          return;
-        }
-        p.spellsUsedOnce[spellId] = true;
-      }
-      const unitId = `unit_${nextUnitId++}`;
-      gameState.units[unitId] = {
-        id: unitId, ownerId: p.id,
-        x, y, type: spell.unitType,
-        hp: udef.hp, maxHp: udef.hp,
-        speed: udef.speed, range: udef.range, damage: udef.damage, cost: 0,
-        targetX: null, targetY: null,
-        attackTargetId: null, attackTargetType: null,
-        lastAttackTime: 0,
-        mode: 'defend', defendX: x, defendY: y, defendRadius: 320,
-        spawnTime: Date.now(),
-      };
-      io.emit('unitSummoned', { unitId, type: spell.unitType, x, y, ownerId: p.id });
     }
-    // Broadcast pour l'animation côté client
-    io.emit('spellCast', { spellId, x, y, casterId: p.id, color: p.color, radius: spell.radius || 80 });
+    // Broadcast pour l'animation client (couleur Theme côté client via casterId)
+    io.emit('spellCast', { spellId, x, y, casterId: p.id, radius: spell.radius });
   });
 
   socket.on('requestRestart', () => {
@@ -2408,9 +2357,12 @@ setInterval(() => {
     const baseSpeed = unit.speed || 80;
     const isFrozen  = unit.frozenUntil  && unit.frozenUntil  > nowMs;
     const isFeared  = unit.fearedUntil  && unit.fearedUntil  > nowMs;
-    // Bonus tech : Téléportation/Mobilité magique → +15% vitesse toutes unités
+    // Bonus tech de mobilité (cumulables) :
+    //   - 'roads' (science T2) : +12% vitesse toutes unités
+    //   - 'teleportation' (magie T3) : +15% vitesse toutes unités
     const owner = gameState.players[unit.ownerId];
     let speedBonus = 1.0;
+    if (owner && hasTech(owner, 'roads')) speedBonus *= 1.12;
     if (owner && hasTech(owner, 'teleportation')) speedBonus *= 1.15;
     // Bonus tech 'lightning' (magic_speed_vision) → +25% vitesse pour unités magie
     if (owner && hasTech(owner, 'lightning') && MAGIC_UNDEAD.has(unit.type)) speedBonus *= 1.25;
@@ -2669,6 +2621,7 @@ setInterval(() => {
         attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type,
         targetType: unit.attackTargetType, targetId: target.id,
         targetX: target.x, targetY: target.y,
+        dmg: Math.round(uDamage),
       };
 
       // ── Passif 'magic_splash' (pyromancy) : mini-AoE 30 px à chaque tir magique ──
@@ -2803,6 +2756,7 @@ setInterval(() => {
         attackerId: unit.id, attackerX: unit.x, attackerY: unit.y, attackerType: unit.type,
         targetType: bestType, targetId: best.id,
         targetX: best.x, targetY: best.y,
+        dmg: Math.round(uDamage),
       };
 
       if (bestType === 'unit' && best.hp <= 0) {
@@ -2848,7 +2802,7 @@ setInterval(() => {
         bestTarget.targetX = null; bestTarget.targetY = null;
         if (bestTarget.mode === 'defend') bestTarget.mode = 'attack';
       }
-      const entry = { attackerId: b.id, attackerType: 'building', attackerBuildingType: b.type, targetType: 'unit', targetId: bestTarget.id, bx: b.x, by: b.y };
+      const entry = { attackerId: b.id, attackerType: 'building', attackerBuildingType: b.type, targetType: 'unit', targetId: bestTarget.id, bx: b.x, by: b.y, dmg: Math.round(def.damage) };
       if (bestTarget.hp <= 0) {
         toDelete.add(bestTarget.id);
         entry.killed = true;
@@ -2877,7 +2831,7 @@ setInterval(() => {
     if (best) {
       p.lastCitadelAttack = nowMs;
       best.hp = Math.max(0, best.hp - CIT_DMG);
-      const entry = { attackerId: 'citadel_' + p.id, attackerType: 'building', attackerBuildingType: 'citadel', targetType: 'unit', targetId: best.id, bx: p.x, by: p.y };
+      const entry = { attackerId: 'citadel_' + p.id, attackerType: 'building', attackerBuildingType: 'citadel', targetType: 'unit', targetId: best.id, bx: p.x, by: p.y, dmg: CIT_DMG };
       if (best.hp <= 0) {
         toDelete.add(best.id);
         entry.killed = true;

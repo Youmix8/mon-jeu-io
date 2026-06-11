@@ -69,9 +69,9 @@ const TECH_TREE = {
   },
   roads: {
     id: 'roads', axis: 'science', tier: 2, name: 'Voies', icon: '🛣',
-    desc: 'Permet de tracer des chemins. +30% vitesse sur un chemin.',
+    desc: 'Réseau routier : +12% vitesse de déplacement pour toutes tes unités.',
     cost: 20, requires: ['construction'],
-    unlocks: { buildings: ['road'] },
+    unlocks: { passives: ['road_speed'] },
     pos: pos('science', 2, 0.5),
   },
   ballistics: {

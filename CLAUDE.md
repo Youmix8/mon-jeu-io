@@ -81,6 +81,8 @@ Sections principales :
 | `hdv-panel.js` | Panel HDV : production unités + tech tree access + upgrade |
 | `village-panel.js` | Panel village (2 niveaux : Lv1 soldat seul, Lv2 toutes unités déblo.) |
 | `building-info-panel.js` | Panel au clic d'un bâtiment : HP, portée, effets, bouton vendre (50 % remboursé) |
+| `diplomacy-panel.js` | Panel diplomatie (bouton HUD + touche **P**) : pactes de non-agression, gaté par tech `diplomacy` |
+| `spell-cast.js` | Sorts actifs (hotkeys F/G/H/J) : preview AoE, cooldown client, cast → serveur |
 | `tech-tree-overlay.js` | Overlay SVG plein écran (touche T). Axes recolorés cyan/violet/or. Glyphes via `NeonGlyphs.tech()`. |
 | `tech-indicators.js` | Badges emoji au-dessus du HDV (légende live des techs débloquées) |
 | `build-mode.js` | Mode placement bâtiment ghost sprite + grille cyan |
@@ -352,10 +354,11 @@ ou l'esthétique.
 
 ---
 
-## 📝 État de l'audit (session volet-A, 10 juin 2026)
+## 📝 État de l'audit (volets A + B + C, juin 2026)
 
-L'audit complet en 3 volets a été réalisé, puis le **Volet A (bugs) appliqué
-intégralement**. Récap des fixes livrés :
+L'audit complet en 3 volets a été réalisé. **Volet A (bugs) appliqué**, puis
+**Volet B (features) + Volet C (game feel)** appliqués sur direction de Robin
+(sorts réactivés, roads en passif vitesse, UI diplomatie, game feel). Récap :
 
 ### ✅ Volet A — corrigé
 - 🟥 Bots magic/religion sans économie → `BOT_BUILD_PLANS` (sanctum/mage_tower,
@@ -387,32 +390,49 @@ intégralement**. Récap des fixes livrés :
   visibles sur la minimap ; bots excluent les non-combattants des waves ;
   village panel "Niveau x / 5" ; COLORS serveur alignées palette néon.
 
-### 🔜 Volet B — fonctionnalités incomplètes (à traiter, demander à Robin les priorités)
-1. **Sorts actifs** : UI client complète (hotkeys F/G/H/J, preview, coût) mais
-   `castSpell` est un **no-op serveur** (handler legacy conservé sous
-   `_legacyCastSpell_disabled`). Décision : réactiver (rebrancher le handler) ou retirer l'UI.
-2. **Diplomatie** : handlers serveur OK (`proposeTreaty`/`breakTreaty`,
-   `treatySigned`/`treatyBroken`) mais **aucune UI** et aucun listener client.
-3. **TechIndicators** : module chargé mais `init()`/`sync()` jamais appelés → badges HDV morts.
-4. **Renaissance / omniscience** : payload `omniscient` envoyé par le serveur,
-   jamais consommé par `minimap.js`.
-5. **`roads`** : débloque un bâtiment `road` qui n'existe pas ; +30 % vitesse
-   non implémenté. Tech = taxe de 20 PR (mais prérequis de colonization).
-6. **`utils/animations.js` + `config/entitiesConfig.js`** non chargés dans
-   index.html → visuel `pilgrimExplosion` (martyrs) mort, lignes mana/foi du
-   building-info-panel mortes.
-7. **Feedback `spawnFailed`** : seul `not_enough_gold` a un retour visuel
-   (pop cap / mana / foi : aucun feedback).
-8. Rebrand glyphes incomplet (panneaux + kill feed encore en emojis).
-9. Tutoriel, audio, contrôles tactiles : manquants.
+### ✅ Volet B — appliqué (session "volet-BC", 11 juin 2026)
+1. **Sorts actifs RÉACTIVÉS** : `castSpell` serveur rebranché (fireball/freeze/
+   blessing/purifying_light), chacun avec `cooldownMs` propre + crédit kills/PvE.
+   Les 4 sorts d'INVOCATION ont été retirés de `SPELLS` (doublon avec la
+   production d'unités). Cooldown miroir côté client (`SpellCast.lastCastAt`) +
+   toast "en recharge". `playCastAnim` refait full néon (onde de choc + burst ADD).
+2. **UI Diplomatie** : nouveau `diplomacy-panel.js` (bouton HUD + touche **P**),
+   liste des joueurs vivants, statuts allié/neutre/en-attente, gaté par tech
+   `diplomacy` (et exige que les 2 camps l'aient). `network.js` : `breakTreaty`
+   + listeners `treatySigned`/`treatyBroken` (maj `allies` locale immédiate).
+   Kill feed sur pacte signé/rompu (callbacks détenus par MainScene, slot unique).
+3. **TechIndicators** : `init()` dans `_buildMap`, `sync()` après `_syncHDVs` →
+   badges + halos de techs au-dessus des HDV désormais vivants.
+4. **Omniscience Renaissance** : `minimap.js` consomme `state.omniscient` (liseré
+   doré + révélation de tous les ennemis hors fog).
+5. **`roads`** → passif `road_speed` (+12 % vitesse toutes unités, cumul avec
+   teleportation). Plus de bâtiment `road` fantôme.
+6. **martyrs** : `pilgrimExplosion` rebranché via callback (nova de soin verte
+   dans MainScene) — ne dépend plus de `Animations` (non chargé).
+7. **Feedback `spawnFailed`** : toast HUD lisible (`_hudToast`) pour TOUTES les
+   causes (pop/mana/foi/PR/verrou/recharge/zone…), plus seulement le gold.
+8. **Glyphes néon** : panneaux HDV/village/bâtiment via `NeonGlyphs.unit/building`,
+   préfixes kill feed (☠ ▰ ✺ ⚔ ⊕ ✗).
 
-### 🔜 Volet C — améliorations (backlog)
-- Game feel : hit-stop, damage numbers, kill streaks, screen flash.
+### ✅ Volet C — game feel appliqué (même session)
+- **Damage numbers** flottants : `dmg` ajouté au payload `attacks` serveur
+  (4 chemins : combat ciblé, idle, tour, citadelle). Client : chiffre doré quand
+  JE frappe / rouge quand J'encaisse, filtré sur mes unités (perf + lisibilité),
+  gros chiffre sur les boss.
+- **Impact punch** : `_impactPunch` (scale ×1.28 yoyo 70 ms via `_baseScaleX/Y`).
+- **Kill streaks** : `_registerKill` (fenêtre 3 s) → bannière DOUBLE/TRIPLE/
+  QUADRA/PENTA KILL / MASSACRE, couleur montant avec le palier.
+- **Screen flash** : `_screenFlash` (voile ADD plein écran fixé caméra) sur kill de boss.
+
+### 🔜 Reste (backlog volet B/C non demandé cette session)
+- Tutoriel intégré, audio (SFX/ambiance), contrôles tactiles mobile.
+- `utils/animations.js` + `config/entitiesConfig.js` toujours non chargés
+  (lignes mana/foi du building-info-panel via ENTITIES_CONFIG restent mortes —
+  à brancher ou purger). Le visuel martyrs ne dépend plus d'eux.
 - Perf : cap global d'unités, collisions O(n²), GC particules, throttle broadcast.
-- Architecture : découpe de server.js en modules (`server/combat.js`,
-  `server/bot.js`, `server/pve.js`, `server/handlers.js`, `server/economy.js`).
-- Équilibrage magie post-refonte (1 seul mage) — observer les bots magic
-  maintenant qu'ils ont une économie.
+- Architecture : découpe de server.js en modules.
+- Équilibrage magie post-refonte + équilibrage des sorts réactivés (à observer
+  en partie réelle).
 
 ---
 

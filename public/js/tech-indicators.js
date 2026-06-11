@@ -28,7 +28,7 @@ const TechIndicators = (() => {
     // ── Science / économie ──
     agriculture:    { icon: '🌾', color: 0x84cc16, label: 'Agriculture' },
     construction:   { icon: '🛠', color: 0x94a3b8, label: 'Construction' },
-    roads:          { icon: '🛣', color: 0xb45309, label: 'Voies' },
+    roads:          { icon: '🛣', color: 0xb45309, label: 'Voies (+12% vitesse)' },
     ballistics:     { icon: '🎯', color: 0x22d3ee, label: 'Balistique (+25% cadence)' },
     reconnaissance: { icon: '🔭', color: 0x22d3ee, label: 'Reconnaissance (+30% vision, +15% portée)' },
     diplomacy:      { icon: '🤝', color: 0x93c5fd, label: 'Diplomatie' },

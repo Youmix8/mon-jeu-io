@@ -96,9 +96,11 @@ const BuildingInfoPanel = (() => {
     const hpPct = Math.max(0, Math.min(100, Math.round((b.hp / b.maxHp) * 100)));
     const hpColor = hpPct > 60 ? '#22c55e' : hpPct > 30 ? '#f59e0b' : '#ef4444';
 
+    const headerGlyph = (typeof NeonGlyphs !== 'undefined')
+      ? NeonGlyphs.building(b.type, def.icon || '◈') : (def.icon || '◈');
     panel.innerHTML = `
       <div class="bip-header">
-        <span class="bip-icon">${def.icon || '🏗'}</span>
+        <span class="bip-icon">${headerGlyph}</span>
         <span class="bip-name">${def.name || b.type}</span>
         <button class="bip-close" title="Fermer">×</button>
       </div>

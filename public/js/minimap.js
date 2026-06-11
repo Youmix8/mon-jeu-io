@@ -53,20 +53,35 @@ const Minimap = (() => {
       }
     }
 
-    const fcol = (pid) => {
+    const fcol = (pid, type) => {
       if (typeof Theme === 'undefined') return '#94a3b8';
-      return pid ? Theme.factionColorStr(pid) : Theme.NEUTRAL_STR;
+      return pid ? Theme.factionColorStr(pid, type) : Theme.NEUTRAL_STR;
     };
 
+    // Passif Renaissance (minimap_omniscience) : le serveur envoie `omniscient`
+    // = positions BRUTES de TOUT (hors fog). On l'utilise comme source quand il
+    // est présent → la mini-carte révèle tous les mouvements ennemis.
+    const omni     = state.omniscient || null;
+    const villages = omni ? omni.villages : (state.villages || []);
+    const players  = omni ? omni.players  : Object.values(state.players || {});
+    const units    = omni ? omni.units    : Object.values(state.units || {});
+    if (omni) {
+      // Liseré doré discret = omniscience active
+      ctx.strokeStyle = 'rgba(251,191,36,0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0.5, 0.5, SIZE - 1, SIZE - 1);
+    }
+
     // Villages (carré 4×4)
-    for (const v of (state.villages || [])) {
+    for (const v of villages) {
       const px = v.x * sx, py = v.y * sy;
       ctx.fillStyle = v.ownerId ? fcol(v.ownerId) : '#64748b';
       ctx.fillRect(px - 2, py - 2, 4, 4);
     }
 
     // HDV (carré 6×6 couleur équipe)
-    for (const p of Object.values(state.players || {})) {
+    for (const p of players) {
+      if (p.eliminated) continue;
       const px = p.x * sx, py = p.y * sy;
       ctx.fillStyle = fcol(p.id);
       ctx.fillRect(px - 3, py - 3, 6, 6);
@@ -74,10 +89,8 @@ const Minimap = (() => {
 
     // Unités (carré 2×2) — y compris les neutres visibles (barbares rouges, faune)
     // dont le "propriétaire" n'est pas dans state.players. Theme résout leur couleur.
-    for (const u of Object.values(state.units || {})) {
-      ctx.fillStyle = (typeof Theme !== 'undefined')
-        ? Theme.factionColorStr(u.ownerId, u.type)
-        : fcol(u.ownerId);
+    for (const u of units) {
+      ctx.fillStyle = fcol(u.ownerId, u.type);
       ctx.fillRect(u.x * sx - 1, u.y * sy - 1, 2, 2);
     }
 

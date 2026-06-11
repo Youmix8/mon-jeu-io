@@ -8,6 +8,7 @@ const SpellCast = (() => {
   let active = null;          // spellId en cours, ou null
   let ghost  = null;          // Phaser.GameObjects.Graphics (preview AoE)
   let label  = null;          // texte flottant (coût mana, sort)
+  const lastCastAt = {};      // spellId → timestamp du dernier cast réussi (cooldown client)
 
   function init(sc) {
     scene = sc;
@@ -36,11 +37,18 @@ const SpellCast = (() => {
           _flashHud(`🔒 ${sp.name} verrouillé — recherche ${sp.requiresTech}`);
           return;
         }
+        // Cooldown client (miroir du serveur) — évite les clics gaspillés
+        const cd   = sp.cooldownMs || 1000;
+        const left = cd - (Date.now() - (lastCastAt[sp.id] || 0));
+        if (left > 0) {
+          _flashHud(`${sp.icon} ${sp.name} en recharge (${(left / 1000).toFixed(1)}s)`);
+          return;
+        }
         const costType = sp.costType || 'mana';
         const current  = (costType === 'faith') ? (me.faith || 0) : (me.mana || 0);
-        const label    = (costType === 'faith') ? '✚ foi' : '✦ mana';
+        const costLbl  = (costType === 'faith') ? '✚ foi' : '✦ mana';
         if (current < sp.cost) {
-          _flashHud(`Pas assez de ${label} (${sp.cost} requis)`);
+          _flashHud(`Pas assez de ${costLbl} (${sp.cost} requis)`);
           return;
         }
         activate(sp.id);
@@ -90,6 +98,7 @@ const SpellCast = (() => {
   function tryCast(wx, wy) {
     if (!active) return false;
     Network.castSpell(active, wx, wy);
+    lastCastAt[active] = Date.now(); // démarre le cooldown client
     cancel();
     return true;
   }
@@ -112,32 +121,46 @@ const SpellCast = (() => {
     scene.tweens.add({ targets: t, alpha: 0, duration: 1400, ease: 'Quad.easeIn', onComplete: () => t.destroy() });
   }
 
-  // Animation à jouer quand un sort est lancé (par n'importe qui)
+  // Animation à jouer quand un sort est lancé (par n'importe qui) — full néon.
+  // Onde de choc (cercle qui se dilate du centre au rayon réel) + flash de
+  // remplissage + burst de particules ADD, le tout teinté par le type de sort.
   function playCastAnim(data) {
     if (!scene || !scene.sys || !scene.sys.isActive() || !data) return;
     const sp = (Network.getConfig().spells || {})[data.spellId];
     if (!sp) return;
-    const color    = _colorFor(sp);
-    const isExpl   = (sp.type === 'aoe_damage' || sp.type === 'aoe_purify');
-    const ring = scene.add.graphics().setDepth(94);
-    ring.lineStyle(3, color, 1);
-    ring.fillStyle(color, isExpl ? 0.45 : 0.30);
-    ring.fillCircle(data.x, data.y, data.radius || sp.radius);
-    ring.strokeCircle(data.x, data.y, data.radius || sp.radius);
+    const color  = _colorFor(sp);
+    const radius = data.radius || sp.radius || 80;
+    const isExpl = (sp.type === 'aoe_damage' || sp.type === 'aoe_purify');
+
+    // 1. Flash de remplissage instantané qui s'estompe (la zone touchée)
+    const fill = scene.add.circle(data.x, data.y, radius, color, isExpl ? 0.38 : 0.26)
+      .setDepth(53).setBlendMode(Phaser.BlendModes.ADD);
     scene.tweens.add({
-      targets: ring,
-      alpha:  { from: 1, to: 0 },
-      scaleX: { from: 1, to: isExpl ? 1.4 : 1.15 },
-      scaleY: { from: 1, to: isExpl ? 1.4 : 1.15 },
-      duration: isExpl ? 600 : 900, ease: 'Quad.easeOut',
+      targets: fill, alpha: { from: fill.alpha, to: 0 },
+      scale: { from: 0.85, to: 1 }, duration: isExpl ? 420 : 700,
+      ease: 'Quad.easeOut', onComplete: () => fill.destroy(),
+    });
+
+    // 2. Onde de choc : anneau fin qui se dilate de 0 → rayon
+    const ring = scene.add.circle(data.x, data.y, radius, color, 0)
+      .setStrokeStyle(3, color, 1).setDepth(54).setBlendMode(Phaser.BlendModes.ADD);
+    scene.tweens.add({
+      targets: ring, scale: { from: 0.15, to: 1.05 }, alpha: { from: 1, to: 0 },
+      duration: isExpl ? 450 : 600, ease: 'Cubic.easeOut',
       onComplete: () => ring.destroy(),
     });
-    // Icône centrale flash
-    const icn = scene.add.text(data.x, data.y, sp.icon, { fontSize: '38px' }).setOrigin(0.5).setDepth(95);
-    scene.tweens.add({
-      targets: icn, alpha: { from: 1, to: 0 }, y: data.y - 40, duration: 700, ease: 'Quad.easeOut',
-      onComplete: () => icn.destroy(),
+
+    // 3. Burst de particules néon (vers l'extérieur pour les dégâts,
+    //    implosion douce pour soin/gel)
+    const emitter = scene.add.particles(data.x, data.y, 'particle', {
+      tint: color,
+      speed: { min: radius * 0.6, max: radius * 1.6 },
+      scale: { start: 1.4, end: 0 }, alpha: { start: 1, end: 0 },
+      lifespan: isExpl ? 420 : 600, quantity: isExpl ? 18 : 12,
+      blendMode: Phaser.BlendModes.ADD, emitting: false,
     });
+    emitter.explode();
+    scene.time.delayedCall(700, () => emitter.destroy());
   }
 
   return { init, activate, update, tryCast, cancel, isActive, playCastAnim };

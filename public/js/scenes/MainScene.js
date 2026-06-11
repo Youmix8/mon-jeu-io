@@ -101,16 +101,35 @@ class MainScene extends Phaser.Scene {
     // ── Callbacks réseau ──────────────────────────────────────────
 
     Network.setOnSpawnFailed((reason) => {
-      if (reason !== 'not_enough_gold') return;
-      const el = document.getElementById('my-gold-row');
-      if (!el) return;
-      el.classList.remove('flash-error');
-      void el.offsetWidth;
-      el.classList.add('flash-error');
+      // Flash de la ligne gold (signal historique pour le manque d'or)
+      if (reason === 'not_enough_gold') {
+        const el = document.getElementById('my-gold-row');
+        if (el) { el.classList.remove('flash-error'); void el.offsetWidth; el.classList.add('flash-error'); }
+      }
+      // Toast lisible pour TOUTES les autres causes (avant : silencieux → le
+      // joueur ne comprenait pas pourquoi rien ne se passait).
+      const MSG = {
+        not_enough_gold:      '◈ Pas assez de gold',
+        not_enough_mana:      '✦ Pas assez de mana',
+        not_enough_faith:     '✚ Pas assez de foi',
+        not_enough_pr:        '▤ Pas assez de points de recherche',
+        population_cap:        '⌬ Population maximale atteinte',
+        unit_locked:          '🔒 Unité non débloquée (recherche requise)',
+        unit_locked_at_village:'🔒 Village de niveau supérieur requis',
+        building_locked:      '🔒 Bâtiment non débloqué',
+        missing_requires:     '🔒 Prérequis de recherche manquant',
+        out_of_build_zone:    '⛔ Hors de la zone constructible',
+        cell_occupied:        '⛔ Case déjà occupée',
+        too_close_to_base:    '⛔ Trop près d\'une base',
+        spell_locked:         '🔒 Sort non débloqué',
+        spell_cooldown:       '⏳ Sort en recharge',
+      };
+      const msg = MSG[reason];
+      if (msg) this._hudToast(msg);
     });
 
     Network.setOnPlayerEliminated((data) => {
-      this._addKillFeedEntry(`💀 ${data.name} éliminé !`, Theme.factionColorStr(data.playerId));
+      this._addKillFeedEntry(`☠ ${data.name} éliminé !`, Theme.factionColorStr(data.playerId));
     });
 
     // Pop néon d'invocation (résurrection nécro / clone de liche).
@@ -138,6 +157,25 @@ class MainScene extends Phaser.Scene {
       this.time.delayedCall(600, () => emitter.destroy());
     });
 
+    // Martyrs : le Pèlerin explose en soin AoE → nova verte expansive.
+    Network.setOnPilgrimExplosion((data) => {
+      if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
+      const green = 0x22c55e;
+      const ring = this.add.circle(data.x, data.y, 100, green, 0.22).setDepth(53)
+        .setStrokeStyle(3, green, 1).setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({
+        targets: ring, scale: { from: 0.2, to: 1 }, alpha: { from: 1, to: 0 },
+        duration: 600, ease: 'Cubic.easeOut', onComplete: () => ring.destroy(),
+      });
+      const emitter = this.add.particles(data.x, data.y, 'particle', {
+        tint: green, speed: { min: 50, max: 130 }, scale: { start: 1.3, end: 0 },
+        alpha: { start: 1, end: 0 }, lifespan: 600, quantity: 14,
+        blendMode: Phaser.BlendModes.ADD, emitting: false,
+      });
+      emitter.explode();
+      this.time.delayedCall(700, () => emitter.destroy());
+    });
+
     // PvE : raids barbares et camps nettoyés dans le kill feed
     Network.setOnBarbarianRaid((data) => {
       this._addKillFeedEntry(`⌖ Raid barbare → ${data.targetName}`, Theme.factionColorStr(data.targetPlayerId));
@@ -146,8 +184,21 @@ class MainScene extends Phaser.Scene {
       this._addKillFeedEntry(`✦ ${data.byName} nettoie un camp (+${data.rewardGold} ◈)`, Theme.factionColorStr(data.byPlayerId));
     });
 
+    // Diplomatie : kill feed + relais vers le panneau (callbacks réseau à slot unique)
+    Network.setOnTreatySigned((data) => {
+      this._addKillFeedEntry(`⊕ Pacte : ${data.aName} ↔ ${data.bName}`, Theme.factionColorStr(data.a));
+      if (typeof DiplomacyPanel !== 'undefined') DiplomacyPanel.notifyResolved(data.a, data.b);
+    });
+    Network.setOnTreatyBroken((data) => {
+      const st = Network.getState();
+      const an = (st.players[data.a] || {}).name || '?';
+      const bn = (st.players[data.b] || {}).name || '?';
+      this._addKillFeedEntry(`✗ Pacte rompu : ${an} / ${bn}`, Theme.HP.low);
+      if (typeof DiplomacyPanel !== 'undefined') DiplomacyPanel.notifyResolved(data.a, data.b);
+    });
+
     Network.setOnVillageCaptured((data) => {
-      this._addKillFeedEntry(`🏘 ${data.ownerName} capture un village`, Theme.factionColorStr(data.ownerId));
+      this._addKillFeedEntry(`▰ ${data.ownerName} capture un village`, Theme.factionColorStr(data.ownerId));
       // Flash de capture (juice §11.7) : pulse doré + 10 particules dorées au centre du village
       const v = (Network.getState().villages || []).find(vv => vv.id === data.villageId);
       if (v) {
@@ -172,7 +223,7 @@ class MainScene extends Phaser.Scene {
       const state = Network.getState();
       const attacker = state.players[data.byPlayerId];
       const attackerName = attacker ? attacker.name : 'Quelqu\'un';
-      this._addKillFeedEntry(`💥 ${attackerName} détruit un village`, Theme.factionColorStr(data.byPlayerId));
+      this._addKillFeedEntry(`✺ ${attackerName} détruit un village`, Theme.factionColorStr(data.byPlayerId));
     });
 
     Network.setOnGameOver((data) => {
@@ -187,21 +238,25 @@ class MainScene extends Phaser.Scene {
 
     Network.setOnAttack((data) => {
       const state = Network.getState();
+      const myId  = Network.getMyId();
 
       // ── Résoudre la position de la cible ──
-      let tx, ty;
+      let tx, ty, targetMine = false;
       if (data.targetType === 'unit') {
         const t = state.units && state.units[data.targetId];
         if (!t) return;
         tx = t.x; ty = t.y;
+        targetMine = (t.ownerId === myId);
         this._flashUnit(data.targetId);
+        this._impactPunch(data.targetId);
         if (data.killed) {
           this._spawnDeathParticles(t.x, t.y, Theme.factionColorInt(t.ownerId, t.type));
-          // Camera shake si gros impact (boss tué) — juice §11.1
+          // Camera shake + screen flash si gros impact (boss tué) — juice §11.1
           const shape = Theme.unitShape(t.type);
           const isCampBoss = t.ownerId === 'neutral_boss' || t.neutralRole === 'camp_boss';
           if (shape.sh === 'boss' || isCampBoss) {
             this.cameras.main.shake(180, 0.004);
+            this._screenFlash(0xfcd34d, 0.16, 160);
           }
         }
       } else if (data.targetType === 'village') {
@@ -225,30 +280,51 @@ class MainScene extends Phaser.Scene {
 
       // ── Résoudre l'attaquant (unité OU bâtiment) ──
       let attackerColorInt = 0xffffff;
+      let attackerOwnerId = null;
       if (data.attackerType === 'building') {
         // Beam depuis le bâtiment (les coords sont fournies en bx, by)
         const ax = (data.bx != null) ? data.bx : tx;
         const ay = (data.by != null) ? data.by : ty;
-        // ownerId du bâtiment, si dispo, donne la couleur d'équipe pour le beam
+        // ownerId du bâtiment, si dispo, donne la couleur d'équipe pour le beam.
+        // Citadelle : id = 'citadel_<playerId>' → le propriétaire est le joueur.
         const b = (state.buildings || []).find(bb => bb.id === data.attackerId);
-        if (b && b.ownerId) attackerColorInt = Theme.factionColorInt(b.ownerId);
-        else attackerColorInt = Theme.BEAM.ranged;
+        if (b && b.ownerId) attackerOwnerId = b.ownerId;
+        else if (typeof data.attackerId === 'string' && data.attackerId.startsWith('citadel_')) attackerOwnerId = data.attackerId.slice(8);
+        attackerColorInt = attackerOwnerId ? Theme.factionColorInt(attackerOwnerId) : Theme.BEAM.ranged;
         this._drawBeam(ax, ay, tx, ty, attackerColorInt);
       } else {
         const attacker = state.units && state.units[data.attackerId];
         if (!attacker) return;
+        attackerOwnerId = attacker.ownerId;
         attackerColorInt = Theme.factionColorInt(attacker.ownerId);
         this._playAttackAnimation(attacker, tx, ty);
         if (data.killed && data.targetType === 'unit') {
           const killerOwner = state.players[attacker.ownerId];
           if (killerOwner) {
-            this._addKillFeedEntry(`⚔️ ${killerOwner.name} a tué une unité`, Theme.factionColorStr(attacker.ownerId));
+            this._addKillFeedEntry(`⚔ ${killerOwner.name} a tué une unité`, Theme.factionColorStr(attacker.ownerId));
           }
         }
       }
+      const iAmAttacker = attackerOwnerId === myId;
 
       // Particule d'impact (couleur équipe attaquante) à chaque coup porté.
       this._spawnImpactParticles(tx, ty, attackerColorInt);
+
+      // ── Damage numbers flottants (juice) — uniquement ce qui me concerne ──
+      // Vert doré quand JE frappe, rouge quand JE encaisse. Évite le spam des
+      // combats IA distants. Pas de chiffre sur les invocations/non-dégâts.
+      if (data.dmg > 0 && (iAmAttacker || targetMine)) {
+        const dnColor = iAmAttacker ? '#fde68a' : '#fb7185';
+        const big = (data.targetType === 'unit') && Theme.unitShape(
+          (state.units[data.targetId] || {}).type || ''
+        ).sh === 'boss';
+        this._spawnDamageNumber(tx, ty, data.dmg, dnColor, big);
+      }
+
+      // ── Kill streaks (juice) : compte mes kills d'unités rapprochés ──
+      if (data.killed && data.targetType === 'unit' && iAmAttacker) {
+        this._registerKill();
+      }
 
       // Ricochet (tech 'arcane_ricochet') : mini-beam vers 2e cible + flash
       if (data.ricochet && Number.isFinite(data.ricochet.x) && Number.isFinite(data.ricochet.y)) {
@@ -445,6 +521,11 @@ class MainScene extends Phaser.Scene {
 
     this._syncHDVs(state.players);
     this._syncUnits(state.units || {}, state.players);
+
+    // Badges + halos de techs au-dessus des HDV visibles (publics, hors fog).
+    if (typeof TechIndicators !== 'undefined') {
+      TechIndicators.sync(state.playerSummary || [], new Set(Object.keys(state.players)), state.players);
+    }
   }
 
   // ── Villages neutres ─────────────────────────────────────────────
@@ -709,6 +790,7 @@ class MainScene extends Phaser.Scene {
 
     // Mini-carte
     if (typeof Minimap !== 'undefined') Minimap.init(this.cameras.main);
+    if (typeof TechIndicators !== 'undefined') TechIndicators.init(this);
     if (typeof RadialMenu !== 'undefined') RadialMenu.init(this);
     if (typeof BuildMode !== 'undefined') BuildMode.init(this);
     if (typeof SpellCast !== 'undefined') SpellCast.init(this);
@@ -1256,6 +1338,84 @@ class MainScene extends Phaser.Scene {
     });
   }
 
+  // ── Impact punch (juice) : petit coup de scale sur l'unité touchée ──
+  // Lit/écrit _baseScaleX/Y (jamais sprite.scaleX/Y, pollué par le wobble idle).
+  _impactPunch(unitId) {
+    const sprites = this.unitSprites[unitId];
+    if (!sprites) return;
+    const sprite = sprites[0];
+    if (!sprite) return;
+    const bx = sprite._baseScaleX || sprite.scaleX;
+    const by = sprite._baseScaleY || sprite.scaleY;
+    this.tweens.add({
+      targets: sprite,
+      scaleX: bx * 1.28, scaleY: by * 1.28,
+      duration: 70, yoyo: true, ease: 'Quad.easeOut',
+    });
+  }
+
+  // ── Damage number flottant (juice) : monte et fade ──
+  _spawnDamageNumber(x, y, dmg, colorStr, big) {
+    const jitter = (Math.random() - 0.5) * 14;
+    const txt = this.add.text(x + jitter, y - 8, String(dmg), {
+      fontFamily: '"Inter", system-ui, sans-serif',
+      fontSize: big ? '20px' : '14px',
+      fontStyle: '800',
+      color: colorStr,
+      stroke: '#04121a',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(80);
+    this.tweens.add({
+      targets: txt,
+      y: y - (big ? 56 : 40),
+      alpha: { from: 1, to: 0 },
+      scale: { from: big ? 1.15 : 1, to: 0.85 },
+      duration: big ? 900 : 680,
+      ease: 'Quad.easeOut',
+      onComplete: () => txt.destroy(),
+    });
+  }
+
+  // ── Screen flash bref (juice) : voile coloré plein écran qui s'estompe ──
+  // Rectangle fixé à la caméra (scrollFactor 0), alpha contrôlé, blend ADD.
+  _screenFlash(colorInt, alpha, durationMs) {
+    const w = this.scale.width, h = this.scale.height;
+    const veil = this.add.rectangle(w / 2, h / 2, w, h, colorInt, alpha || 0.16)
+      .setScrollFactor(0).setDepth(200).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({
+      targets: veil, alpha: 0, duration: durationMs || 160,
+      ease: 'Quad.easeOut', onComplete: () => veil.destroy(),
+    });
+  }
+
+  // ── Kill streaks (juice) : kills rapprochés du joueur local ──
+  _registerKill() {
+    const now = Date.now();
+    if (!this._killStreak || now - this._killStreak.last > 3000) {
+      this._killStreak = { count: 0, last: now };
+    }
+    this._killStreak.count++;
+    this._killStreak.last = now;
+    const c = this._killStreak.count;
+    const LABELS = { 2: 'DOUBLE KILL', 3: 'TRIPLE KILL', 4: 'QUADRA KILL', 5: 'PENTA KILL' };
+    if (c >= 2) this._killStreakBanner(c >= 6 ? 'MASSACRE' : (LABELS[c] || 'PENTA KILL'), c);
+  }
+
+  _killStreakBanner(text, count) {
+    let el = document.getElementById('kill-streak');
+    if (!el) { el = document.createElement('div'); el.id = 'kill-streak'; document.body.appendChild(el); }
+    // Couleur qui monte en intensité avec le streak
+    const color = count >= 5 ? '#fb7185' : count >= 4 ? '#fcd34d' : count >= 3 ? '#a78bfa' : '#22d3ee';
+    el.textContent = `${text} ×${count}`;
+    el.style.color = color;
+    el.style.textShadow = `0 0 18px ${color}`;
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(() => el.classList.remove('show'), 1400);
+  }
+
   _flashHdv(playerId) {
     const sprites = this.hdvSprites[playerId];
     if (!sprites) return;
@@ -1411,6 +1571,25 @@ class MainScene extends Phaser.Scene {
   }
 
   // ── Kill feed ─────────────────────────────────────────────────────
+
+  // Toast HUD éphémère centré-bas (erreurs d'action : ressources, pop, verrou…).
+  // Déduplique les messages rapprochés pour éviter le spam au clic répété.
+  _hudToast(msg) {
+    let el = document.getElementById('hud-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'hud-toast';
+      document.body.appendChild(el);
+    }
+    if (el._lastMsg === msg && Date.now() - (el._lastAt || 0) < 700) return;
+    el._lastMsg = msg; el._lastAt = Date.now();
+    el.textContent = msg;
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(() => el.classList.remove('show'), 1600);
+  }
 
   _addKillFeedEntry(text, color) {
     const feed = document.getElementById('kill-feed');
