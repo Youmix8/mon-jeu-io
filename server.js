@@ -1606,9 +1606,11 @@ function resetMatch() {
 }
 
 // Ajoute un joueur humain à CETTE partie (ex-corps de io.on('connection')).
-// Lit encore handshake.auth (name/mapType/mapSize) — la sélection de room
-// arrivera en phase 2 (events lobby:*).
-function addPlayer(socket) {
+// `joinName` : pseudo transmis par le flux lobby (phase 2) ; à défaut, fallback
+// sur handshake.auth (anciens clients en cache).
+// Retourne { ok: true } ou { ok: false, reason: 'ended'|'full' } — c'est
+// l'appelant (couche lobby) qui décide quoi faire du refus (ack ou disconnect).
+function addPlayer(socket, joinName) {
   // Zombie recovery: ended state with no players left — auto-reset
   if (gameState.matchState === 'ended' && Object.keys(gameState.players).length === 0) {
     gameState.matchState     = 'waiting';
@@ -1626,20 +1628,18 @@ function addPlayer(socket) {
   }
 
   if (gameState.matchState === 'ended') {
-    socket.emit('matchEnded');
-    socket.disconnect(true);
-    return;
+    return { ok: false, reason: 'ended' };
   }
 
   const slot = getAvailableSlot();
   if (slot === -1) {
-    console.log('Server full — refusing connection', socket.id);
-    socket.emit('serverFull');
-    socket.disconnect(true);
-    return;
+    console.log(`Partie pleine — refus de ${socket.id.slice(0, 6)}`);
+    return { ok: false, reason: 'full' };
   }
 
-  const rawName    = (socket.handshake.auth && socket.handshake.auth.name) || '';
+  const rawName    = (joinName != null && joinName !== '')
+    ? String(joinName)
+    : ((socket.handshake.auth && socket.handshake.auth.name) || '');
   const playerName = rawName.trim().slice(0, 20) || `Joueur ${slot + 1}`;
 
   // Config map envoyée par le 1er joueur : appliquée si on est encore en waiting
@@ -2146,6 +2146,11 @@ function addPlayer(socket) {
   });
 
   socket.on('addBot', () => {
+    // Réservé à l'hôte de la room (anti-grief dans les parties publiques)
+    if (config.isHost && !config.isHost(socket.id)) {
+      socket.emit('spawnFailed', { reason: 'host_only' });
+      return;
+    }
     if (Object.keys(gameState.players).length >= MAX_PLAYERS) return;
     addBot();
     broadcastFilteredState();
@@ -2278,6 +2283,8 @@ function addPlayer(socket) {
 
     broadcastFilteredState();
   });
+
+  return { ok: true };
 }
 
 // Game loop — order: behavior → move → collisions → combat → gold → broadcast
@@ -3175,6 +3182,11 @@ function tick() {
 // ── Interface publique de la partie ──
 function humanCount()  { return Object.values(gameState.players).filter((p) => !p.isBot).length; }
 function playerCount() { return Object.keys(gameState.players).length; }
+function humans() {
+  return Object.values(gameState.players)
+    .filter((p) => !p.isBot)
+    .map((p) => ({ id: p.id, name: p.name, joinTime: p.joinTime }));
+}
 
 return {
   tick,
@@ -3182,20 +3194,201 @@ return {
   addBot,
   humanCount,
   playerCount,
+  humans,
   getMatchState: () => gameState.matchState,
 };
 } // ← fin de createGame()
 
 // ════════════════════════════════════════════════════════════════════════════
-// Room par défaut — phase 1 lobbys : une seule partie globale, comme avant.
-// La phase 2 remplacera ce bloc par un RoomManager (Map code → room) et le
-// scheduler itérera sur toutes les rooms avec un try/catch par partie.
+// RoomManager — phase 2 lobbys : plusieurs parties simultanées.
+// room = { code, visibility, hostId, hostName, mapSize, createdAt, game }.
+// Events lobby:* avec acks Socket.io (réponse directe, pas de course d'events).
 // ════════════════════════════════════════════════════════════════════════════
-const defaultRoom = createGame({ emitAll: (ev, data) => io.emit(ev, data) });
+const rooms = new Map();                 // code → room
+const MAX_ROOMS = 20;                    // cap mémoire (Render free 512 MB)
+const ROOM_TTL_MS = 3 * 60 * 60 * 1000;  // filet de sécurité : 3 h max par room
+// Alphabet sans caractères ambigus (0/O, 1/I/L)
+const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-io.on('connection', (socket) => defaultRoom.addPlayer(socket));
+function genRoomCode() {
+  for (;;) {
+    let code = '';
+    for (let i = 0; i < 5; i++) {
+      code += ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)];
+    }
+    if (!rooms.has(code)) return code;
+  }
+}
 
-setInterval(() => defaultRoom.tick(), TICK_MS);
+function createRoom({ visibility, mapSize, hostSocketId, hostName }) {
+  const code = genRoomCode();
+  const room = {
+    code, visibility, mapSize,
+    hostId: hostSocketId, hostName,
+    createdAt: Date.now(), tickErrors: 0,
+    game: null,
+  };
+  room.game = createGame({
+    mapSize,
+    emitAll: (ev, data) => io.to('room:' + code).emit(ev, data),
+    isHost: (sid) => sid === room.hostId,
+  });
+  rooms.set(code, room);
+  console.log(`[lobby] Room ${code} créée (${visibility}, ${mapSize}) par ${hostName} — ${rooms.size} room(s)`);
+  return room;
+}
+
+function destroyRoom(room, reason) {
+  if (!rooms.delete(room.code)) return;
+  // Préviens et éjecte les éventuels sockets restants (TTL, crash) — pour une
+  // room vide c'est un no-op.
+  io.to('room:' + room.code).emit('matchEnded');
+  io.in('room:' + room.code).disconnectSockets(true);
+  console.log(`[lobby] Room ${room.code} détruite (${reason}) — ${rooms.size} room(s)`);
+}
+
+// Fait entrer un socket dans une room : channel d'abord (pour recevoir les
+// emitAll dès l'init), puis addPlayer ; rollback du channel en cas de refus.
+function enterRoom(socket, room, name) {
+  socket.join('room:' + room.code);
+  const res = room.game.addPlayer(socket, name);
+  if (!res.ok) {
+    socket.leave('room:' + room.code);
+    return res;
+  }
+  socket.data.room = room;
+  return { ok: true };
+}
+
+// Compat anciens clients (page en cache) : pseudo dans le handshake → rejoint
+// une room publique en attente, sinon en crée une. Conserve l'ancien contrat
+// (emit matchEnded/serverFull + disconnect en cas de refus).
+function joinLegacy(socket, auth) {
+  let room = null;
+  for (const r of rooms.values()) {
+    if (r.visibility !== 'public') continue;
+    if (r.game.getMatchState() !== 'waiting') continue;
+    if (r.game.playerCount() >= MAX_PLAYERS) continue;
+    room = r;
+    break;
+  }
+  const name = String(auth.name || '').trim().slice(0, 20);
+  if (!room) {
+    if (rooms.size >= MAX_ROOMS) { socket.emit('serverFull'); socket.disconnect(true); return; }
+    room = createRoom({
+      visibility: 'public',
+      mapSize: (auth.mapSize && MAP_SIZES[auth.mapSize]) ? auth.mapSize : DEFAULT_MAP_SIZE,
+      hostSocketId: socket.id,
+      hostName: name || 'Joueur',
+    });
+  }
+  const res = enterRoom(socket, room, auth.name || '');
+  if (!res.ok) {
+    socket.emit(res.reason === 'ended' ? 'matchEnded' : 'serverFull');
+    socket.disconnect(true);
+  }
+}
+
+io.on('connection', (socket) => {
+  const auth = socket.handshake.auth || {};
+
+  // ── Lobby : créer une partie ──
+  socket.on('lobby:create', (data, ack) => {
+    if (typeof ack !== 'function') return;
+    if (socket.data.room) return ack({ error: 'already_in_room' });
+    if (rooms.size >= MAX_ROOMS) return ack({ error: 'server_full' });
+    const name = String((data && data.name) || '').trim().slice(0, 20);
+    const room = createRoom({
+      visibility: (data && data.visibility) === 'private' ? 'private' : 'public',
+      mapSize: (data && MAP_SIZES[data.mapSize]) ? data.mapSize : DEFAULT_MAP_SIZE,
+      hostSocketId: socket.id,
+      hostName: name || 'Joueur',
+    });
+    const res = enterRoom(socket, room, name);
+    if (!res.ok) { destroyRoom(room, 'création échouée'); return ack({ error: res.reason }); }
+    ack({ ok: true, code: room.code, isHost: true });
+  });
+
+  // ── Lobby : rejoindre par code (insensible à la casse) ──
+  socket.on('lobby:join', (data, ack) => {
+    if (typeof ack !== 'function') return;
+    if (socket.data.room) return ack({ error: 'already_in_room' });
+    const code = String((data && data.code) || '').trim().toUpperCase();
+    const room = rooms.get(code);
+    if (!room) return ack({ error: 'not_found' });
+    if (room.game.getMatchState() === 'ended') return ack({ error: 'ended' });
+    const name = String((data && data.name) || '').trim().slice(0, 20);
+    const res = enterRoom(socket, room, name);
+    if (!res.ok) return ack({ error: res.reason });
+    ack({ ok: true, code: room.code, isHost: socket.id === room.hostId });
+  });
+
+  // ── Lobby : liste des parties publiques joignables ──
+  socket.on('lobby:list', (_data, ack) => {
+    if (typeof ack !== 'function') return;
+    const list = [];
+    for (const r of rooms.values()) {
+      if (r.visibility !== 'public') continue;
+      const state = r.game.getMatchState();
+      if (state === 'ended') continue;
+      const count = r.game.playerCount();
+      if (count >= MAX_PLAYERS) continue;
+      list.push({ code: r.code, hostName: r.hostName, count, max: MAX_PLAYERS, mapSize: r.mapSize, state });
+    }
+    ack({ rooms: list });
+  });
+
+  // ── Sortie : destruction des rooms vides + réassignation d'hôte ──
+  // setImmediate : laisse d'abord le handler gameplay (dans addPlayer) retirer
+  // le joueur de gameState, puis on regarde ce qu'il reste.
+  socket.on('disconnect', () => {
+    const room = socket.data.room;
+    if (!room) return;
+    setImmediate(() => {
+      if (!rooms.has(room.code)) return;
+      if (room.game.humanCount() === 0) { destroyRoom(room, 'vide'); return; }
+      if (room.hostId === socket.id) {
+        const hs = room.game.humans();
+        if (hs.length > 0) {
+          hs.sort((a, b) => (a.joinTime || 0) - (b.joinTime || 0));
+          room.hostId = hs[0].id;
+          room.hostName = hs[0].name;
+          console.log(`[lobby] Room ${room.code} : nouvel hôte ${room.hostName}`);
+        }
+      }
+    });
+  });
+
+  // Ancien client (pseudo dans le handshake) → flux legacy direct
+  if (auth.name !== undefined) joinLegacy(socket, auth);
+});
+
+// Scheduler unique : tick toutes les rooms ; une room qui crash ne tue pas les
+// autres (avant la phase 1, une exception dans le tick tuait tout le process).
+setInterval(() => {
+  for (const room of rooms.values()) {
+    try {
+      room.game.tick();
+      room.tickErrors = 0;
+    } catch (e) {
+      room.tickErrors = (room.tickErrors || 0) + 1;
+      console.error(`[room ${room.code}] tick crash (${room.tickErrors})`, e);
+      if (room.tickErrors > 100) destroyRoom(room, 'crashs répétés');
+    }
+  }
+}, TICK_MS);
+
+// Sweep de sécurité (60 s) : rooms vides ratées + TTL + télémétrie mémoire.
+setInterval(() => {
+  const now = Date.now();
+  for (const room of [...rooms.values()]) {
+    if (room.game.humanCount() === 0) destroyRoom(room, 'vide (sweep)');
+    else if (now - room.createdAt > ROOM_TTL_MS) destroyRoom(room, 'TTL 3 h');
+  }
+  if (rooms.size > 0) {
+    console.log(`[lobby] ${rooms.size} room(s) actives — heap ${(process.memoryUsage().heapUsed / 1048576).toFixed(0)} MB`);
+  }
+}, 60000);
 
 const PORT = process.env.PORT || 3000;
 
