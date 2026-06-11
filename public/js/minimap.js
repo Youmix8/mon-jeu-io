@@ -1,6 +1,6 @@
 // Mini-carte : canvas 200×200 en bas à gauche.
 // Rendu : fog (exploré/visible), HDV, unités, villages, viewport caméra.
-// Clic = téléporte la caméra vers cette position.
+// Clic = téléporte la caméra ; maintien = drag continu (la caméra suit la souris).
 
 const Minimap = (() => {
   let canvas, ctx;
@@ -13,14 +13,29 @@ const Minimap = (() => {
     ctx    = canvas.getContext('2d');
     phaserCamera = camera;
 
-    canvas.addEventListener('click', (e) => {
+    // Conversion écran → monde (clampée à la map) + recentrage caméra
+    const centerFromEvent = (e) => {
       if (!phaserCamera) return;
       const info = Network.getMapInfo();
       const rect = canvas.getBoundingClientRect();
-      const wx = ((e.clientX - rect.left) / rect.width)  * info.mapWidth;
-      const wy = ((e.clientY - rect.top)  / rect.height) * info.mapHeight;
+      const wx = Math.max(0, Math.min(info.mapWidth,  ((e.clientX - rect.left) / rect.width)  * info.mapWidth));
+      const wy = Math.max(0, Math.min(info.mapHeight, ((e.clientY - rect.top)  / rect.height) * info.mapHeight));
       phaserCamera.centerOn(wx, wy);
+    };
+
+    // Drag continu : mousedown recentre immédiatement, puis la caméra suit la
+    // souris tant que le bouton est enfoncé — même si elle sort de la mini-carte
+    // (listeners move/up sur window, pas sur le canvas).
+    let dragging = false;
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      dragging = true;
+      centerFromEvent(e);
     });
+    window.addEventListener('mousemove', (e) => {
+      if (dragging) centerFromEvent(e);
+    });
+    window.addEventListener('mouseup', () => { dragging = false; });
   }
 
   function render() {

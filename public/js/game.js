@@ -36,8 +36,17 @@ document.querySelectorAll('.map-size-btn').forEach(btn => {
   });
 });
 
+// Pré-remplit le pseudo de la session précédente (try/catch : mode privé)
+try {
+  const savedName = localStorage.getItem('mji-name');
+  if (savedName) nameInput.value = savedName;
+} catch (_) { /* localStorage indisponible */ }
+
 function startGame() {
   const name = nameInput.value.trim().slice(0, 20);
+  try {
+    if (name) localStorage.setItem('mji-name', name);
+  } catch (_) { /* localStorage indisponible */ }
   lobbyOverlay.style.display = 'none';
   Network.init(name, { mapType: selectedMapType, mapSize: selectedMapSize });
   if (typeof DebugPanel !== 'undefined') DebugPanel.init();

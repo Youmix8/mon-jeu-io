@@ -18,6 +18,15 @@ class MainScene extends Phaser.Scene {
     this.dragRectGraphics = null;
     this.attackGraphics   = null;
     this.attackLines      = [];
+    // ── Caméra & main (confort de contrôle) ──
+    this._panVel       = { x: 0, y: 0 }; // vitesse du pan clavier (px monde/s)
+    this._mouseScreen  = null;           // dernière position souris écran (edge-scroll)
+    this._midPan       = null;           // drag-pan clic milieu en cours
+    this.edgeScrollEnabled = true;       // désactivable (futur menu options)
+    this._lastAlert    = null;           // dernière attaque subie { x, y, t }
+    this._lastUnitClick = null;          // double-clic même type { id, t }
+    this._lastSpaceTap = 0;              // double-tap Espace (recentrage alerte)
+    this._rightEmptyPressAt = 0;         // clic droit sans sélection (toast)
   }
 
   preload() {
@@ -66,8 +75,15 @@ class MainScene extends Phaser.Scene {
       if (!this.mapBuilt) return;
       const cam = this.cameras.main;
       if (e.ctrlKey) {
+        // Zoom centré curseur : le point monde sous la souris reste fixe.
+        // Listener attaché au canvas → offsetX/Y sont bien relatifs au canvas.
+        const before = cam.getWorldPoint(e.offsetX, e.offsetY);
         const zoomFactor = e.deltaY > 0 ? 0.96 : 1.04;
         cam.zoom = Phaser.Math.Clamp(cam.zoom * zoomFactor, this.minZoom, 1.6);
+        cam.preRender(); // recalcule la matrice caméra (sinon getWorldPoint est faux)
+        const after = cam.getWorldPoint(e.offsetX, e.offsetY);
+        cam.scrollX += before.x - after.x;
+        cam.scrollY += before.y - after.y;
       } else {
         cam.scrollX += e.deltaX / cam.zoom;
         cam.scrollY += e.deltaY / cam.zoom;
@@ -82,6 +98,40 @@ class MainScene extends Phaser.Scene {
       this._recomputeMinZoom();
       cam.zoom = this.minZoom;
       cam.centerOn(this.MAP_W / 2, this.MAP_H / 2);
+    });
+
+    // ── Espace — recentrage caméra ────────────────────────────────
+    // Tap simple : pan vers mon HDV. Double-tap (<350 ms) : pan vers la
+    // dernière alerte (attaque subie / raid barbare) si elle a moins de 30 s.
+    // Listener DOM (et non Phaser) pour pouvoir garder la garde INPUT/TEXTAREA
+    // et bloquer le scroll page via preventDefault.
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'Space' || e.repeat) return;
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      e.preventDefault();
+      if (!this.mapBuilt) return;
+      const cam = this.cameras.main;
+      const now = Date.now();
+      const isDoubleTap = now - this._lastSpaceTap < 350;
+      this._lastSpaceTap = now;
+      if (isDoubleTap && this._lastAlert && now - this._lastAlert.t < 30000) {
+        cam.pan(this._lastAlert.x, this._lastAlert.y, 250, 'Quad.easeOut');
+        return;
+      }
+      const me = Network.getState().players[Network.getMyId()];
+      if (me) cam.pan(me.x, me.y, 250, 'Quad.easeOut');
+    });
+
+    // ── Edge-scrolling : suivi de la souris écran (consommé dans update()) ──
+    window.addEventListener('mousemove', (e) => {
+      this._mouseScreen = { x: e.clientX, y: e.clientY, overCanvas: e.target === this.game.canvas };
+    });
+    document.addEventListener('mouseleave', () => { this._mouseScreen = null; });
+    window.addEventListener('blur', () => { this._mouseScreen = null; });
+
+    // ── Clic milieu : bloque l'autoscroll navigateur sur le canvas ──
+    this.input.manager.canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault();
     });
 
     // ── Ctrl+A — select all own units ────────────────────────────
@@ -179,6 +229,11 @@ class MainScene extends Phaser.Scene {
     // PvE : raids barbares et camps nettoyés dans le kill feed
     Network.setOnBarbarianRaid((data) => {
       this._addKillFeedEntry(`⌖ Raid barbare → ${data.targetName}`, Theme.factionColorStr(data.targetPlayerId));
+      // Raid qui ME vise : devient la dernière alerte (double-tap Espace)
+      if (data.targetPlayerId === Network.getMyId()
+          && Number.isFinite(data.villageX) && Number.isFinite(data.villageY)) {
+        this._lastAlert = { x: data.villageX, y: data.villageY, t: Date.now() };
+      }
     });
     Network.setOnCampCleared((data) => {
       this._addKillFeedEntry(`✦ ${data.byName} nettoie un camp (+${data.rewardGold} ◈)`, Theme.factionColorStr(data.byPlayerId));
@@ -247,6 +302,8 @@ class MainScene extends Phaser.Scene {
         if (!t) return;
         tx = t.x; ty = t.y;
         targetMine = (t.ownerId === myId);
+        // Mémorise la dernière attaque subie (double-tap Espace = recentrage dessus)
+        if (targetMine) this._lastAlert = { x: tx, y: ty, t: Date.now() };
         this._flashUnit(data.targetId);
         this._impactPunch(data.targetId);
         if (data.killed) {
@@ -274,6 +331,7 @@ class MainScene extends Phaser.Scene {
         // HDV touché : shake léger uniquement si c'est MON HDV
         if (data.targetId === Network.getMyId()) {
           this.cameras.main.shake(120, 0.0025);
+          this._lastAlert = { x: tx, y: ty, t: Date.now() };
         }
         this._flashHdv(data.targetId);
       }
@@ -339,6 +397,12 @@ class MainScene extends Phaser.Scene {
     // ── Input ─────────────────────────────────────────────────────
 
     this.input.on('pointerdown', (pointer, currentlyOver) => {
+      // ── Clic milieu : drag-pan caméra (prioritaire sur tous les modes) ──
+      if (pointer.button === 1) {
+        const cam = this.cameras.main;
+        this._midPan = { sx: cam.scrollX, sy: cam.scrollY, px: pointer.x, py: pointer.y };
+        return; // ne déclenche ni sélection ni roue
+      }
       // Mode build prioritaire sur tous les autres clics
       if (typeof BuildMode !== 'undefined' && BuildMode.isActive()) {
         if (pointer.button === 0) {
@@ -361,12 +425,30 @@ class MainScene extends Phaser.Scene {
         const myId   = Network.getMyId();
         const hitUnit = currentlyOver.find(go => go._unitOwnerId === myId);
         if (hitUnit) {
+          const now = Date.now();
           if (pointer.event.shiftKey) {
             if (this.selectedUnitIds.has(hitUnit._unitId)) this.selectedUnitIds.delete(hitUnit._unitId);
             else this.selectedUnitIds.add(hitUnit._unitId);
+            this._lastUnitClick = null;
+          } else if (this._lastUnitClick && this._lastUnitClick.id === hitUnit._unitId
+                     && now - this._lastUnitClick.t < 300) {
+            // Double-clic sur la même unité : étend la sélection à toutes mes
+            // unités du même type visibles à l'écran (worldView). Le 1er clic
+            // a déjà fait la sélection simple → aucun délai introduit.
+            const units = Network.getState().units || {};
+            const clicked = units[hitUnit._unitId];
+            const type = clicked ? clicked.type : hitUnit._unitType;
+            const view = this.cameras.main.worldView;
+            this.selectedUnitIds.clear();
+            for (const [uid, u] of Object.entries(units)) {
+              if (u.ownerId !== myId || u.type !== type) continue;
+              if (view.contains(u.x, u.y)) this.selectedUnitIds.add(uid);
+            }
+            this._lastUnitClick = null;
           } else {
             this.selectedUnitIds.clear();
             this.selectedUnitIds.add(hitUnit._unitId);
+            this._lastUnitClick = { id: hitUnit._unitId, t: now };
           }
           this._updateSelectionRings();
           return;
@@ -377,7 +459,12 @@ class MainScene extends Phaser.Scene {
         this.dragStartY = pointer.worldY;
         this.dragRectGraphics = this.add.graphics();
       } else if (pointer.button === 2) {
-        if (this.selectedUnitIds.size === 0) return;
+        if (this.selectedUnitIds.size === 0) {
+          // Clic droit sans sélection : toast au relâchement s'il est court
+          // (la roue radiale ne s'ouvre jamais sans sélection → pas de conflit).
+          this._rightEmptyPressAt = Date.now();
+          return;
+        }
         const myId  = Network.getMyId();
         const state = Network.getState();
         const myPlayer = state.players[myId];
@@ -397,6 +484,12 @@ class MainScene extends Phaser.Scene {
 
     // Suivi du mouvement pendant l'appui droit pour mettre à jour la sélection radiale
     this.input.on('pointermove', (pointer) => {
+      // Drag-pan clic milieu : la caméra suit la souris (1:1 en coordonnées monde)
+      if (this._midPan && pointer.middleButtonDown()) {
+        const cam = this.cameras.main;
+        cam.scrollX = this._midPan.sx - (pointer.x - this._midPan.px) / cam.zoom;
+        cam.scrollY = this._midPan.sy - (pointer.y - this._midPan.py) / cam.zoom;
+      }
       if (this._rightPressDown && typeof RadialMenu !== 'undefined' && RadialMenu.isActive()) {
         RadialMenu.updateMove(pointer.x, pointer.y);
       }
@@ -410,8 +503,22 @@ class MainScene extends Phaser.Scene {
     });
 
     this.input.on('pointerup', (pointer) => {
+      // ── Clic milieu relâché : fin du drag-pan ──
+      if (pointer.button === 1) {
+        this._midPan = null;
+        return;
+      }
       // ── Clic droit relâché : roue d'action OU action par défaut (selon durée) ──
       if (pointer.button === 2) {
+        // Clic droit court sans sélection → feedback (aucune roue n'était ouverte)
+        if (this._rightEmptyPressAt) {
+          const wasShort = Date.now() - this._rightEmptyPressAt < 300;
+          this._rightEmptyPressAt = 0;
+          if (wasShort && this.selectedUnitIds.size === 0) {
+            this._hudToast('⊘ Aucune unité sélectionnée');
+          }
+          return;
+        }
         if (!this._rightPressDown) return;
         this._rightPressDown = false;
         const pressed = this._rightPressWorld;
@@ -453,11 +560,44 @@ class MainScene extends Phaser.Scene {
   update() {
     if (!this.mapBuilt) return; // pas avant que l'event 'init' n'arrive
     const cam = this.cameras.main;
-    const SPEED = 12 / cam.zoom;
-    if (this.cursors.left.isDown  || this.wasd.left.isDown)  cam.scrollX -= SPEED;
-    if (this.cursors.right.isDown || this.wasd.right.isDown) cam.scrollX += SPEED;
-    if (this.cursors.up.isDown    || this.wasd.up.isDown)    cam.scrollY -= SPEED;
-    if (this.cursors.down.isDown  || this.wasd.down.isDown)  cam.scrollY += SPEED;
+    // Delta-time en secondes, clampé contre les gros trous (retour d'onglet)
+    const dt = Math.min(0.1, this.game.loop.delta / 1000);
+
+    // ── Pan clavier lissé : modèle vitesse/accélération (indép. du framerate) ──
+    // Vitesse cible = VMAX sur les axes pressés, 0 sinon ; on lerpe la vitesse
+    // réelle vers la cible en ~150 ms → démarrage et arrêt doux.
+    const VMAX = 900 / cam.zoom; // px monde/s
+    let vTargetX = 0, vTargetY = 0;
+    if (this.cursors.left.isDown  || this.wasd.left.isDown)  vTargetX -= VMAX;
+    if (this.cursors.right.isDown || this.wasd.right.isDown) vTargetX += VMAX;
+    if (this.cursors.up.isDown    || this.wasd.up.isDown)    vTargetY -= VMAX;
+    if (this.cursors.down.isDown  || this.wasd.down.isDown)  vTargetY += VMAX;
+    const accel = Math.min(1, dt / 0.15);
+    this._panVel.x += (vTargetX - this._panVel.x) * accel;
+    this._panVel.y += (vTargetY - this._panVel.y) * accel;
+    cam.scrollX += this._panVel.x * dt;
+    cam.scrollY += this._panVel.y * dt;
+
+    // Sécurité : relâchement du clic milieu raté (hors fenêtre) → fin du drag-pan
+    if (this._midPan && !this.input.activePointer.middleButtonDown()) this._midPan = null;
+
+    // ── Edge-scrolling : souris contre un bord de fenêtre → la caméra défile ──
+    // Inactif si : option désactivée, souris hors canvas (HUD/panneaux), roue
+    // radiale ouverte, ou drag-pan clic milieu en cours.
+    if (this.edgeScrollEnabled && this._mouseScreen && this._mouseScreen.overCanvas
+        && !this._midPan
+        && !(typeof RadialMenu !== 'undefined' && RadialMenu.isActive())) {
+      const EDGE = 24, ESPEED = 1100 / cam.zoom; // px monde/s à fond
+      const mx = this._mouseScreen.x, my = this._mouseScreen.y;
+      const w = window.innerWidth, h = window.innerHeight;
+      let fx = 0, fy = 0; // facteur -1..1 selon la profondeur dans la marge
+      if (mx < EDGE)          fx = -(EDGE - mx) / EDGE;
+      else if (mx > w - EDGE) fx =  (mx - (w - EDGE)) / EDGE;
+      if (my < EDGE)          fy = -(EDGE - my) / EDGE;
+      else if (my > h - EDGE) fy =  (my - (h - EDGE)) / EDGE;
+      cam.scrollX += Phaser.Math.Clamp(fx, -1, 1) * ESPEED * dt;
+      cam.scrollY += Phaser.Math.Clamp(fy, -1, 1) * ESPEED * dt;
+    }
 
     this._updateRingPositions();
     this._updateUnitBarPositions();
