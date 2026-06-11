@@ -545,7 +545,7 @@ function rewardCampClear(camp, player) {
     lastAttackTime: 0, mode: 'defend', defendX: player.x, defendY: player.y, defendRadius: 320,
   };
   player.unitsCreated++;
-  io.emit('campCleared', { campId: camp.id, x: camp.x, y: camp.y,
+  emitAll('campCleared', { campId: camp.id, x: camp.x, y: camp.y,
     byPlayerId: player.id, byName: player.name, byColor: player.color,
     rewardGold: CAMP_REWARD_GOLD, freeUnit: freeType });
   console.log(`[PvE] Camp ${camp.id} nettoyé par ${player.name} (+${CAMP_REWARD_GOLD} gold, +1 ${freeType})`);
@@ -1523,7 +1523,7 @@ function buildGameOverPayload(winnerId, reason) {
 function emitGameOver(winnerId, reason) {
   gameState.matchState = 'ended';
   gameState.winnerId = winnerId;
-  io.emit('gameOver', buildGameOverPayload(winnerId, reason));
+  emitAll('gameOver', buildGameOverPayload(winnerId, reason));
 }
 
 function checkMatchState() {
@@ -1561,7 +1561,7 @@ function eliminatePlayer(player, toDelete) {
   for (const uid of Object.keys(gameState.units)) {
     if (gameState.units[uid].ownerId === player.id) toDelete.add(uid);
   }
-  io.emit('playerEliminated', { playerId: player.id, name: player.name, color: player.color });
+  emitAll('playerEliminated', { playerId: player.id, name: player.name, color: player.color });
   const aliveCount = Object.values(gameState.players).filter(p => !p.eliminated).length;
   console.log(`Player ${player.id} eliminated. ${aliveCount} players left`);
   checkMatchState();
@@ -1843,7 +1843,7 @@ function addPlayer(socket) {
       t.allies.push(p.id);
       p.proposalsOut = p.proposalsOut.filter(x => x !== t.id);
       t.proposalsOut = t.proposalsOut.filter(x => x !== p.id);
-      io.emit('treatySigned', { a: p.id, b: t.id, aName: p.name, bName: t.name });
+      emitAll('treatySigned', { a: p.id, b: t.id, aName: p.name, bName: t.name });
       console.log(`Pacte de non-agression : ${p.name} ↔ ${t.name}`);
     }
   });
@@ -1853,7 +1853,7 @@ function addPlayer(socket) {
     if (!p || !t) return;
     p.allies = (p.allies || []).filter(x => x !== t.id);
     t.allies = (t.allies || []).filter(x => x !== p.id);
-    io.emit('treatyBroken', { a: p.id, b: t.id });
+    emitAll('treatyBroken', { a: p.id, b: t.id });
   });
 
   socket.on('unlockTech', ({ techId } = {}) => {
@@ -1881,7 +1881,7 @@ function addPlayer(socket) {
       p.hp = p.maxHp; // heal full au moment de l'upgrade
     }
     console.log(`[${p.name}] tech débloquée : ${techId} (${node.cost} PR)`);
-    io.emit('techUnlocked', { playerId: p.id, techId, name: node.name, icon: node.icon, axis: node.axis });
+    emitAll('techUnlocked', { playerId: p.id, techId, name: node.name, icon: node.icon, axis: node.axis });
     // Broadcast immédiat pour que le client voie le nouvel état sans attendre le tick
     broadcastFilteredState();
   });
@@ -1939,7 +1939,7 @@ function addPlayer(socket) {
     const refund = Math.floor((def.cost || 0) * 0.5);
     p.gold += refund;
     gameState.buildings.splice(idx, 1);
-    io.emit('buildingSold', { buildingId, refund, ownerId: p.id });
+    emitAll('buildingSold', { buildingId, refund, ownerId: p.id });
     console.log(`${p.name} vend ${b.type} (+${refund} gold remboursés)`);
   });
 
@@ -2142,7 +2142,7 @@ function addPlayer(socket) {
       u.targetX = null; u.targetY = null;
       u.attackTargetId = null; u.attackTargetType = null;
     }
-    io.emit('spellCast', { spellId: 'portal', x: tx, y: ty, casterId: p.id, color: p.color, radius: 80 });
+    emitAll('spellCast', { spellId: 'portal', x: tx, y: ty, casterId: p.id, color: p.color, radius: 80 });
   });
 
   socket.on('addBot', () => {
@@ -2222,14 +2222,14 @@ function addPlayer(socket) {
       }
     }
     // Broadcast pour l'animation client (couleur Theme côté client via casterId)
-    io.emit('spellCast', { spellId, x, y, casterId: p.id, radius: spell.radius });
+    emitAll('spellCast', { spellId, x, y, casterId: p.id, radius: spell.radius });
   });
 
   socket.on('requestRestart', () => {
     if (gameState.matchState !== 'ended') return;
     resetMatch();
     console.log(`Match restarted by ${socket.id.slice(0,6)}`);
-    io.emit('matchRestarted');
+    emitAll('matchRestarted');
     broadcastFilteredState();
   });
 
@@ -2459,7 +2459,7 @@ function tick() {
           captureProgress: 0, capturingPlayerId: null,
           level: 1, lastAttackTime: 0,
         });
-        io.emit('villageCaptured', { villageId: 'colon', ownerId: u.ownerId,
+        emitAll('villageCaptured', { villageId: 'colon', ownerId: u.ownerId,
           ownerName: (gameState.players[u.ownerId] || {}).name || 'Colon',
           ownerColor: (gameState.players[u.ownerId] || {}).color || '#fff' });
         console.log(`Village fondé par Colon (${u.ownerId})`);
@@ -2729,7 +2729,7 @@ function tick() {
         target.capturingPlayerId = null;
         target.hp = 0;
         attackEntry.killed = true;
-        io.emit('villageDestroyed', { villageId: target.id, byPlayerId: unit.ownerId, prevOwnerId: prevOwner });
+        emitAll('villageDestroyed', { villageId: target.id, byPlayerId: unit.ownerId, prevOwnerId: prevOwner });
         unit.attackTargetId = null; unit.attackTargetType = null;
       } else if (unit.attackTargetType === 'building' && target.hp <= 0) {
         // Bâtiment détruit : supprimé du state
@@ -2925,7 +2925,7 @@ function tick() {
             ally.hp = Math.min(ally.maxHp || ally.hp, ally.hp + 200);
           }
         }
-        io.emit('pilgrimExplosion', { x: dead.x, y: dead.y, ownerId: dead.ownerId });
+        emitAll('pilgrimExplosion', { x: dead.x, y: dead.y, ownerId: dead.ownerId });
       }
     }
     // d) Résurrection par Nécromancien (refonte v3)
@@ -3005,7 +3005,7 @@ function tick() {
       _summonSource: s.source,
       _summonLifetime: s.override && s.override.lifetime,
     };
-    io.emit('unitSummoned', {
+    emitAll('unitSummoned', {
       unitId, type: s.type, x: s.x, y: s.y, ownerId: s.ownerId,
       source: s.source,
     });
@@ -3022,7 +3022,7 @@ function tick() {
     if (nowMs - u.spawnTime >= lifetime) toDelete.add(uid);
   }
 
-  if (attacks.length > 0) io.emit('attacks', attacks);
+  if (attacks.length > 0) emitAll('attacks', attacks);
 
   for (const id of toDelete) {
     delete gameState.units[id];
@@ -3065,7 +3065,7 @@ function tick() {
           v.capturingPlayerId = null;
           v.hp = VILLAGE_MAX_HP; // restauré à pleine HP à la capture
           v.level = 1;            // toujours Lv1 au moment de la prise
-          io.emit('villageCaptured', { villageId: v.id, ownerId: claimer, ownerName: player.name, ownerColor: player.color });
+          emitAll('villageCaptured', { villageId: v.id, ownerId: claimer, ownerName: player.name, ownerColor: player.color });
           console.log(`Village ${v.id} capturé par ${player.name}`);
         }
       }
@@ -3158,7 +3158,7 @@ function tick() {
           if (spawned > 0) {
             v.raidLastSpawn = nowR;
             activeRaids += spawned;
-            io.emit('barbarianRaid', { villageId: v.id, villageX: v.x, villageY: v.y,
+            emitAll('barbarianRaid', { villageId: v.id, villageX: v.x, villageY: v.y,
               targetPlayerId: best.id, targetName: best.name, targetColor: best.color, count: spawned });
             console.log(`[PvE] Raid barbare : ${v.id} → ${best.name} (${spawned})`);
             if (activeRaids >= RAID_MAX_ACTIVE) break;
