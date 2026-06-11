@@ -9,6 +9,8 @@ const io = new Server(server);
 
 validateTechTree();
 
+app.use(express.static('public'));
+
 // Tailles de map disponibles (configurable depuis le lobby)
 const MAP_SIZES = {
   small:  { width: 3000, height: 3000, villageMin: 6,  villageMax: 10 },
@@ -18,11 +20,8 @@ const MAP_SIZES = {
 const DEFAULT_MAP_TYPE = 'no_water'; // l'eau a été retirée du jeu — seul type valide
 const DEFAULT_MAP_SIZE = 'medium';
 
-// Variables courantes (initialisées dans regenerateMap, peuvent changer entre parties)
-let MAP_WIDTH  = MAP_SIZES[DEFAULT_MAP_SIZE].width;
-let MAP_HEIGHT = MAP_SIZES[DEFAULT_MAP_SIZE].height;
-let currentMapType = DEFAULT_MAP_TYPE;
-let currentMapSize = DEFAULT_MAP_SIZE;
+// NB : MAP_WIDTH/MAP_HEIGHT/currentMapType/currentMapSize/GRID_W/GRID_H sont
+// déclarés DANS createGame() : ce sont des variables PAR PARTIE (closure).
 
 const MAX_PLAYERS = 4;
 const GOLD_PER_SECOND = 1;
@@ -49,8 +48,6 @@ function snapToGrid(x, y) {
     y: Math.floor(y / BUILD_GRID) * BUILD_GRID + BUILD_GRID / 2,
   };
 }
-let   GRID_W      = MAP_WIDTH  / TILE_SIZE;   // recalculé dans applyMapConfig()
-let   GRID_H      = MAP_HEIGHT / TILE_SIZE;
 const VISION_UNIT = 240;
 
 // ────────── Tech tree, types d'unités, niveaux HDV ──────────
@@ -293,6 +290,30 @@ const NEUTRAL_OWNER_BARBARIAN = 'neutral_barbarian';
 const NEUTRAL_OWNER_FAUNA     = 'neutral_fauna';
 const NEUTRAL_OWNER_BOSS      = 'neutral_boss';
 const NEUTRAL_OWNERS = new Set([NEUTRAL_OWNER_BARBARIAN, NEUTRAL_OWNER_FAUNA, NEUTRAL_OWNER_BOSS]);
+
+// ════════════════════════════════════════════════════════════════════════════
+// createGame(config) — fabrique UNE partie isolée.
+// Tout l'état mutable d'une partie (map, gameState, fog, compteurs d'ids…) vit
+// dans la closure de cette fonction ; les tables const ci-dessus restent
+// partagées. Les fonctions internes gardent leurs noms et leur code d'origine :
+// elles résolvent simplement leurs références vers les variables de LA partie.
+//   config.emitAll(event, data) : broadcast aux joueurs de cette partie
+//                                 (défaut : io.emit global — room unique).
+//   config.mapType / config.mapSize : config map appliquée à la création.
+// NB : le corps conserve l'indentation module d'origine (refactor mécanique,
+// diff minimal — relire avec `git diff -w`).
+// ════════════════════════════════════════════════════════════════════════════
+function createGame(config = {}) {
+const emitAll = config.emitAll || ((ev, data) => io.emit(ev, data));
+
+// Dimensions de map de LA partie (recalculées dans applyMapConfig)
+let MAP_WIDTH  = MAP_SIZES[DEFAULT_MAP_SIZE].width;
+let MAP_HEIGHT = MAP_SIZES[DEFAULT_MAP_SIZE].height;
+let currentMapType = DEFAULT_MAP_TYPE;
+let currentMapSize = DEFAULT_MAP_SIZE;
+let GRID_W = MAP_WIDTH  / TILE_SIZE;   // recalculé dans applyMapConfig()
+let GRID_H = MAP_HEIGHT / TILE_SIZE;
+
 function isNeutralOwner(ownerId) { return NEUTRAL_OWNERS.has(ownerId); }
 // Même camp (ne s'attaquent pas) : identiques OU tous deux neutres (factions neutres alliées).
 function sameSide(a, b) {
@@ -1213,8 +1234,8 @@ function generateSpawns() {
   return spawns;
 }
 
-// Initialisation map (dimensions, grid)
-applyMapConfig(DEFAULT_MAP_TYPE, DEFAULT_MAP_SIZE);
+// Initialisation map (dimensions, grid) — config de la room si fournie
+applyMapConfig(config.mapType || DEFAULT_MAP_TYPE, config.mapSize || DEFAULT_MAP_SIZE);
 let currentSpawns = generateSpawns();
 let initialVillages = generateVillages(currentSpawns);
 let initialCamps    = generateCamps(currentSpawns, initialVillages);
@@ -1401,8 +1422,6 @@ let peakPlayerCount = 0;
 spawnAllCampMobs();
 spawnAllFauna(currentSpawns);
 
-app.use(express.static('public'));
-
 function getAvailableSlot() {
   for (let i = 0; i < MAX_PLAYERS; i++) {
     const taken = Object.values(gameState.players).some(p => p.slot === i);
@@ -1586,7 +1605,10 @@ function resetMatch() {
   console.log(`Match reset. State: ${gameState.matchState}, Players: ${playerCount}`);
 }
 
-io.on('connection', (socket) => {
+// Ajoute un joueur humain à CETTE partie (ex-corps de io.on('connection')).
+// Lit encore handshake.auth (name/mapType/mapSize) — la sélection de room
+// arrivera en phase 2 (events lobby:*).
+function addPlayer(socket) {
   // Zombie recovery: ended state with no players left — auto-reset
   if (gameState.matchState === 'ended' && Object.keys(gameState.players).length === 0) {
     gameState.matchState     = 'waiting';
@@ -2256,10 +2278,11 @@ io.on('connection', (socket) => {
 
     broadcastFilteredState();
   });
-});
+}
 
 // Game loop — order: behavior → move → collisions → combat → gold → broadcast
-setInterval(() => {
+// (ex-corps du setInterval 20 Hz ; appelé par le scheduler module-level)
+function tick() {
   tickCount++;
   const nowMs = Date.now();
 
@@ -3147,7 +3170,32 @@ setInterval(() => {
 
   // 5. Broadcast — filtré par joueur (fog of war)
   broadcastFilteredState();
-}, TICK_MS);
+}
+
+// ── Interface publique de la partie ──
+function humanCount()  { return Object.values(gameState.players).filter((p) => !p.isBot).length; }
+function playerCount() { return Object.keys(gameState.players).length; }
+
+return {
+  tick,
+  addPlayer,
+  addBot,
+  humanCount,
+  playerCount,
+  getMatchState: () => gameState.matchState,
+};
+} // ← fin de createGame()
+
+// ════════════════════════════════════════════════════════════════════════════
+// Room par défaut — phase 1 lobbys : une seule partie globale, comme avant.
+// La phase 2 remplacera ce bloc par un RoomManager (Map code → room) et le
+// scheduler itérera sur toutes les rooms avec un try/catch par partie.
+// ════════════════════════════════════════════════════════════════════════════
+const defaultRoom = createGame({ emitAll: (ev, data) => io.emit(ev, data) });
+
+io.on('connection', (socket) => defaultRoom.addPlayer(socket));
+
+setInterval(() => defaultRoom.tick(), TICK_MS);
 
 const PORT = process.env.PORT || 3000;
 
