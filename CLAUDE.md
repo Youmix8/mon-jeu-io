@@ -13,8 +13,11 @@ direction artistique **« obsidienne néon »** depuis la refonte visuelle de
 mai 2026. Phaser 3 (CDN) côté client, Node + Express + Socket.io côté
 serveur, déployé sur Render.
 
-- **URL prod** : https://mon-jeu-io-17dn.onrender.com
-- **Repo** : `Youmix8/mon-jeu-io` — auto-deploy depuis `main` via
+- **URL prod** : https://mon-jeu-io-qzw8.onrender.com (service Render créé par
+  Robin sur SON compte, branché sur la branche **`developpement`**).
+  ⚠️ L'ancienne URL `mon-jeu-io-17dn` appartient à un service orphelin d'un
+  compte Render introuvable — ne plus l'utiliser.
+- **Repo** : `Youmix8/mon-jeu-io` — auto-deploy depuis **`developpement`** via
   `render.yaml` (~3 min).
 - **Dernier commit (session "session-1-camera-lobbys")** : voir ligne « Dernière
   mise à jour » en bas de ce fichier.
@@ -69,11 +72,15 @@ lignes ~306 → « fin de createGame() »). Les tables `const` (UNIT_TYPES, SPEL
 restent au niveau module. Le corps de la factory garde l'indentation module
 d'origine (refactor mécanique — relire les diffs avec `git diff -w`).
 Interface : `{ tick, addPlayer, addBot, humanCount, playerCount, getMatchState }`.
-En bas du fichier : `defaultRoom = createGame({ emitAll })` + `io.on('connection')`
-+ `setInterval` → une seule room pour l'instant. **Phase 2 prévue** : RoomManager
-(Map code→room), events `lobby:*` avec acks, `emitAll` → `io.to('room:'+code)`.
-Les broadcasts internes passent par **`emitAll(event, data)`** (PAS `io.emit` —
-sinon fuite inter-rooms en phase 2). `io.to(pid).emit('gameState')` reste direct.
+En bas du fichier : le **RoomManager** (phases 2+3 faites en session-2) —
+`rooms` Map (code 5 chars sans 0/O/1/I/L), `MAX_ROOMS=20`, TTL 3 h, events
+`lobby:create/join/list` en acks Socket.io, `emitAll` → `io.to('room:'+code)`,
+destruction des rooms vides (setImmediate + sweep 60 s), réassignation d'hôte,
+scheduler unique try/catch par room, compat anciens clients (handshake
+auth.name → room publique auto). `addPlayer(socket, name)` retourne
+`{ok, reason}` ; `addBot` réservé à l'hôte via `config.isHost`.
+Les broadcasts internes passent par **`emitAll(event, data)`** (JAMAIS
+`io.emit` — fuite inter-rooms). `io.to(pid).emit('gameState')` reste direct.
 
 Sections principales (dans la factory) :
 1. Constantes module (`MAP_SIZES`, `UNIT_TYPES`, `BUILDING_TYPES`, `SPELLS`,
@@ -94,7 +101,8 @@ Sections principales (dans la factory) :
 | Fichier | Rôle |
 |---|---|
 | `scenes/MainScene.js` | Scène Phaser : rendu unités/bâtiments/HDV/villages **en formes géométriques néon**, fog, inputs, beams projectiles, particules ADD |
-| `network.js` | Wrapper Socket.io client + callbacks events serveur |
+| `network.js` | Wrapper Socket.io client + callbacks events serveur. `connect()` (sans auth) + `createRoom/joinRoom/listRooms` (acks lobby) |
+| `lobby.js` | Écran lobby à étapes (créer/rejoindre par code/liste publique), overlay d'attente de room (code + copier lien + joueurs + bot hôte), deep link `?room=CODE`, bouton plein écran ⛶ |
 | `config/theme.js` | **Source unique** de palette néon (FCOL équipes, AXC axes, UNIT_SHAPES, GLOW params, BEAM colors, slot mapping joueur) |
 | `config/neonGlyphs.js` | Mapping centralisé emoji médiéval → glyphe néon Unicode (49 techs + ressources + unités + bâtiments) |
 | `config/entitiesConfig.js` | `ENTITIES_CONFIG` — métadonnées historiques des entités, encore utilisé par debug-panel |
@@ -382,7 +390,14 @@ ou l'esthétique.
 - **`utils/animations.js` et `config/entitiesConfig.js` ne sont PAS chargés
   dans index.html** : tout code client `typeof Animations !== 'undefined'` ou
   `typeof ENTITIES_CONFIG !== 'undefined'` est silencieusement mort (volet B :
-  charger ou purger).
+  charger ou purger). Conséquence active : **`DebugPanel.init()` throw
+  toujours** (« cats.spells is not iterable ») — contourné en try/catch dans
+  lobby.js, le panneau debug (touche `) est donc CASSÉ tant que ce n'est pas
+  réparé.
+- **Tests en preview MCP** : le RAF de l'onglet en arrière-plan est en pause
+  (tweens/update() figés, canvas noir sur les captures) et `preview_click`
+  peut provoquer un faux reload de page — tester les flux UI avec des clics
+  JS purs via preview_eval (`document.getElementById(...).click()`).
 
 ---
 
@@ -473,6 +488,18 @@ lobbys = code 5 chars + liste publique ; Google OAuth reporté ; desktop-only.
   phase 3 UI client (créer/rejoindre/liste + écran d'attente + `?room=`),
   phase 4 polish. Puis P1 : formations, shift-queue, groupes de contrôle.
 
+### ✅ Session-2-rooms (11 juin 2026) — lobbys phases 2+3 + plein écran
+Demandes Robin : plein écran (fix edge-scroll haut en fenêtré), système de
+rooms complet, propositions d'améliorations interface.
+- **Serveur** : RoomManager complet (cf. section Backend). 21/21 tests
+  d'intégration + 19/19 tests gameplay.
+- **Client** : lobby à étapes (Créer/Rejoindre par code/Parties publiques),
+  overlay d'attente (code, copier le lien, joueurs, bot hôte), ligne « Salon »
+  HUD, deep link `?room=CODE`, bouton plein écran ⛶ (bas-droite), Retour au
+  lobby au game over, restyle néon du lobby (map-size-btn sombres).
+- **Découverte** : DebugPanel.init() throw depuis toujours (ENTITIES_CONFIG
+  absent) → contourné, vraie réparation au backlog.
+
 ### 🔜 Reste (backlog volet B/C non demandé cette session)
 - Tutoriel intégré, audio (SFX/ambiance), contrôles tactiles mobile.
 - `utils/animations.js` + `config/entitiesConfig.js` toujours non chargés
@@ -485,15 +512,15 @@ lobbys = code 5 chars + liste publique ; Google OAuth reporté ; desktop-only.
 
 ---
 
-**Dernière mise à jour** : session "session-1-camera-lobbys" (11 juin 2026),
-commits `cdec9f6` + `01295b1` (refactor createGame/emitAll) + `9862ab0`
-(lot caméra/UX) — P0 de la roadmap « confort de jeu » appliqué : caméra
-moderne (zoom curseur, edge-scroll, drag-pan, Espace), QoL sélection, et
-phase 1 du chantier lobbys (état serveur encapsulé dans createGame, prêt
-pour le RoomManager multi-rooms). Prochaine session : phases 2+3 lobbys
-(events lobby:* + UI créer/rejoindre/liste) puis P1 contrôles RTS
-(formations, shift-queue, groupes). Roadmap complète :
-`~/.claude/plans/le-jeu-qui-est-sparkling-valley.md`.
+**Dernière mise à jour** : session "session-2-rooms" (11 juin 2026), commits
+`83cb234` (RoomManager serveur) + `1c41ee2` (UI rooms + plein écran) sur la
+branche **`developpement`** (= branche de déploiement Render, nouvelle URL
+prod `mon-jeu-io-qzw8`). Le jeu a maintenant : caméra moderne (session-1),
+vrai système de lobbys (créer/rejoindre par code/liste publique, parties
+simultanées isolées), plein écran. Prochaine session (au choix de Robin) :
+lot « interface » P2 (menu options, mode daltonien, tooltips, purge emojis,
+file de production) et/ou P1 contrôles RTS (formations, shift-queue, groupes
+de contrôle). Roadmap : `~/.claude/plans/le-jeu-qui-est-sparkling-valley.md`.
 
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier
 commit de ta session.
