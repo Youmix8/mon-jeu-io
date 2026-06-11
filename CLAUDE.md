@@ -16,7 +16,7 @@ serveur, déployé sur Render.
 - **URL prod** : https://mon-jeu-io-17dn.onrender.com
 - **Repo** : `Youmix8/mon-jeu-io` — auto-deploy depuis `main` via
   `render.yaml` (~3 min).
-- **Dernier commit (session "audit-volet-A")** : `7d73cda`.
+- **Dernier commit (session "volet-BC")** : `aef9d94`.
 
 ---
 
@@ -436,12 +436,14 @@ L'audit complet en 3 volets a été réalisé. **Volet A (bugs) appliqué**, pui
 
 ---
 
-**Dernière mise à jour** : commit `7d73cda` (session "audit-volet-A",
-10 juin 2026) — audit complet réalisé puis Volet A (21 bugs) corrigé en
-intégralité et validé par 2 parties simulées avec bots. Prochain chantier :
-**Volet B** (sorts actifs, diplomatie UI, TechIndicators, omniscience
-minimap, roads — voir section "État de l'audit" ci-dessus ; demander à
-Robin ses priorités avant de coder).
+**Dernière mise à jour** : commit `aef9d94` (session "volet-BC", 11 juin 2026)
+— Volets B + C appliqués sur direction de Robin : sorts actifs réactivés,
+roads en passif vitesse, UI diplomatie (touche P), game feel (damage numbers,
+impact punch, kill streaks, screen flash), + correctifs de câblage
+(TechIndicators, omniscience minimap, feedback spawnFailed, glyphes panneaux,
+martyrs). Reste backlog : tutoriel, audio, tactile, perf, découpe server.js,
+équilibrage (voir section "État de l'audit"). Demander à Robin avant le prochain
+gros chantier.
 
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier
 commit de ta session.
