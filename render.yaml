@@ -19,9 +19,10 @@ services:
     runtime: node
     plan: free                   # Change en "starter" si tu veux pas de cold start
     region: frankfurt            # Plus proche de la France ; alternatives : oregon / singapore
+    branch: developpement        # Branche de déploiement (l'ancien service sur main est orphelin — autre compte Render)
     buildCommand: npm install
     startCommand: npm start
-    autoDeploy: true             # Re-deploy automatique à chaque push sur main
+    autoDeploy: true             # Re-deploy automatique à chaque push sur developpement
     healthCheckPath: /           # Render ping cette URL pour vérifier que le serveur vit
     envVars:
       - key: NODE_VERSION

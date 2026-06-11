@@ -45,7 +45,13 @@ npm install          # premier setup
 npm start            # lance le serveur sur :3000 (ou $PORT)
 ```
 
-**Déploiement** : `git push origin HEAD:main` → Render redéploie en ~3 min.
+**Déploiement** : `git push origin HEAD:developpement` → Render redéploie en
+~3 min. ⚠️ Depuis la session-1 : la **branche de déploiement est
+`developpement`** (cf. `branch:` dans render.yaml). L'ancien service Render
+branché sur `main` (URL `mon-jeu-io-17dn`) appartient à un compte Render
+introuvable — il a été remplacé par un nouveau service Blueprint créé par
+Robin sur son compte, branché sur `developpement`. Continuer à merger/pousser
+`main` pour l'historique, mais c'est `developpement` qui part en prod.
 
 **Tester localement** : `http://localhost:3000` (plusieurs onglets = plusieurs
 joueurs). Le lobby permet de choisir uniquement la TAILLE de carte (l'eau a
