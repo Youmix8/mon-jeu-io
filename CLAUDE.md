@@ -16,7 +16,10 @@ serveur, déployé sur Render.
 - **URL prod** : https://mon-jeu-io-17dn.onrender.com
 - **Repo** : `Youmix8/mon-jeu-io` — auto-deploy depuis `main` via
   `render.yaml` (~3 min).
-- **Dernier commit (session "volet-BC")** : `aef9d94`.
+- **Dernier commit (session "session-1-camera-lobbys")** : voir ligne « Dernière
+  mise à jour » en bas de ce fichier.
+- **Roadmap priorisée** (lobbys, contrôles RTS, options/accessibilité) :
+  `/Users/madeinai/.claude/plans/le-jeu-qui-est-sparkling-valley.md`.
 
 ---
 
@@ -54,8 +57,20 @@ joueurs). Le lobby permet de choisir uniquement la TAILLE de carte (l'eau a
 
 ### Backend (`server.js`, monolithique)
 
-Sections principales :
-1. Constantes (`MAP_SIZES`, `UNIT_TYPES`, `BUILDING_TYPES`, `SPELLS`,
+⚠️ **Depuis la session-1-camera-lobbys (phase 1 lobbys)** : tout l'état mutable
+d'une partie est encapsulé dans **`createGame(config)`** (factory closure,
+lignes ~306 → « fin de createGame() »). Les tables `const` (UNIT_TYPES, SPELLS…)
+restent au niveau module. Le corps de la factory garde l'indentation module
+d'origine (refactor mécanique — relire les diffs avec `git diff -w`).
+Interface : `{ tick, addPlayer, addBot, humanCount, playerCount, getMatchState }`.
+En bas du fichier : `defaultRoom = createGame({ emitAll })` + `io.on('connection')`
++ `setInterval` → une seule room pour l'instant. **Phase 2 prévue** : RoomManager
+(Map code→room), events `lobby:*` avec acks, `emitAll` → `io.to('room:'+code)`.
+Les broadcasts internes passent par **`emitAll(event, data)`** (PAS `io.emit` —
+sinon fuite inter-rooms en phase 2). `io.to(pid).emit('gameState')` reste direct.
+
+Sections principales (dans la factory) :
+1. Constantes module (`MAP_SIZES`, `UNIT_TYPES`, `BUILDING_TYPES`, `SPELLS`,
    `HDV_LEVELS`, `VILLAGE_LEVELS`, `SUMMONED_ONLY_TYPES`, `SPLASH_AOE_UNITS`)
 2. Helpers neutres PvE (`isNeutralOwner`, `sameSide`, `areAllied`, `friendly`)
 3. Helpers combat (`effectiveRange`, `effectiveCooldown`,
@@ -63,9 +78,10 @@ Sections principales :
 4. Génération spawns + villages (le code eau a été **entièrement purgé**
    en session volet-A — plus aucun stub `isWaterAt`/`waterTiles`)
 5. Bot IA (`botTick`) — spécialité (science/magic/religion) + `BOT_BUILD_PLANS`
-6. Handlers Socket.io
-7. Game loop (20 Hz) : behavior IA → mouvement → combat → behaviors spéciaux
-   → résurrection (necro/lich) → ressources passives → broadcast filtré fog
+6. Handlers Socket.io (dans `addPlayer(socket)`, ex-corps de io.on('connection'))
+7. Game loop 20 Hz (`tick()`, ex-corps du setInterval) : behavior IA → mouvement
+   → combat → behaviors spéciaux → résurrection (necro/lich) → ressources
+   passives → broadcast filtré fog
 
 ### Frontend (`public/js/`)
 
@@ -240,7 +256,14 @@ le camp (l'ancienne signature lime des squelettes créait une confusion avec
 la couleur d'équipe du slot 3).
 
 **Raccourcis** : T arbre tech · **V vue d'ensemble** (était F → conflit avec
-le hotkey Fireball) · ` debug · Ctrl+A tout sélectionner.
+le hotkey Fireball) · ` debug · Ctrl+A tout sélectionner · **Espace** recentrer
+sur HDV (double-tap <350 ms : dernière alerte, expire 30 s) · **clic milieu**
+drag-pan caméra · **double-clic** sélectionne le type à l'écran.
+
+**Caméra (session-1)** : zoom Ctrl+molette **centré curseur** (`getWorldPoint`
+avant/après + `cam.preRender()`), pan clavier **lissé** (vitesse/accel delta-time,
+`_panVel`), **edge-scroll** 24 px (`edgeScrollEnabled`, à exposer dans le futur
+menu options), minimap **drag continu**, pseudo en `localStorage('mji-name')`.
 
 **Pop / squash / shake / pulse glow** :
 - Pop apparition unité : scale 0→1 en 180 ms `Back.easeOut`
@@ -320,10 +343,13 @@ ou l'esthétique.
 
 ## ⚠️ Pièges techniques connus
 
-- `MAP_WIDTH/HEIGHT/GRID_W/GRID_H` sont `let`, recalculés dans `applyMapConfig()`.
-  Attention si capturés dans une closure.
-- `nowMs` est déclaré au TOUT DÉBUT du `setInterval` du game loop. Si tu ajoutes
-  du code AVANT et utilises `nowMs`, TDZ → crash.
+- `MAP_WIDTH/HEIGHT/GRID_W/GRID_H` sont des `let` **de la closure createGame()**
+  (per-partie), recalculés dans `applyMapConfig()`. Toute fonction qui les lit
+  DOIT être déclarée dans la factory — jamais au niveau module.
+- Ne JAMAIS réintroduire un `io.emit(` dans la factory : utiliser `emitAll(`
+  (en phase 2 multi-rooms, `io.emit` fuiterait vers toutes les parties).
+- `nowMs` est déclaré au TOUT DÉBUT de `tick()` (ex-setInterval du game loop).
+  Si tu ajoutes du code AVANT et utilises `nowMs`, TDZ → crash.
 - Le serveur émet `attacks` event **non filtré** par fog. Le client gère le cas
   où attaquant ou cible n'est pas dans `state.units` (fallback sur
   `attackerX/Y` / `targetX/Y` inclus dans le payload).
@@ -424,6 +450,23 @@ L'audit complet en 3 volets a été réalisé. **Volet A (bugs) appliqué**, pui
   QUADRA/PENTA KILL / MASSACRE, couleur montant avec le palier.
 - **Screen flash** : `_screenFlash` (voile ADD plein écran fixé caméra) sur kill de boss.
 
+### ✅ Session-1-camera-lobbys (11 juin 2026) — P0 de la roadmap « confort »
+Roadmap complète priorisée (issue de l'audit caméra/UI/serveur) dans
+`~/.claude/plans/le-jeu-qui-est-sparkling-valley.md`. Décisions Robin :
+lobbys = code 5 chars + liste publique ; Google OAuth reporté ; desktop-only.
+- **Lot caméra/UX client** : zoom centré curseur, pan clavier lissé delta-time,
+  Espace recentrage / ×2 dernière alerte, edge-scroll 24 px, drag-pan clic
+  milieu, minimap drag continu, double-clic même type, toast « aucune unité
+  sélectionnée », pseudo localStorage, hints à jour.
+- **Lobbys phase 1 (serveur)** : extraction `createGame(config)` (factory
+  closure, diff minimal 63+/15−), `addPlayer`/`tick`, `emitAll` injecté
+  (17 sites), `defaultRoom` unique — comportement validé par smoke test
+  socket.io 19/19 (init, config map, fog par joueur, spawn/move, bots,
+  machine d'état, reset no-humans).
+- **Reste du chantier lobbys** : phase 2 RoomManager + events `lobby:*`,
+  phase 3 UI client (créer/rejoindre/liste + écran d'attente + `?room=`),
+  phase 4 polish. Puis P1 : formations, shift-queue, groupes de contrôle.
+
 ### 🔜 Reste (backlog volet B/C non demandé cette session)
 - Tutoriel intégré, audio (SFX/ambiance), contrôles tactiles mobile.
 - `utils/animations.js` + `config/entitiesConfig.js` toujours non chargés
@@ -436,14 +479,15 @@ L'audit complet en 3 volets a été réalisé. **Volet A (bugs) appliqué**, pui
 
 ---
 
-**Dernière mise à jour** : commit `aef9d94` (session "volet-BC", 11 juin 2026)
-— Volets B + C appliqués sur direction de Robin : sorts actifs réactivés,
-roads en passif vitesse, UI diplomatie (touche P), game feel (damage numbers,
-impact punch, kill streaks, screen flash), + correctifs de câblage
-(TechIndicators, omniscience minimap, feedback spawnFailed, glyphes panneaux,
-martyrs). Reste backlog : tutoriel, audio, tactile, perf, découpe server.js,
-équilibrage (voir section "État de l'audit"). Demander à Robin avant le prochain
-gros chantier.
+**Dernière mise à jour** : session "session-1-camera-lobbys" (11 juin 2026),
+commits `cdec9f6` + `01295b1` (refactor createGame/emitAll) + `9862ab0`
+(lot caméra/UX) — P0 de la roadmap « confort de jeu » appliqué : caméra
+moderne (zoom curseur, edge-scroll, drag-pan, Espace), QoL sélection, et
+phase 1 du chantier lobbys (état serveur encapsulé dans createGame, prêt
+pour le RoomManager multi-rooms). Prochaine session : phases 2+3 lobbys
+(events lobby:* + UI créer/rejoindre/liste) puis P1 contrôles RTS
+(formations, shift-queue, groupes). Roadmap complète :
+`~/.claude/plans/le-jeu-qui-est-sparkling-valley.md`.
 
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier
 commit de ta session.
