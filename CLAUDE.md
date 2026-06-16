@@ -512,15 +512,44 @@ rooms complet, propositions d'améliorations interface.
 
 ---
 
-**Dernière mise à jour** : session "session-2-rooms" (11 juin 2026), commits
-`83cb234` (RoomManager serveur) + `1c41ee2` (UI rooms + plein écran) sur la
-branche **`developpement`** (= branche de déploiement Render, nouvelle URL
-prod `mon-jeu-io-qzw8`). Le jeu a maintenant : caméra moderne (session-1),
-vrai système de lobbys (créer/rejoindre par code/liste publique, parties
-simultanées isolées), plein écran. Prochaine session (au choix de Robin) :
-lot « interface » P2 (menu options, mode daltonien, tooltips, purge emojis,
-file de production) et/ou P1 contrôles RTS (formations, shift-queue, groupes
-de contrôle). Roadmap : `~/.claude/plans/le-jeu-qui-est-sparkling-valley.md`.
+### ✅ Session-3 (16 juin 2026) — lancement manuel, feel/fond diep.io, arbre tech v3
+Demandes Robin : (1) lancement par l'hôte (plus d'auto-start), (2) refonte
+arbre tech (sens + équilibrage), (3) contrôles/déplacement/plein écran plus
+intuitifs, (4) fond façon diep.io (« pas que du noir » + fog conservé).
+- **Lancement manuel** : `createGame(config.manualStart)` + flag `launched`,
+  event `lobby:start` (host_only, ≥2 participants → `need_players`), `launch()`
+  idempotent. Bouton « ⚔ Lancer la partie » dans l'overlay d'attente (hôte,
+  désactivé <2). Rooms legacy = auto-start conservé. **NE PAS** réintroduire
+  d'auto-start à 2 pour les rooms du lobby.
+- **Feel caméra** (MainScene) : zoom lissé (`_targetZoom`, lerp demi-vie 85 ms,
+  recentrage curseur), molette seule = zoom, edge-scroll recalculé sur
+  `getBoundingClientRect()` du canvas (le bord HAUT marche en fenêtré),
+  drag-pan clic DROIT si aucune sélection (sinon = ordre/roue) + clic milieu,
+  momentum doux. Plein écran : `fullscreenchange` → `_onResize` (resize Phaser
+  + minZoom/bounds).
+- **Fond diep.io** (`_buildMap`) : fond bleu-nuit `#0a1622` + vignette, grille
+  2 niveaux (mineure 75 px `0x2e5563` α.22 / majeure 300 px `0x4a86a0` α.42) en
+  Graphics statiques coords monde (dessinée 1×, coût nul/frame), mur du monde
+  néon. Fog INCHANGÉ par-dessus (depth 100). Constantes de feel ajustables en
+  tête de MainScene (`ZOOM_TAU`, `PAN_KEY_SPEED`, `EDGE_*`…).
+- **Arbre tech v3** (`server/techTree.js` + effets server.js) : restructuration
+  « chaque nœud a un effet ». 14 nouveaux passifs (construction +25 % PV bât.,
+  Logistique +0,5 gold/village, elements_study/animism +0,3 mana/foi de base,
+  steel_forge/sacred_order +10 % PV, etc.), 8 nerfs/buffs (renaissance =
+  **radar par impulsion** 3 s/30 s via `tickCount % 600 < 60` dans
+  buildFilteredState, citadel ×1,8, printing ×1,5, god_avatar 900/45/pop18,
+  général 160/16, time_mastery −12 %, necro 20 mana, crossbows −10 %). Ids
+  inchangés. Helpers ajoutés : `buildingHp`, `effectiveBuildingRange`,
+  set `MELEE_UNIT_TYPES`. Équilibrage à observer en partie réelle.
+
+**Dernière mise à jour** : session "session-3" (16 juin 2026), commits
+`4cc5ada` (lancement manuel) + `1a0eeb2` (feel caméra + fond diep.io) +
+arbre tech v3, sur **`developpement`** (URL prod `mon-jeu-io-qzw8`). Backlog
+au choix de Robin : lot « interface » P2 (menu options, mode daltonien,
+tooltips, purge emojis, file de production), P1 contrôles RTS (formations,
+shift-queue, groupes), réparation debug panel (ENTITIES_CONFIG), observation
+de l'équilibrage de l'arbre v3. Roadmap :
+`~/.claude/plans/le-jeu-qui-est-sparkling-valley.md`.
 
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier
 commit de ta session.
