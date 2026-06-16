@@ -372,6 +372,8 @@ const Network = (() => {
     if (socket) socket.emit('breakTreaty', { targetId });
   }
   function addBot()         { if (socket) socket.emit('addBot'); }
+  // L'hôte lance la partie (rooms à démarrage manuel) → ack { ok } ou { error }
+  function startMatch(cb)   { if (socket) socket.emit('lobby:start', {}, (ack) => { if (cb) cb(ack); }); }
   function upgradeVillage(villageId)  { if (socket) socket.emit('upgradeVillage', { villageId }); }
   function villageSpawnUnit(villageId, unitType) { if (socket) socket.emit('villageSpawnUnit', { villageId, unitType }); }
   function buildBuilding(type, x, y, baseType, baseId) {
@@ -411,7 +413,7 @@ const Network = (() => {
   return {
     connect, createRoom, joinRoom, listRooms,
     getState, getMyId, getMapInfo, getConfig,
-    spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot,
+    spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot, startMatch,
     upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty, breakTreaty,
     debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,

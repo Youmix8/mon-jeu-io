@@ -207,22 +207,32 @@ const Lobby = (() => {
   function _bindWaitOverlay() {
     $('copy-link-btn').addEventListener('click', () => _copyInviteLink($('copy-link-btn')));
     $('room-view-map-btn').addEventListener('click', () => {
-      $('room-wait-overlay').style.display = 'none'; // on peut déjà jouer en waiting
+      $('room-wait-overlay').style.display = 'none'; // on peut déjà regarder la carte en attente
     });
     $('room-add-bot-btn').addEventListener('click', () => Network.addBot());
     $('room-code-line').addEventListener('click', () => _copyInviteLink($('room-code-copy-hint')));
+    // L'hôte lance la partie (pas d'auto-start)
+    $('room-start-btn').addEventListener('click', () => {
+      _setStartError('');
+      Network.startMatch((ack) => {
+        if (ack && ack.error === 'need_players') _setStartError('Il faut au moins 2 participants (ajoute un bot ou attends un joueur)');
+        else if (ack && ack.error) _setStartError('Lancement impossible');
+      });
+    });
   }
 
   function _showWaitOverlay() {
     $('room-code-display').textContent = roomCode;
     $('room-add-bot-btn').style.display = isHost ? 'inline-block' : 'none';
+    $('room-start-btn').style.display   = isHost ? 'inline-block' : 'none';
     $('room-wait-overlay').style.display = 'flex';
     _renderWaitPlayers();
+    _refreshWaitControls();
     _startWaitPoll();
   }
 
   // Poll simple et robuste (500 ms) : tant que le match est en attente, on
-  // rafraîchit la liste des joueurs ; dès qu'il démarre, on masque tout.
+  // rafraîchit la liste des joueurs ; dès que l'hôte lance, on masque tout.
   function _startWaitPoll() {
     if (waitTimer) clearInterval(waitTimer);
     waitTimer = setInterval(() => {
@@ -233,8 +243,36 @@ const Lobby = (() => {
         waitTimer = null;
         return;
       }
-      if ($('room-wait-overlay').style.display !== 'none') _renderWaitPlayers();
+      if ($('room-wait-overlay').style.display !== 'none') {
+        _renderWaitPlayers();
+        _refreshWaitControls();
+      }
     }, 500);
+  }
+
+  // Active/désactive le bouton « Lancer » (hôte, ≥2 participants) et adapte le
+  // texte d'attente selon qu'on est hôte ou non.
+  function _refreshWaitControls() {
+    const count = (Network.getState().playerSummary || []).length;
+    const hint = $('room-wait-hint');
+    if (isHost) {
+      const btn = $('room-start-btn');
+      const ready = count >= 2;
+      btn.disabled = !ready;
+      btn.style.opacity = ready ? '1' : '0.5';
+      btn.style.cursor = ready ? 'pointer' : 'not-allowed';
+      if (hint) hint.textContent = ready
+        ? 'Prêt — lance la partie quand tu veux'
+        : 'Ajoute un bot ou invite un joueur (2 minimum)';
+    } else if (hint) {
+      hint.textContent = 'En attente que l\'hôte lance la partie…';
+    }
+  }
+
+  function _setStartError(msg) {
+    const hint = $('room-wait-hint');
+    if (hint && msg) { hint.textContent = msg; hint.style.color = '#fb7185'; }
+    else if (hint) { hint.style.color = ''; }
   }
 
   function _renderWaitPlayers() {

@@ -306,6 +306,12 @@ const NEUTRAL_OWNERS = new Set([NEUTRAL_OWNER_BARBARIAN, NEUTRAL_OWNER_FAUNA, NE
 function createGame(config = {}) {
 const emitAll = config.emitAll || ((ev, data) => io.emit(ev, data));
 
+// Démarrage manuel : si true (rooms du lobby), la partie ne passe en 'playing'
+// QUE lorsque l'hôte appelle launch() — pas d'auto-start à 2 joueurs.
+// (false pour les rooms legacy/anciens clients → auto-start comme avant.)
+const manualStart = !!config.manualStart;
+let launched = false;
+
 // Dimensions de map de LA partie (recalculées dans applyMapConfig)
 let MAP_WIDTH  = MAP_SIZES[DEFAULT_MAP_SIZE].width;
 let MAP_HEIGHT = MAP_SIZES[DEFAULT_MAP_SIZE].height;
@@ -1538,6 +1544,13 @@ function checkMatchState() {
     return;
   }
 
+  // Rooms à démarrage manuel : on reste en attente tant que l'hôte n'a pas lancé.
+  if (manualStart && !launched) {
+    gameState.matchState = 'waiting';
+    gameState.matchStartTime = null;
+    return;
+  }
+
   if (alive.length >= 2) {
     if (gameState.matchState !== 'playing') {
       gameState.matchState = 'playing';
@@ -1600,9 +1613,22 @@ function resetMatch() {
   const playerCount        = Object.keys(gameState.players).length;
   peakPlayerCount          = playerCount;
   gameState.winnerId       = null;
-  gameState.matchStartTime = playerCount >= 2 ? Date.now() : null;
-  gameState.matchState     = playerCount >= 2 ? 'playing' : 'waiting';
+  // Room à démarrage manuel : on retombe en attente, l'hôte doit relancer.
+  if (manualStart) launched = false;
+  const autoStart          = playerCount >= 2 && !(manualStart && !launched);
+  gameState.matchStartTime = autoStart ? Date.now() : null;
+  gameState.matchState     = autoStart ? 'playing' : 'waiting';
   console.log(`Match reset. State: ${gameState.matchState}, Players: ${playerCount}`);
+}
+
+// Lancement manuel par l'hôte (event lobby:start). Exige au moins 2 participants
+// (humains + bots). Idempotent. Retourne { ok } ou { ok:false, reason }.
+function launch() {
+  if (launched) return { ok: true };
+  if (Object.keys(gameState.players).length < 2) return { ok: false, reason: 'need_players' };
+  launched = true;
+  checkMatchState();
+  return { ok: true };
 }
 
 // Ajoute un joueur humain à CETTE partie (ex-corps de io.on('connection')).
@@ -3192,10 +3218,13 @@ return {
   tick,
   addPlayer,
   addBot,
+  launch,
   humanCount,
   playerCount,
   humans,
   getMatchState: () => gameState.matchState,
+  isManualStart: () => manualStart,
+  isLaunched: () => launched,
 };
 } // ← fin de createGame()
 
@@ -3220,7 +3249,7 @@ function genRoomCode() {
   }
 }
 
-function createRoom({ visibility, mapSize, hostSocketId, hostName }) {
+function createRoom({ visibility, mapSize, hostSocketId, hostName, manualStart = true }) {
   const code = genRoomCode();
   const room = {
     code, visibility, mapSize,
@@ -3230,6 +3259,7 @@ function createRoom({ visibility, mapSize, hostSocketId, hostName }) {
   };
   room.game = createGame({
     mapSize,
+    manualStart,
     emitAll: (ev, data) => io.to('room:' + code).emit(ev, data),
     isHost: (sid) => sid === room.hostId,
   });
@@ -3280,6 +3310,7 @@ function joinLegacy(socket, auth) {
       mapSize: (auth.mapSize && MAP_SIZES[auth.mapSize]) ? auth.mapSize : DEFAULT_MAP_SIZE,
       hostSocketId: socket.id,
       hostName: name || 'Joueur',
+      manualStart: false, // anciens clients : pas d'UI de lancement → auto-start
     });
   }
   const res = enterRoom(socket, room, auth.name || '');
@@ -3321,6 +3352,17 @@ io.on('connection', (socket) => {
     const res = enterRoom(socket, room, name);
     if (!res.ok) return ack({ error: res.reason });
     ack({ ok: true, code: room.code, isHost: socket.id === room.hostId });
+  });
+
+  // ── Lobby : l'hôte lance la partie (pas d'auto-start) ──
+  socket.on('lobby:start', (_data, ack) => {
+    const room = socket.data.room;
+    if (!room) { if (typeof ack === 'function') ack({ error: 'not_in_room' }); return; }
+    if (socket.id !== room.hostId) { if (typeof ack === 'function') ack({ error: 'host_only' }); return; }
+    const res = room.game.launch();
+    if (!res.ok) { if (typeof ack === 'function') ack({ error: res.reason }); return; }
+    console.log(`[lobby] Room ${room.code} lancée par l'hôte ${room.hostName}`);
+    if (typeof ack === 'function') ack({ ok: true });
   });
 
   // ── Lobby : liste des parties publiques joignables ──
