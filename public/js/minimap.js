@@ -48,8 +48,9 @@ const Minimap = (() => {
     const W = info.mapWidth, H = info.mapHeight;
     const sx = SIZE / W, sy = SIZE / H;
 
-    // Background — obsidienne (#06101a)
-    ctx.fillStyle = '#06101a';
+    // Background — bleu-nuit profond (cohérent avec le nouveau fond du jeu,
+    // un cran plus bleu que l'ancien #06101a quasi-noir).
+    ctx.fillStyle = '#0a1622';
     ctx.fillRect(0, 0, SIZE, SIZE);
 
     // Fog : exploré = alpha 0.55, jamais vu = alpha 0.96, visible = transparent.
@@ -72,6 +73,14 @@ const Minimap = (() => {
       if (typeof Theme === 'undefined') return '#94a3b8';
       return pid ? Theme.factionColorStr(pid, type) : Theme.NEUTRAL_STR;
     };
+
+    // Mur du monde : fin liseré cyan au bord (rappel du « mur » diep.io en jeu).
+    // Le liseré doré d'omniscience (plus bas) le remplace quand actif.
+    if (!state.omniscient) {
+      ctx.strokeStyle = 'rgba(34,211,238,0.30)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0.5, 0.5, SIZE - 1, SIZE - 1);
+    }
 
     // Passif Renaissance (minimap_omniscience) : le serveur envoie `omniscient`
     // = positions BRUTES de TOUT (hors fog). On l'utilise comme source quand il

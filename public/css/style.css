@@ -44,7 +44,11 @@
 body {
   width: 100vw; height: 100vh;
   overflow: hidden;
-  background: var(--bg-deep);
+  /* Fond bleu-nuit avec vignette inversée douce (cohérent avec le nouveau fond
+     canvas #0a1622). Visible derrière le canvas Phaser pendant les bascules
+     plein écran / letterboxing — évite tout flash de noir pur. */
+  background:
+    radial-gradient(ellipse at 50% 42%, #0d1c2b 0%, #0a1622 55%, #060d15 100%);
   font-family: 'Inter', system-ui, sans-serif;
   color: var(--text);
 }
@@ -53,6 +57,9 @@ body {
   position: absolute; top: 0; left: 0;
   width: 100%; height: 100%;
 }
+/* Le canvas Phaser remplit son parent ; pas de fond CSS dessus (Phaser gère
+   sa propre couleur de fond), mais on garantit qu'il ne déborde pas. */
+#game canvas { display: block; }
 
 /* ─── HUD top-left ───────────────────────────────────────────── */
 #ui {

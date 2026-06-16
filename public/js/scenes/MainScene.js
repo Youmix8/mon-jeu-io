@@ -21,12 +21,26 @@ class MainScene extends Phaser.Scene {
     // ── Caméra & main (confort de contrôle) ──
     this._panVel       = { x: 0, y: 0 }; // vitesse du pan clavier (px monde/s)
     this._mouseScreen  = null;           // dernière position souris écran (edge-scroll)
-    this._midPan       = null;           // drag-pan clic milieu en cours
+    this._midPan       = null;           // drag-pan clic milieu OU clic droit en cours
     this.edgeScrollEnabled = true;       // désactivable (futur menu options)
     this._lastAlert    = null;           // dernière attaque subie { x, y, t }
     this._lastUnitClick = null;          // double-clic même type { id, t }
     this._lastSpaceTap = 0;              // double-tap Espace (recentrage alerte)
     this._rightEmptyPressAt = 0;         // clic droit sans sélection (toast)
+    // ── Zoom lissé (interpolation vers une cible, style RTS « velouté ») ──
+    this._targetZoom   = null;           // zoom visé ; cam.zoom y est lerpé dans update()
+    this._zoomAnchor   = null;           // { sx, sy } position écran sous laquelle garder le point monde fixe
+    // ── Momentum (inertie) du drag-pan : la caméra glisse brièvement au relâcher ──
+    this._panMomentum  = { x: 0, y: 0 }; // px monde/s, amorti dans update()
+    this._dragLast     = null;           // dernière position monde lue pendant un drag (calcul vitesse)
+
+    // ── Constantes de FEEL caméra (à ajuster librement) ──
+    this.MAX_ZOOM          = 1.6;   // zoom maxi (était 1.6 en dur dans le wheel)
+    this.ZOOM_TAU          = 0.085; // demi-vie du lissage de zoom (s) — ↓ = plus vif, ↑ = plus mou
+    this.PAN_KEY_SPEED     = 900;   // vitesse pan clavier (px monde/s à zoom 1)
+    this.PAN_MOMENTUM_TAU  = 0.22;  // amortissement du momentum drag (s) — ↓ = s'arrête vite
+    this.EDGE_MARGIN       = 24;    // épaisseur de la bande d'edge-scroll (px écran)
+    this.EDGE_SPEED        = 1100;  // vitesse edge-scroll (px monde/s à zoom 1)
   }
 
   preload() {
@@ -59,35 +73,33 @@ class MainScene extends Phaser.Scene {
     pg.generateTexture('particle', 3, 3);
     pg.destroy();
 
-    // Recalcule la borne de zoom min si on redimensionne la fenêtre
-    this.scale.on('resize', () => {
-      if (!this.mapBuilt) return;
-      this._recomputeMinZoom();
-      const cam = this.cameras.main;
-      if (cam.zoom < this.minZoom) cam.zoom = this.minZoom;
-    });
+    // Recalcule la borne de zoom min + les bornes caméra après tout resize
+    // (fenêtre OU entrée/sortie plein écran — game.js déclenche scale.resize
+    // dans les deux cas). On clampe le zoom courant ET la cible de zoom lissé.
+    this.scale.on('resize', () => this._onResize());
 
     // Build map dès que le serveur a envoyé init (ou immédiatement si déjà reçu)
     Network.setOnInitReceived(() => this._buildMap());
 
+    // ── Molette = ZOOM lissé (Ctrl+molette OU molette seule) ──────────────
+    // Un RTS zoome à la molette ; l'ancien pan-molette était déroutant → retiré.
+    // On ne modifie PAS cam.zoom directement : on déplace une CIBLE (_targetZoom)
+    // et update() lerpe le zoom réel vers elle (zoom « velouté », sans paliers
+    // secs). Le point monde sous le curseur reste fixe pendant TOUTE l'interpo
+    // grâce à _zoomAnchor (réappliqué chaque frame dans update()).
     this.input.manager.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       if (!this.mapBuilt) return;
-      const cam = this.cameras.main;
-      if (e.ctrlKey) {
-        // Zoom centré curseur : le point monde sous la souris reste fixe.
-        // Listener attaché au canvas → offsetX/Y sont bien relatifs au canvas.
-        const before = cam.getWorldPoint(e.offsetX, e.offsetY);
-        const zoomFactor = e.deltaY > 0 ? 0.96 : 1.04;
-        cam.zoom = Phaser.Math.Clamp(cam.zoom * zoomFactor, this.minZoom, 1.6);
-        cam.preRender(); // recalcule la matrice caméra (sinon getWorldPoint est faux)
-        const after = cam.getWorldPoint(e.offsetX, e.offsetY);
-        cam.scrollX += before.x - after.x;
-        cam.scrollY += before.y - after.y;
-      } else {
-        cam.scrollX += e.deltaX / cam.zoom;
-        cam.scrollY += e.deltaY / cam.zoom;
-      }
+      // Pas par cran de molette. deltaY peut être en lignes (deltaMode 1) ou
+      // pixels (0) selon l'OS/navigateur → on borne le pas pour rester stable.
+      const dir = e.deltaY > 0 ? -1 : 1;             // molette vers le haut = zoom in
+      const STEP = 1.12;                              // facteur multiplicatif par cran
+      const base = (this._targetZoom != null) ? this._targetZoom : this.cameras.main.zoom;
+      const next = dir > 0 ? base * STEP : base / STEP;
+      this._targetZoom = Phaser.Math.Clamp(next, this.minZoom, this.MAX_ZOOM);
+      // Ancre = position écran du curseur (offset relatif au canvas). update()
+      // garde ce point monde fixe tant que le zoom n'a pas convergé.
+      this._zoomAnchor = { sx: e.offsetX, sy: e.offsetY };
     }, { passive: false });
 
     // ── V — vue d'ensemble (fit map) ──────────────────────────────
@@ -96,7 +108,11 @@ class MainScene extends Phaser.Scene {
       if (!this.mapBuilt) return;
       const cam = this.cameras.main;
       this._recomputeMinZoom();
+      // Zoom direct (pas d'interpo) pour une vue d'ensemble instantanée, mais on
+      // synchronise la cible lissée pour que la molette reparte du bon niveau.
       cam.zoom = this.minZoom;
+      this._targetZoom = this.minZoom;
+      this._zoomAnchor = null;
       cam.centerOn(this.MAP_W / 2, this.MAP_H / 2);
     });
 
@@ -399,8 +415,7 @@ class MainScene extends Phaser.Scene {
     this.input.on('pointerdown', (pointer, currentlyOver) => {
       // ── Clic milieu : drag-pan caméra (prioritaire sur tous les modes) ──
       if (pointer.button === 1) {
-        const cam = this.cameras.main;
-        this._midPan = { sx: cam.scrollX, sy: cam.scrollY, px: pointer.x, py: pointer.y };
+        this._beginDragPan(pointer, 'middle');
         return; // ne déclenche ni sélection ni roue
       }
       // Mode build prioritaire sur tous les autres clics
@@ -460,8 +475,13 @@ class MainScene extends Phaser.Scene {
         this.dragRectGraphics = this.add.graphics();
       } else if (pointer.button === 2) {
         if (this.selectedUnitIds.size === 0) {
-          // Clic droit sans sélection : toast au relâchement s'il est court
-          // (la roue radiale ne s'ouvre jamais sans sélection → pas de conflit).
+          // ── Clic droit SANS sélection = drag-pan caméra (alternative au clic
+          //    milieu, plus accessible). RÈGLE ANTI-CONFLIT : le clic droit ne
+          //    pan QUE s'il n'y a AUCUNE unité sélectionnée — sinon il garde son
+          //    rôle d'ordre (attack/move) et de roue radiale (cf. branche
+          //    `else` ci-dessous). Un clic droit court (< seuil de mouvement et
+          //    < 300 ms) sans sélection → toast « aucune unité sélectionnée ».
+          this._beginDragPan(pointer, 'right');
           this._rightEmptyPressAt = Date.now();
           return;
         }
@@ -484,11 +504,32 @@ class MainScene extends Phaser.Scene {
 
     // Suivi du mouvement pendant l'appui droit pour mettre à jour la sélection radiale
     this.input.on('pointermove', (pointer) => {
-      // Drag-pan clic milieu : la caméra suit la souris (1:1 en coordonnées monde)
-      if (this._midPan && pointer.middleButtonDown()) {
-        const cam = this.cameras.main;
-        cam.scrollX = this._midPan.sx - (pointer.x - this._midPan.px) / cam.zoom;
-        cam.scrollY = this._midPan.sy - (pointer.y - this._midPan.py) / cam.zoom;
+      // ── Drag-pan (clic milieu OU clic droit sans sélection) ──
+      // La caméra suit la souris 1:1 en coordonnées monde. On enregistre aussi
+      // la vitesse instantanée pour donner un léger momentum au relâcher.
+      if (this._midPan) {
+        const stillDown = this._midPan.btn === 'middle'
+          ? pointer.middleButtonDown()
+          : pointer.rightButtonDown();
+        if (stillDown) {
+          const cam = this.cameras.main;
+          const nx = this._midPan.sx - (pointer.x - this._midPan.px) / cam.zoom;
+          const ny = this._midPan.sy - (pointer.y - this._midPan.py) / cam.zoom;
+          // Vitesse = delta monde / delta temps (clampé) → alimente le momentum
+          const now = performance.now();
+          if (this._dragLast) {
+            const dtv = Math.max(0.001, (now - this._dragLast.t) / 1000);
+            this._panMomentum.x = (nx - this._dragLast.x) / dtv;
+            this._panMomentum.y = (ny - this._dragLast.y) / dtv;
+          }
+          this._dragLast = { x: nx, y: ny, t: now };
+          cam.scrollX = nx;
+          cam.scrollY = ny;
+          // Au-delà d'un petit seuil de déplacement écran : c'est un vrai drag
+          // (et non un clic) → on neutralise le toast « aucune unité ».
+          const moved = Math.hypot(pointer.x - this._midPan.px, pointer.y - this._midPan.py);
+          if (moved > 6) this._midPan.dragged = true;
+        }
       }
       if (this._rightPressDown && typeof RadialMenu !== 'undefined' && RadialMenu.isActive()) {
         RadialMenu.updateMove(pointer.x, pointer.y);
@@ -503,18 +544,22 @@ class MainScene extends Phaser.Scene {
     });
 
     this.input.on('pointerup', (pointer) => {
-      // ── Clic milieu relâché : fin du drag-pan ──
+      // ── Clic milieu relâché : fin du drag-pan (+ momentum) ──
       if (pointer.button === 1) {
-        this._midPan = null;
+        this._endDragPan();
         return;
       }
       // ── Clic droit relâché : roue d'action OU action par défaut (selon durée) ──
       if (pointer.button === 2) {
-        // Clic droit court sans sélection → feedback (aucune roue n'était ouverte)
+        // Cas drag-pan clic droit (sans sélection) : on termine le pan. Si la
+        // souris a réellement bougé → c'était un pan, pas de toast. Sinon (clic
+        // court immobile) → feedback « aucune unité sélectionnée ».
         if (this._rightEmptyPressAt) {
           const wasShort = Date.now() - this._rightEmptyPressAt < 300;
+          const wasDrag  = !!(this._midPan && this._midPan.dragged);
           this._rightEmptyPressAt = 0;
-          if (wasShort && this.selectedUnitIds.size === 0) {
+          this._endDragPan();
+          if (!wasDrag && wasShort && this.selectedUnitIds.size === 0) {
             this._hudToast('⊘ Aucune unité sélectionnée');
           }
           return;
@@ -557,16 +602,69 @@ class MainScene extends Phaser.Scene {
     });
   }
 
+  // ── Drag-pan : démarrage commun clic milieu / clic droit (sans sélection) ──
+  // `btn` ∈ {'middle','right'} → on sait quel bouton surveiller pour la fin.
+  _beginDragPan(pointer, btn) {
+    const cam = this.cameras.main;
+    this._midPan = { sx: cam.scrollX, sy: cam.scrollY, px: pointer.x, py: pointer.y, btn, dragged: false };
+    this._dragLast = null;
+    // Coupe tout momentum résiduel : on reprend la main proprement.
+    this._panMomentum.x = 0;
+    this._panMomentum.y = 0;
+  }
+
+  // Fin du drag-pan : le momentum est déjà alimenté par pointermove ; ici on
+  // libère juste l'état. Le momentum est amorti dans update().
+  _endDragPan() {
+    this._midPan = null;
+    this._dragLast = null;
+  }
+
+  // Recalc après tout resize (fenêtre OU plein écran). Clampe le zoom courant
+  // ET la cible de zoom lissé pour ne jamais voir hors-map. Les bounds caméra
+  // ne dépendent pas de la taille d'écran (ils couvrent la map + padding) donc
+  // pas besoin de les refaire, mais le minZoom, lui, dépend de la taille.
+  _onResize() {
+    if (!this.mapBuilt) return;
+    this._recomputeMinZoom();
+    const cam = this.cameras.main;
+    if (cam.zoom < this.minZoom) cam.zoom = this.minZoom;
+    if (this._targetZoom != null) {
+      this._targetZoom = Phaser.Math.Clamp(this._targetZoom, this.minZoom, this.MAX_ZOOM);
+    }
+  }
+
   update() {
     if (!this.mapBuilt) return; // pas avant que l'event 'init' n'arrive
     const cam = this.cameras.main;
     // Delta-time en secondes, clampé contre les gros trous (retour d'onglet)
     const dt = Math.min(0.1, this.game.loop.delta / 1000);
 
+    // ── ZOOM lissé : lerp cam.zoom → _targetZoom, point curseur maintenu fixe ──
+    // Le facteur de lissage est exprimé en « demi-vie » : à 60 fps on couvre
+    // ~22 %/frame, indépendant du framerate via 1-exp(-dt/τ).
+    if (this._targetZoom != null && Math.abs(cam.zoom - this._targetZoom) > 0.0005) {
+      // Point monde sous le curseur AVANT le changement de zoom (pour le garder fixe)
+      let anchorBefore = null;
+      if (this._zoomAnchor) anchorBefore = cam.getWorldPoint(this._zoomAnchor.sx, this._zoomAnchor.sy);
+      const k = 1 - Math.exp(-dt / this.ZOOM_TAU);
+      cam.zoom = Phaser.Math.Linear(cam.zoom, this._targetZoom, k);
+      if (anchorBefore) {
+        cam.preRender(); // recalcule la matrice (sinon getWorldPoint est faux)
+        const after = cam.getWorldPoint(this._zoomAnchor.sx, this._zoomAnchor.sy);
+        cam.scrollX += anchorBefore.x - after.x;
+        cam.scrollY += anchorBefore.y - after.y;
+      }
+    } else if (this._targetZoom != null) {
+      // Convergé : on fige exactement la cible et on libère l'ancre.
+      cam.zoom = this._targetZoom;
+      this._zoomAnchor = null;
+    }
+
     // ── Pan clavier lissé : modèle vitesse/accélération (indép. du framerate) ──
     // Vitesse cible = VMAX sur les axes pressés, 0 sinon ; on lerpe la vitesse
     // réelle vers la cible en ~150 ms → démarrage et arrêt doux.
-    const VMAX = 900 / cam.zoom; // px monde/s
+    const VMAX = this.PAN_KEY_SPEED / cam.zoom; // px monde/s
     let vTargetX = 0, vTargetY = 0;
     if (this.cursors.left.isDown  || this.wasd.left.isDown)  vTargetX -= VMAX;
     if (this.cursors.right.isDown || this.wasd.right.isDown) vTargetX += VMAX;
@@ -578,23 +676,56 @@ class MainScene extends Phaser.Scene {
     cam.scrollX += this._panVel.x * dt;
     cam.scrollY += this._panVel.y * dt;
 
-    // Sécurité : relâchement du clic milieu raté (hors fenêtre) → fin du drag-pan
-    if (this._midPan && !this.input.activePointer.middleButtonDown()) this._midPan = null;
+    // Sécurité : relâchement du bouton de drag raté (hors fenêtre) → fin du drag-pan
+    if (this._midPan) {
+      const stillDown = this._midPan.btn === 'middle'
+        ? this.input.activePointer.middleButtonDown()
+        : this.input.activePointer.rightButtonDown();
+      if (!stillDown) this._endDragPan();
+    }
 
-    // ── Edge-scrolling : souris contre un bord de fenêtre → la caméra défile ──
+    // ── Momentum (inertie) du drag-pan : glisse courte après le relâcher ──
+    // Amortissement exponentiel ; on coupe sous un seuil pour ne pas dériver.
+    if (!this._midPan && (this._panMomentum.x || this._panMomentum.y)) {
+      cam.scrollX += this._panMomentum.x * dt;
+      cam.scrollY += this._panMomentum.y * dt;
+      const damp = Math.exp(-dt / this.PAN_MOMENTUM_TAU);
+      this._panMomentum.x *= damp;
+      this._panMomentum.y *= damp;
+      if (Math.hypot(this._panMomentum.x, this._panMomentum.y) < 8) {
+        this._panMomentum.x = 0; this._panMomentum.y = 0;
+      }
+    }
+
+    // ── Edge-scrolling : souris contre un bord du CANVAS → la caméra défile ──
+    // CORRECTION fenêtré : la marge est calculée sur le rectangle du CANVAS
+    // (getBoundingClientRect), pas sur window.innerWidth/Height. En fenêtré, dès
+    // que le curseur entre dans la bande haute du canvas, le scroll part — même
+    // si la fenêtre n'occupe pas tout l'écran (le bord HAUT marche enfin).
     // Inactif si : option désactivée, souris hors canvas (HUD/panneaux), roue
-    // radiale ouverte, ou drag-pan clic milieu en cours.
+    // radiale ouverte, ou drag-pan en cours.
     if (this.edgeScrollEnabled && this._mouseScreen && this._mouseScreen.overCanvas
         && !this._midPan
         && !(typeof RadialMenu !== 'undefined' && RadialMenu.isActive())) {
-      const EDGE = 24, ESPEED = 1100 / cam.zoom; // px monde/s à fond
-      const mx = this._mouseScreen.x, my = this._mouseScreen.y;
-      const w = window.innerWidth, h = window.innerHeight;
+      const EDGE = this.EDGE_MARGIN, ESPEED = this.EDGE_SPEED / cam.zoom; // px monde/s à fond
+      const rect = this.game.canvas.getBoundingClientRect();
+      // Position du curseur RELATIVE au canvas (et non à la fenêtre).
+      const mx = this._mouseScreen.x - rect.left;
+      const my = this._mouseScreen.y - rect.top;
+      const w = rect.width, h = rect.height;
       let fx = 0, fy = 0; // facteur -1..1 selon la profondeur dans la marge
-      if (mx < EDGE)          fx = -(EDGE - mx) / EDGE;
-      else if (mx > w - EDGE) fx =  (mx - (w - EDGE)) / EDGE;
-      if (my < EDGE)          fy = -(EDGE - my) / EDGE;
-      else if (my > h - EDGE) fy =  (my - (h - EDGE)) / EDGE;
+      // On ne déclenche que si le curseur est DANS le canvas sur l'autre axe
+      // (évite un edge-scroll fantôme quand la souris longe un bord hors zone).
+      const inX = mx >= 0 && mx <= w;
+      const inY = my >= 0 && my <= h;
+      if (inY) {
+        if (mx >= 0 && mx < EDGE)          fx = -(EDGE - mx) / EDGE;
+        else if (mx <= w && mx > w - EDGE) fx =  (mx - (w - EDGE)) / EDGE;
+      }
+      if (inX) {
+        if (my >= 0 && my < EDGE)          fy = -(EDGE - my) / EDGE;
+        else if (my <= h && my > h - EDGE) fy =  (my - (h - EDGE)) / EDGE;
+      }
       cam.scrollX += Phaser.Math.Clamp(fx, -1, 1) * ESPEED * dt;
       cam.scrollY += Phaser.Math.Clamp(fy, -1, 1) * ESPEED * dt;
     }
@@ -886,24 +1017,81 @@ class MainScene extends Phaser.Scene {
     this.MAP_W = info.mapWidth;
     this.MAP_H = info.mapHeight;
 
-    // ── SOL OBSIDIENNE (depth 0) ──
-    this.add.rectangle(
-      this.MAP_W / 2, this.MAP_H / 2,
-      this.MAP_W, this.MAP_H,
-      Phaser.Display.Color.HexStringToColor(Theme.BG.terrain).color
-    ).setDepth(0);
+    // ════════════════════════════════════════════════════════════════════
+    //  FOND « style diep.io » — sombre mais vivant + grille soignée + mur
+    //  ─────────────────────────────────────────────────────────────────
+    //  Tout est dessiné UNE SEULE FOIS ici (Graphics statiques en coordonnées
+    //  MONDE, depth 0→3). La caméra les fait défiler avec le monde ; rien n'est
+    //  redessiné par frame → coût nul en jeu. Le fog (depth 100) se dessine
+    //  PAR-DESSUS, donc la grille disparaît naturellement dans le noir non
+    //  exploré (effet voulu, cohérent avec diep.io + DA néon).
+    //  Ces valeurs sont sobres/réversibles — voir le rapport pour les ajuster.
+    const W = this.MAP_W, H = this.MAP_H;
 
-    // ── GRILLE NÉON discrète (depth 1) ──
-    const grid = this.add.graphics().setDepth(1);
-    grid.lineStyle(1, Theme.GRID.color, Theme.GRID.alpha);
-    const step = Theme.GRID.step;
-    for (let x = step; x < this.MAP_W; x += step) grid.lineBetween(x, 0, x, this.MAP_H);
-    for (let y = step; y < this.MAP_H; y += step) grid.lineBetween(0, y, this.MAP_W, y);
+    // ── 1. SOL : base bleu-nuit profond (depth 0) ──
+    // Légèrement plus bleu/clair que l'ancien #0a1a1f pour « ne pas que du noir ».
+    const TERRAIN = 0x0b1622;
+    this.add.rectangle(W / 2, H / 2, W, H, TERRAIN).setDepth(0);
 
-    // ── BORDURE CYAN (depth 2) ──
-    const border = this.add.graphics().setDepth(2);
-    border.lineStyle(4, Theme.GRID.border, Theme.GRID.borderA);
-    border.strokeRect(0, 0, this.MAP_W, this.MAP_H);
+    // ── 2. VIGNETTE INVERSÉE douce (depth 0) : centre un poil plus clair ──
+    // On simule un dégradé radial avec quelques disques additifs concentriques
+    // (Graphics ne sait pas faire de gradient radial). Très faible alpha → on ne
+    // voit qu'une respiration lumineuse au centre, les bords restent sombres.
+    const vignette = this.add.graphics().setDepth(0);
+    vignette.setBlendMode(Phaser.BlendModes.ADD);
+    const cx = W / 2, cy = H / 2;
+    const rMax = Math.hypot(W, H) / 2;
+    const VIG_TINT = 0x103048; // teinte bleu froid de la lueur centrale
+    const VIG_STEPS = 6;
+    for (let i = VIG_STEPS; i >= 1; i--) {
+      const r = rMax * (i / VIG_STEPS);
+      // Plus on est petit (proche du centre), plus l'alpha cumulé est fort.
+      vignette.fillStyle(VIG_TINT, 0.018);
+      vignette.fillCircle(cx, cy, r);
+    }
+
+    // ── 3. GRILLE 2 niveaux (mineure depth 1, majeure depth 2) ──
+    // Style diep.io : un fin quadrillage régulier en coordonnées monde. Niveau
+    // mineur très discret tous les MINOR px ; niveau majeur (un peu plus visible)
+    // tous les MAJOR_EVERY carreaux mineurs. Couleur cyan/bleu désaturé.
+    const MINOR = 75;                 // pas mineur en px monde
+    const MAJOR_EVERY = 4;            // 1 ligne majeure tous les 4 carreaux mineurs (300 px)
+    const MAJOR = MINOR * MAJOR_EVERY;
+    // Grille nettement lisible dans la zone visible (effet diep.io) — le fog
+    // l'éteint naturellement dans le noir non exploré.
+    const GRID_MINOR_COL = 0x2e5563, GRID_MINOR_A = 0.22;
+    const GRID_MAJOR_COL = 0x4a86a0, GRID_MAJOR_A = 0.42;
+
+    const gridMinor = this.add.graphics().setDepth(1);
+    gridMinor.lineStyle(1, GRID_MINOR_COL, GRID_MINOR_A);
+    for (let x = MINOR; x < W; x += MINOR) {
+      if (x % MAJOR === 0) continue;  // les majeures sont dessinées au niveau 2
+      gridMinor.lineBetween(x, 0, x, H);
+    }
+    for (let y = MINOR; y < H; y += MINOR) {
+      if (y % MAJOR === 0) continue;
+      gridMinor.lineBetween(0, y, W, y);
+    }
+
+    const gridMajor = this.add.graphics().setDepth(2);
+    gridMajor.lineStyle(1.5, GRID_MAJOR_COL, GRID_MAJOR_A);
+    for (let x = MAJOR; x < W; x += MAJOR) gridMajor.lineBetween(x, 0, x, H);
+    for (let y = MAJOR; y < H; y += MAJOR) gridMajor.lineBetween(0, y, W, y);
+
+    // ── 4. MUR DU MONDE (depth 3) : liseré lumineux néon au bord jouable ──
+    // Façon diep.io : on « sent » la limite. Double trait — un large glow cyan
+    // semi-transparent + un trait fin plus vif par-dessus.
+    const border = this.add.graphics().setDepth(3);
+    border.setBlendMode(Phaser.BlendModes.ADD);
+    border.lineStyle(10, Theme.GRID.border, 0.12); // halo large diffus
+    border.strokeRect(0, 0, W, H);
+    border.lineStyle(2.5, Theme.GRID.border, 0.55); // trait net lumineux
+    border.strokeRect(0, 0, W, H);
+    // Léger assombrissement HORS map (au-delà du bord, dans le padding caméra)
+    // pour bien isoler la zone jouable du fond du canvas. Anneau sombre fin.
+    const outer = this.add.graphics().setDepth(2);
+    outer.lineStyle(40, 0x060d15, 0.5);
+    outer.strokeRect(-20, -20, W + 40, H + 40);
 
     // Génère les textures procédurales (fallback si assets manquants)
     if (typeof SpriteFactory !== 'undefined') SpriteFactory.generateAll(this);
@@ -914,6 +1102,8 @@ class MainScene extends Phaser.Scene {
     this.cameras.main.setBounds(-CAM_PAD, -CAM_PAD, this.MAP_W + 2 * CAM_PAD, this.MAP_H + 2 * CAM_PAD);
     this._recomputeMinZoom();
     this.cameras.main.setZoom(this.minZoom);
+    // Initialise la cible de zoom lissé (la molette repart de ce niveau).
+    this._targetZoom = this.minZoom;
 
     // Fog of war — canvas low-res, scaled up avec filtre linéaire
     this.fogCanvas = document.createElement('canvas');
