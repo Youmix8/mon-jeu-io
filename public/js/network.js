@@ -208,6 +208,10 @@ const Network = (() => {
       alert('Le serveur est plein (4 joueurs max). Réessaie plus tard !');
     });
 
+    socket.on('cheatResult', (data) => {
+      if (typeof CheatConsole !== 'undefined') CheatConsole.onResult(data);
+    });
+
     socket.on('playerEliminated', (data) => {
       if (onPlayerEliminatedCallback) onPlayerEliminatedCallback(data);
     });
@@ -374,6 +378,8 @@ const Network = (() => {
   function addBot()         { if (socket) socket.emit('addBot'); }
   // L'hôte lance la partie (rooms à démarrage manuel) → ack { ok } ou { error }
   function startMatch(cb)   { if (socket) socket.emit('lobby:start', {}, (ack) => { if (cb) cb(ack); }); }
+  // Console de triche : donne des ressources (gold / pt / mana / foi)
+  function cheat(resource, amount) { if (socket) socket.emit('cheat', { resource, amount }); }
   function upgradeVillage(villageId)  { if (socket) socket.emit('upgradeVillage', { villageId }); }
   function villageSpawnUnit(villageId, unitType) { if (socket) socket.emit('villageSpawnUnit', { villageId, unitType }); }
   function buildBuilding(type, x, y, baseType, baseId) {
@@ -413,7 +419,7 @@ const Network = (() => {
   return {
     connect, createRoom, joinRoom, listRooms,
     getState, getMyId, getMapInfo, getConfig,
-    spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot, startMatch,
+    spawnUnit, moveUnits, attackTarget, requestRestart, upgradeHdv, addBot, startMatch, cheat,
     upgradeVillage, villageSpawnUnit, defendArea, buildBuilding, sellBuilding, unlockTech, castSpell, proposeTreaty, breakTreaty,
     debugSpawn, debugCastPortal,
     setOnSpawnFailed, setOnAttack,

@@ -2224,6 +2224,40 @@ function addPlayer(socket, joinName) {
     broadcastFilteredState();
   });
 
+  // ── Console de triche (terminal client, touche Entrée) ──
+  // Donne des ressources au joueur. Activée partout (jeu en dev) ; pour la
+  // désactiver en prod, lancer le serveur avec DISABLE_CHEATS=1.
+  socket.on('cheat', ({ resource, amount } = {}) => {
+    if (process.env.DISABLE_CHEATS === '1') return;
+    const p = gameState.players[socket.id];
+    if (!p || p.eliminated) return;
+    let amt = Math.floor(Number(amount));
+    if (!Number.isFinite(amt) || amt === 0) { socket.emit('cheatResult', { ok: false, msg: 'Montant invalide' }); return; }
+    amt = Math.max(-1000000, Math.min(1000000, amt)); // bornes anti-overflow
+    const res = String(resource || '').toLowerCase();
+    let label;
+    if (['gold', 'or', 'argent'].includes(res)) {
+      p.gold = Math.max(0, p.gold + amt);
+      if (amt > 0) p.totalGoldEarned += amt;
+      label = 'gold';
+    } else if (['pt', 'pr', 'recherche', 'talent', 'talents', 'point', 'points'].includes(res)) {
+      p.researchPoints = Math.max(0, (p.researchPoints || 0) + amt);
+      label = 'PR';
+    } else if (res === 'mana') {
+      p.mana = Math.max(0, (p.mana || 0) + amt);
+      label = 'mana';
+    } else if (['foi', 'faith'].includes(res)) {
+      p.faith = Math.max(0, (p.faith || 0) + amt);
+      label = 'foi';
+    } else {
+      socket.emit('cheatResult', { ok: false, msg: `Ressource inconnue : "${res}" (gold, pt, mana, foi)` });
+      return;
+    }
+    console.log(`[cheat] ${p.name} : ${amt > 0 ? '+' : ''}${amt} ${label}`);
+    socket.emit('cheatResult', { ok: true, msg: `${amt > 0 ? '+' : ''}${amt} ${label}`, resource: label });
+    broadcastFilteredState();
+  });
+
   // ── Sorts actifs ciblés au sol (hotkeys F/G/H/J) ──
   // AoE dégâts (fireball), ralentissement (freeze), soin (blessing),
   // purification anti-magie (purifying_light). Limités par coût ressource
@@ -3176,8 +3210,10 @@ function tick() {
       p.gold            += goldRate;
       p.totalGoldEarned += goldRate;
       p.researchPoints  = (p.researchPoints || 0) + prRate;
-      p.mana            = Math.min(200, (p.mana  || 0) + manaRate);  // cap mana à 200
-      p.faith           = Math.min(200, (p.faith || 0) + faithRate); // cap foi à 200
+      // Cap 200 sur la GÉNÉRATION PASSIVE seulement : on n'écrase pas une valeur
+      // déjà au-dessus (sinon une triche/un surplus serait ramené à 200 chaque tick).
+      if ((p.mana  || 0) < 200) p.mana  = Math.min(200, (p.mana  || 0) + manaRate);
+      if ((p.faith || 0) < 200) p.faith = Math.min(200, (p.faith || 0) + faithRate);
       // Population (synchro vers le client)
       p.populationUsed = getPopulationUsed(p);
       p.populationMax  = getPopulationMax(p);
