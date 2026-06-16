@@ -73,7 +73,7 @@ const UNIT_TYPES = {
                    icon: '🛡', desc: 'Tank lourd, gros dégâts au contact.' },
   crossbowman:   { id: 'crossbowman',   name: 'Arbalétrier',     cost: 30,  manaCost: 0,  faithCost: 0,  populationCost: 1,  hp: 35,  speed:  75, range: 200, damage:  7,  requiresTech: 'crossbows',
                    icon: '🎯', desc: 'Archer amélioré. Plus de dégâts, moins de portée.' },
-  general:       { id: 'general',       name: 'Général',         cost: 140,  manaCost: 0,  faithCost: 0,  populationCost: 3, hp: 120, speed: 110, range:  40, damage: 10,  requiresTech: 'war_academy',
+  general:       { id: 'general',       name: 'Général',         cost: 140,  manaCost: 0,  faithCost: 0,  populationCost: 3, hp: 160, speed: 110, range:  40, damage: 16,  requiresTech: 'war_academy',
                    icon: '🎖', desc: 'Aura +25% dégâts aux unités proches (rayon 200).' },
   cannon:        { id: 'cannon',        name: 'Canon',           cost: 120,  manaCost: 0,  faithCost: 0,  populationCost: 3, hp: 60,  speed:  40, range: 280, damage: 35,  requiresTech: 'gunpowder',
                    icon: '💣', desc: 'Très lent, dégâts énormes à longue portée.' },
@@ -82,7 +82,7 @@ const UNIT_TYPES = {
   // Unités Magie — un seul mage : le Nécromancien (refonte v3).
   // wizard et lich (unités) ont été retirés ; lich devient une tech-upgrade
   // qui transforme le revive en "copie de l'unité tuée à -40 % HP/dmg".
-  necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 60,  manaCost: 30,  faithCost: 0,  populationCost: 2,  hp: 70,  speed:  80, range: 200, damage: 14,  requiresTech: 'mage_tower',
+  necromancer:   { id: 'necromancer',   name: 'Nécromancien',    cost: 60,  manaCost: 20,  faithCost: 0,  populationCost: 2,  hp: 70,  speed:  80, range: 200, damage: 14,  requiresTech: 'mage_tower',
                    icon: '💀', desc: 'Mage à distance. Sa victime ressuscite en allié temporaire.' },
   skeleton:      { id: 'skeleton',      name: 'Squelette',       cost: 15,  manaCost: 10,  faithCost: 0,  populationCost: 1,   hp: 30,  speed:  80, range:  30, damage:  5,  requiresTech: null,
                    icon: '☠️', desc: 'Invoqué par le Nécromancien. Durée 60s.' },
@@ -102,7 +102,7 @@ const UNIT_TYPES = {
                      icon: '🐲', desc: 'Boss invoqué. Vole. Durée 60s.' },
   angel:           { id: 'angel',           name: 'Ange',               cost: 100,  manaCost: 0,  faithCost: 70,  populationCost: 6, hp: 300, speed: 100, range: 200, damage: 20, requiresTech: null,
                      icon: '👼', desc: 'Vole. Aura soin +3 HP/s rayon 120. Durée 90s.' },
-  god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 250,  manaCost: 0,  faithCost: 150,  populationCost: 15, hp: 1500, speed: 50, range: 60, damage: 60, requiresTech: null,
+  god_avatar:      { id: 'god_avatar',      name: 'Avatar divin',       cost: 250,  manaCost: 0,  faithCost: 150,  populationCost: 18, hp: 900, speed: 50, range: 60, damage: 45, requiresTech: null,
                      icon: '🌟', desc: 'Boss. Aura peur (ennemis ralentis 50% rayon 400). AoE 60.' },
   // Bateau retiré (système eau supprimé).
 };
@@ -668,8 +668,8 @@ function recomputeHdvStats(player) {
   const lvl = HDV_LEVELS[player.hdvLevel - 1] || HDV_LEVELS[0];
   let maxHp = lvl.maxHp;
   let vision = lvl.vision;
-  // Tech 'citadel' (Science T6) : 3× HP
-  if (hasTech(player, 'citadel')) maxHp *= 3;
+  // Tech 'citadel' (Science T6) : ×1.8 HP (nerf : était ×3 → HDV invincible)
+  if (hasTech(player, 'citadel')) maxHp *= 1.8;
   player.maxHp  = maxHp;
   player.vision = vision;
 }
@@ -680,10 +680,13 @@ function computeGoldRate(player) {
   // Tech Agriculture : +1 gold/sec passif
   if (hasTech(player, 'agriculture')) rate += 1;
   // Bonus villages possédés (selon leur niveau)
+  // Tech 'colonization' (Logistique) : +0.5 gold/s SUPPLÉMENTAIRE par village.
+  const hasLogistics = hasTech(player, 'colonization');
   for (const v of gameState.villages) {
     if (v.ownerId !== player.id || v.hp <= 0) continue;
     const vLvl = VILLAGE_LEVELS[(v.level || 1) - 1] || VILLAGE_LEVELS[0];
     rate += vLvl.goldPerSec || VILLAGE_GOLD_PER_SEC;
+    if (hasLogistics) rate += 0.5;
   }
   // Tech Empire : +50% sur tout
   if (hasTech(player, 'empire')) rate *= 1.5;
@@ -694,7 +697,7 @@ function computeGoldRate(player) {
 function computePrRate(player) {
   let rate = 0.5; // base : HDV génère 0.5 PR/sec
   if (hasTech(player, 'stargazing')) rate += 0.3;
-  if (hasTech(player, 'printing'))   rate *= 2; // Imprimerie : ×2 PR
+  if (hasTech(player, 'printing'))   rate *= 1.5; // Imprimerie : ×1.5 PR (nerf : était ×2)
   return rate;
 }
 
@@ -708,6 +711,8 @@ function computeManaRate(player) {
   }
   // Tech "Enchantement" : ×1.5 sur tous les bâtiments magiques
   if (hasTech(player, 'enchantment')) rate *= 1.5;
+  // Tech 'elements_study' : +0.3 mana/s de base (early magie renforcé) — non multiplié
+  if (hasTech(player, 'elements_study')) rate += 0.3;
   return rate;
 }
 
@@ -724,6 +729,8 @@ function computeFaithRate(player) {
   for (const u of Object.values(gameState.units)) {
     if (u.ownerId === player.id && u.type === 'pilgrim') rate += 0.5;
   }
+  // Tech 'animism' : +0.3 foi/s de base
+  if (hasTech(player, 'animism')) rate += 0.3;
   return rate;
 }
 
@@ -739,7 +746,21 @@ function unitHpMult(player, typeId) {
   if (player && hasTech(player, 'blessing')) {
     mult *= 1.10;
   }
+  // Passif 'melee_hp' (steel_forge) : +10% HP pour les unités de mêlée (identité Science)
+  if (player && hasTech(player, 'steel_forge') && MELEE_UNIT_TYPES.has(typeId)) {
+    mult *= 1.10;
+  }
+  // Passif 'holy_hp' (sacred_order) : +10% HP pour les unités saintes (identité Religion)
+  if (player && hasTech(player, 'sacred_order') && RELIGION_UNITS.has(typeId)) {
+    mult *= 1.10;
+  }
   return mult;
+}
+
+// PV d'un bâtiment au moment de la pose : +25 % si tech 'construction' (Science T1).
+function buildingHp(player, def) {
+  const base = (def && def.hp) || 0;
+  return Math.round(base * (hasTech(player, 'construction') ? 1.25 : 1));
 }
 
 // Rayon de vision d'une unité — boosté par les passifs :
@@ -758,18 +779,35 @@ function unitVisionRadius(unit) {
 // ── Catégorie "unités à projectile" (impactée par ballistics / reconnaissance) ──
 const RANGED_UNIT_TYPES = new Set(['archer', 'crossbowman', 'catapult', 'cannon']);
 const RANGED_BUILDING_TYPES = new Set(['tower', 'bombard_tower']);
+// Unités de mêlée (identité Science : bonus PV via 'steel_forge')
+const MELEE_UNIT_TYPES = new Set(['soldier', 'knight', 'heavy_knight', 'general', 'elite_guard']);
 
 // Portée effective d'une unité :
-//   - 'crossbows' (archer_buff) : archer -20 % de portée (le +50 % dmg est en combat)
+//   - 'archery' : archers +10 % de portée (identité tir Science)
+//   - 'crossbows' (archer_buff) : archer -10 % de portée (le +50 % dmg est en combat)
 //   - 'reconnaissance' : +15 % pour toutes les unités à distance
 function effectiveRange(unit) {
   if (!unit) return 0;
   const owner = gameState.players && gameState.players[unit.ownerId];
   let range = unit.range || 0;
+  if (owner && unit.type === 'archer' && hasTech(owner, 'archery')) {
+    range = Math.round(range * 1.10);
+  }
   if (owner && unit.type === 'archer' && hasTech(owner, 'crossbows')) {
-    range = Math.round(range * 0.8);
+    range = Math.round(range * 0.9);
   }
   if (owner && hasTech(owner, 'reconnaissance') && RANGED_UNIT_TYPES.has(unit.type)) {
+    range = Math.round(range * 1.15);
+  }
+  return range;
+}
+
+// Portée effective d'un bâtiment : 'military_architecture' → tours +15 % de portée.
+function effectiveBuildingRange(building) {
+  const def = BUILDING_TYPES[building.type];
+  let range = (def && def.range) || 0;
+  const owner = gameState.players && gameState.players[building.ownerId];
+  if (owner && building.type === 'tower' && hasTech(owner, 'military_architecture')) {
     range = Math.round(range * 1.15);
   }
   return range;
@@ -1023,11 +1061,12 @@ function botTick(bot) {
         if (Math.hypot(bot.x - snap.x, bot.y - snap.y) < BUILDING_MIN_DIST_HDV) continue;
         if (gameState.buildings.some(b => b.x === snap.x && b.y === snap.y)) continue;
         bot.gold -= def.cost;
+        const bhp = buildingHp(bot, def);
         gameState.buildings.push({
           id: `b_${nextBuildingId++}`,
           ownerId: bot.id, type: plan.type,
           x: snap.x, y: snap.y,
-          hp: def.hp, maxHp: def.hp,
+          hp: bhp, maxHp: bhp,
           lastAttackTime: 0,
         });
         bot.botState.lastBuildTime = nowMs;
@@ -1353,12 +1392,14 @@ function buildFilteredState(viewerId) {
     if (vis.visible[idx]) filteredBuildings.push(b);
   }
 
-  // Passif 'minimap_omniscience' (renaissance, Science T6) : positions BRUTES
-  // de tous les joueurs / unités / villages / bâtiments, non filtrées par fog.
-  // Le client (Minimap) les utilise pour afficher tous les mouvements ennemis.
-  // Payload léger : juste les coords + ownerId + type, pas les stats complètes.
+  // Passif 'minimap_radar' (renaissance, Science T6) — NERF : au lieu d'une
+  // omniscience PERMANENTE (qui supprimait le fog), c'est désormais un RADAR par
+  // impulsion : un balayage de 3 s révèle tout sur la mini-carte toutes les 30 s.
+  // Hors fenêtre, omniscient = null (le fog reprend ses droits).
+  // 20 Hz : 30 s = 600 ticks, 3 s = 60 ticks.
+  const radarOn = (tickCount % 600) < 60;
   let omniscient = null;
-  if (hasTech(viewer, 'renaissance')) {
+  if (radarOn && hasTech(viewer, 'renaissance')) {
     omniscient = {
       players: Object.values(gameState.players).map(p => ({
         id: p.id, x: p.x, y: p.y, color: p.color, eliminated: !!p.eliminated,
@@ -2028,12 +2069,13 @@ function addPlayer(socket, joinName) {
     }
     p.gold -= def.cost;
     const bid = `b_${nextBuildingId++}`;
+    const bhp = buildingHp(p, def);
     gameState.buildings.push({
       id: bid,
       ownerId: p.id,
       type,
       x, y,
-      hp: def.hp, maxHp: def.hp,
+      hp: bhp, maxHp: bhp,
       lastAttackTime: 0,
     });
     console.log(`Bâtiment ${type} construit par ${p.name} en (${Math.round(x)},${Math.round(y)})`);
@@ -2589,10 +2631,11 @@ function tick() {
     // Non-combattants (pèlerin, colon) : jamais d'attaque, même en idle.
     // Fix : avant, les fallbacks `|| 5` et `|| 80` leur donnaient 5 dmg / 80 de portée.
     if ((unit.damage || 0) <= 0) continue;
-    // Cooldown d'attaque — réduit de 20% pour les unités magie/undead si tech 'time_mastery'
+    // Cooldown d'attaque — réduit de 12% pour les unités magie/undead si tech 'time_mastery'
+    // (nerf : était -20% → combo revive nécro/liche trop fort)
     let atkCooldown = ATTACK_COOLDOWN_MS;
     if (MAGIC_UNDEAD.has(unit.type) && hasTech(gameState.players[unit.ownerId], 'time_mastery')) {
-      atkCooldown *= 0.8;
+      atkCooldown *= 0.88;
     }
     // Tech 'ballistics' : +25% cadence sur les unités à projectile (cooldown ×0.8)
     atkCooldown = effectiveCooldown(unit.ownerId, unit.type, atkCooldown);
@@ -2648,6 +2691,13 @@ function tick() {
       if ((unit.attackTargetType === 'hdv' || unit.attackTargetType === 'building'
            || unit.attackTargetType === 'village')
           && hasTech(gameState.players[unit.ownerId], 'crusade')) {
+        uDamage *= 1.25;
+      }
+      // Tech 'siege_engineering' : engins de siège +25% dégâts vs bâtiments/HDV/villages
+      if ((unit.attackTargetType === 'hdv' || unit.attackTargetType === 'building'
+           || unit.attackTargetType === 'village')
+          && (unit.type === 'catapult' || unit.type === 'cannon')
+          && hasTech(gameState.players[unit.ownerId], 'siege_engineering')) {
         uDamage *= 1.25;
       }
 
@@ -2839,7 +2889,8 @@ function tick() {
     // Tech 'ballistics' : tower/bombard cadence +25% (cooldown ×0.8)
     const bCooldown = effectiveCooldown(b.ownerId, b.type, def.cooldownMs || 1000);
     if (nowMs - b.lastAttackTime < bCooldown) continue;
-    let bestTarget = null, bestDist = def.range;
+    // Tech 'military_architecture' : tours +15% de portée
+    let bestTarget = null, bestDist = effectiveBuildingRange(b);
     for (const u of Object.values(gameState.units)) {
       if (u.ownerId === b.ownerId || toDelete.has(u.id)) continue;
       // Skip alliés (pacte de non-agression)
@@ -3049,8 +3100,12 @@ function tick() {
     const u = gameState.units[uid];
     if (toDelete.has(uid)) continue;
     // Override lifetime (revive/lich_clone) prioritaire sur le défaut du type.
-    const lifetime = u._summonLifetime || SUMMONED_LIFETIMES[u.type];
+    let lifetime = u._summonLifetime || SUMMONED_LIFETIMES[u.type];
     if (!lifetime) continue;
+    // Tech 'elemental_summon' : invocations +20 % de durée (identité Magie/summon).
+    if (lifetime < 900000 && hasTech(gameState.players[u.ownerId], 'elemental_summon')) {
+      lifetime = Math.round(lifetime * 1.2);
+    }
     u.spawnTime = u.spawnTime || nowMs;
     if (nowMs - u.spawnTime >= lifetime) toDelete.add(uid);
   }
