@@ -26,6 +26,49 @@ serveur, déployé sur Render.
 
 ---
 
+## 🌳 CHANTIER EN COURS — Retravail de l'arbre tech (une tech à la fois)
+
+> **C'est LA tâche prioritaire de Robin.** Il reprend l'arbre tech v3 **nœud par
+> nœud** pour garantir que **chaque tech est réellement câblée ET bien équilibrée**.
+> Suivi + cases à cocher : **`TECH_REWORK.md`** (racine du repo) — le tenir à jour.
+
+**Objectif par tech** : (1) VÉRIFIER que l'effet décrit dans `server/techTree.js`
+est réellement implémenté et fonctionne en jeu, (2) AJUSTER l'effet / les chiffres
+selon la vision de Robin. Les deux à la fois.
+
+**Ordre imposé** : Science T1→T6, puis Magie T1→T6, puis Religion T1→T6 (ordre du
+tracker). Ne rien sauter.
+
+**⛔ RÈGLE D'OR — une seule tech à la fois.** On ne passe JAMAIS à la tech suivante
+tant que **Robin n'a pas testé en jeu et dit explicitement « OK suivante »**. Pas
+de batch, pas d'anticipation sur la tech d'après.
+
+**Boucle par tech :**
+1. **Audit** — lire l'effet déclaré (desc + unlocks) dans `techTree.js`, puis
+   traquer dans `server.js`/client OÙ il est implémenté (helpers `buildingHp`,
+   `effectiveBuildingRange`, `MELEE_UNIT_TYPES`, ou `hasTech(player,'<id>')`…).
+   Présenter : « déclaré X → codé ici (`fichier:ligne`) / pas codé / partiel ».
+2. **Proposition** — signaler bugs/incohérences + proposer une option d'effet /
+   équilibrage (pros-cons). Robin tranche le design (ne pas décider seul).
+3. **Implémentation** — coder sur `developpement`. Garder la `desc` de
+   `techTree.js` EXACTEMENT synchro avec l'effet réellement codé.
+4. **Test local** — `node --check` + boot, puis lancer le jeu (preview) et
+   démontrer que l'effet marche (log / valeur / capture). Si non testable en solo
+   (combat/multi), le dire franchement.
+5. **Validation Robin** — Robin teste (localhost ou qzw8) → « OK suivante » ou
+   demande un ajustement. Tant que pas OK → on reste sur cette tech.
+6. **Commit + push** `developpement` (déploie en prod qzw8) puis cocher la tech
+   dans `TECH_REWORK.md` (état impl. + décision + ☑ validé).
+
+**Garde-fous :**
+- **Ne JAMAIS renommer un id de tech** (référencé par `hasTech` + routes des bots).
+- Effet ↔ `desc` ↔ tracker toujours cohérents (la dérive desc/code est le bug n°1).
+- `developpement` est auto-déployé : ne pousser qu'un état qui boote.
+- État de départ : la v3 (session-3) a déjà câblé ~14 nouveaux effets + helpers ;
+  **beaucoup marchent déjà** → le travail est surtout VÉRIFIER + ÉQUILIBRER.
+
+---
+
 ## ⚙️ Stack
 
 | Couche | Tech | Fichier(s) clés |
@@ -542,14 +585,14 @@ intuitifs, (4) fond façon diep.io (« pas que du noir » + fog conservé).
   inchangés. Helpers ajoutés : `buildingHp`, `effectiveBuildingRange`,
   set `MELEE_UNIT_TYPES`. Équilibrage à observer en partie réelle.
 
-**Dernière mise à jour** : session "session-3" (16 juin 2026), commits
-`4cc5ada` (lancement manuel) + `1a0eeb2` (feel caméra + fond diep.io) +
-arbre tech v3, sur **`developpement`** (URL prod `mon-jeu-io-qzw8`). Backlog
-au choix de Robin : lot « interface » P2 (menu options, mode daltonien,
-tooltips, purge emojis, file de production), P1 contrôles RTS (formations,
-shift-queue, groupes), réparation debug panel (ENTITIES_CONFIG), observation
-de l'équilibrage de l'arbre v3. Roadmap :
-`~/.claude/plans/le-jeu-qui-est-sparkling-valley.md`.
+**Dernière mise à jour** : session "prep-tech-rework" (16 juin 2026) — préparation
+du chantier **retravail de l'arbre tech une-par-une** : vérif que tout boote
+(`[techTree] 49 nœuds OK`, syntaxe OK), ajout du tracker **`TECH_REWORK.md`** (49
+techs, effets pré-remplis, cases à cocher) et de la section « CHANTIER EN COURS »
+en haut de ce fichier. **Prochaine action** : démarrer la 1re tech (Science T1
+`agriculture`) selon la boucle décrite, et NE PAS enchaîner sans le « OK » de Robin.
+Sur **`developpement`** (URL prod `mon-jeu-io-qzw8`). Backlog antérieur conservé
+ci-dessus. Roadmap : `~/.claude/plans/le-jeu-qui-est-sparkling-valley.md`.
 
 Quand tu mets à jour ce doc, change cette ligne avec le hash du dernier
 commit de ta session.
