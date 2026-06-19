@@ -13,12 +13,12 @@ Statut : ⬜ à faire · 🔄 en cours · ✅ validé par Robin
 
 ### Tier 1
 
-- ⬜ **`agriculture`** — Agriculture (10 PR)
+- ✅ **`agriculture`** — Agriculture (10 PR)
     - Effet déclaré : +1 gold/sec passif sur ton HDV.
     - Débloque : passifs: gold_bonus_1
-    - État implémentation : _(à auditer)_
-    - Décision design / équilibrage : _(à remplir)_
-    - Validé en jeu par Robin : ☐
+    - État implémentation : ✅ câblé & conforme — `computeGoldRate()` (server.js:681 : `rate += 1` si `hasTech`), crédité 1×/s (server.js:3210). Le passif `gold_bonus_1` est purement déclaratif (le code teste l'id `agriculture`).
+    - Décision design / équilibrage : Garder +1/s flat tel quel. Premier pick éco early (double le revenu HDV de base pour 10 PR), s'efface en late où `empire` (×1.5) prend le relais. Aucune modif de code.
+    - Validé en jeu par Robin : ☑
 - ⬜ **`construction`** — Construction (10 PR)
     - Effet déclaré : +25 % de PV sur TOUS tes bâtiments. Ouvre les Voies et la Balistique.
     - Débloque : passifs: building_hp_boost
